@@ -1,0 +1,12 @@
+.venv/
+.fanbox-browser/
+.tmp/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+FANBOX/
+config.yaml
+*.log

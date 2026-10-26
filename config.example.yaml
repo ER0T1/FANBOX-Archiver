@@ -1,0 +1,32 @@
+auth:
+  profile_dir: "./.fanbox-browser"
+  browser_channel: chrome
+storage:
+  output_dir: "./FANBOX"
+  database: "./FANBOX/backup.db"
+download:
+  original_images: true
+  download_attachments: true
+  download_cover: true
+  max_concurrent: 1
+  retry_count: 3
+  request_interval_seconds: 3
+  resume: true
+  verify_sha256: true
+markdown:
+  enabled: true
+  yaml_front_matter: true
+  relative_image_paths: true
+  preserve_original_order: true
+sync:
+  skip_completed: true
+  check_updates: true
+  preserve_deleted_posts: true
+  max_posts_per_run: 20
+  supporting_only: true
+  rotate_creators: true
+  recent_unchanged_stop_count: 20
+logging:
+  level: INFO
+  write_to_file: true
+  keep_days: 30
