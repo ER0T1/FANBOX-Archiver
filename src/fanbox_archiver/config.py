@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import os
+import tempfile
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -83,4 +85,45 @@ class AppConfig(BaseModel):
         if not config.storage.database.is_absolute():
             config.storage.database = (base / config.storage.database).resolve()
         return config
+
+    def editable_dict(self) -> dict[str, Any]:
+        value = self.model_dump(mode="json")
+        return {
+            "download": value["download"],
+            "sync": value["sync"],
+            "markdown": value["markdown"],
+            "logging": value["logging"],
+        }
+
+    def with_editable_patch(self, patch: dict[str, Any]) -> "AppConfig":
+        merged = self.model_dump(mode="python")
+        for section, values in patch.items():
+            if section not in {"download", "sync", "markdown", "logging"}:
+                raise ValueError(f"不允許修改設定區段：{section}")
+            merged[section] = {**merged[section], **values}
+        return type(self).model_validate(merged)
+
+    @staticmethod
+    def save_editable(path: Path, config: "AppConfig", patch: dict[str, Any]) -> None:
+        raw: dict[str, Any] = config.model_dump(mode="json")
+        if path.exists():
+            with path.open("r", encoding="utf-8") as handle:
+                loaded = yaml.safe_load(handle) or {}
+            if not isinstance(loaded, dict):
+                raise ValueError("設定檔根節點必須是物件")
+            raw = loaded
+        editable = config.editable_dict()
+        for section in patch:
+            raw[section] = editable[section]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                yaml.safe_dump(raw, handle, allow_unicode=True, sort_keys=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, path)
+        except BaseException:
+            Path(temp_name).unlink(missing_ok=True)
+            raise
 

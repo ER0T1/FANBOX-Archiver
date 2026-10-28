@@ -5,7 +5,6 @@ import json
 import subprocess
 import sys
 import webbrowser
-from contextlib import nullcontext
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Annotated
@@ -26,7 +25,6 @@ from .client import (
     RemoteUnavailableError,
 )
 from .browser_session import (
-    BrowserPostSession,
     fetch_post_payload,
     interactive_login,
     profile_auth_material,
@@ -37,7 +35,7 @@ from .credentials import cookie_header
 from .models import Post, PostStatus
 from .parser import HtmlPostParser, StructuredPostParser
 from .service import ArchiveService
-from .syncing import SyncPlan, SyncService, SyncStopped
+from .application import BackupEvent, BackupRequest, BackupUseCase
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
 from .security import confined_path, safe_filename
@@ -292,151 +290,96 @@ def download(
     console.print(f"[green]完成[/green] {post.post_id}：{post.title}（{status.value}）")
 
 
-def _print_plan(plan: SyncPlan) -> None:
-    table = Table("Creator ID", "發現", "新增/更新/重試", "略過")
-    for scan in plan.scans:
-        actions = [item for item in scan.items]
+def _print_plan(data: dict) -> None:
+    table = Table("Creator ID", "Profile", "發現", "新增/更新/重試", "略過")
+    for scan in data["scans"]:
         table.add_row(
-            scan.creator_id, str(scan.discovered),
-            f"{sum(i.action == 'new' for i in actions)}/{sum(i.action == 'updated' for i in actions)}/{sum(i.action == 'retry' for i in actions)}",
-            str(scan.skipped),
+            scan["creator_id"], str(scan.get("profile") or "-"), str(scan["discovered"]),
+            f"{scan['new']}/{scan['updated']}/{scan['retry']}",
+            str(scan["skipped"]),
         )
     console.print(table)
     console.print(
-        f"合計：新增 {plan.new}、更新 {plan.updated}、重試 {plan.retried}、"
-        f"略過 {plan.skipped}、本次上限延後 {plan.deferred}"
+        f"合計：新增 {data['new']}、更新 {data['updated']}、重試 {data['retried']}、"
+        f"略過 {data['skipped']}、本次上限延後 {data['deferred']}"
     )
+
+
+class RichBackupEventSink:
+    def __init__(self, progress: Progress, task_id) -> None:
+        self.progress = progress
+        self.task_id = task_id
+
+    def emit(self, event: BackupEvent) -> None:
+        data = event.data
+        if event.kind == "plan_ready":
+            _print_plan(data)
+        elif event.kind == "profile_started":
+            self.progress.update(
+                self.task_id,
+                description=f"正在備份 @{data['creator_id']} 的個人資料",
+            )
+        elif event.kind == "profile_finished":
+            preview = "（預覽）" if data.get("dry_run") else ""
+            self.progress.console.print(
+                f"[cyan]Profile[/cyan] {data['creator_id']}: {data['status']} "
+                f"v{int(data.get('version') or 0):04d}{preview}"
+            )
+        elif event.kind == "profile_warning":
+            self.progress.console.print(
+                f"[yellow]Profile {data['creator_id']}: {data['message']}[/yellow]"
+            )
+        elif event.kind == "asset_progress":
+            total = data.get("total")
+            downloaded = int(data.get("downloaded") or 0)
+            amount = f"{decimal(downloaded)}/{decimal(total)}" if total else decimal(downloaded)
+            self.progress.update(self.task_id, description=f"{data['name']} {amount}")
+        elif event.kind == "item_finished":
+            self.progress.update(
+                self.task_id, advance=1,
+                description=f"{data['creator_id']} / {data['post_id']}",
+            )
+            if data.get("error"):
+                self.progress.console.print(f"[red]{data['post_id']}: {data['error']}[/red]")
+            elif data.get("unchanged"):
+                self.progress.console.print(f"{data['post_id']}: unchanged")
+            else:
+                self.progress.console.print(f"{data['post_id']}: {data['status']}")
+        elif event.kind == "fancard_finished":
+            self.progress.console.print(
+                f"[cyan]Fan Card[/cyan] {data['creator_id']}: "
+                f"{data['status']}（{data['path']}）"
+            )
+        elif event.kind == "warning":
+            creator = f"{data.get('creator_id')}: " if data.get("creator_id") else ""
+            self.progress.console.print(f"[yellow]{creator}{data['message']}[/yellow]")
+        elif event.kind == "job_finished":
+            if data.get("dry_run"):
+                self.progress.console.print("[cyan]預覽完成，未下載投稿或資源。[/cyan]")
+            else:
+                self.progress.console.print(
+                    f"完成：成功 {data['success']}，內容未變 {data['unchanged']}，"
+                    f"未完成 {data['failure']}"
+                )
 
 
 def _run_backup(
     settings: AppConfig, *, creator: str | None, dry_run: bool,
     max_posts: int | None, browser: str | None, scope: str,
 ) -> None:
-    use_profile = browser is None and settings.auth.profile_dir.exists()
-    if use_profile:
-        material = profile_auth_material(
-            settings.auth.profile_dir, channel=settings.auth.browser_channel
-        )
-        cookie = material.cookie_header
-        user_agent = material.user_agent
-    else:
-        cookie = get_cookie(settings, browser)
-        user_agent = None
-    archive = ArchiveService(settings, cookie=cookie, user_agent=user_agent)
-    run_id = archive.db.begin_run(scope, dry_run=dry_run)
-    get_logger().info("backup run %s started scope=%s dry_run=%s", run_id, scope, dry_run)
-    result = None
-    try:
-        with FanboxClient(
-            cookie=cookie, timeout=settings.download.timeout_seconds,
-            user_agent=user_agent,
-            request_interval=settings.download.request_interval_seconds,
-        ) as client:
-            syncing = SyncService(client, archive)
-            creators_to_sync = syncing.resolve_creators(creator)
-            plan = syncing.plan(creators_to_sync, max_posts or settings.sync.max_posts_per_run)
-            _print_plan(plan)
-            if dry_run:
-                archive.db.finish_run(
-                    run_id, 0, 0, discovered=plan.discovered, new=plan.new,
-                    updated=plan.updated, skipped=plan.skipped, retried=plan.retried,
-                )
-                console.print("[cyan]預覽完成，未下載投稿或資源。[/cyan]")
-                return
-
-            post_session_context = (
-                BrowserPostSession(
-                    settings.auth.profile_dir, channel=settings.auth.browser_channel,
-                    request_interval=settings.download.request_interval_seconds,
-                )
-                if use_profile else nullcontext(None)
-            )
-            with post_session_context as post_session:
-                if post_session is not None:
-                    client.post_payload_fetcher = post_session.fetch
-                    for creator_item in creators_to_sync:
-                        try:
-                            fancard_payload = post_session.fetch_fancard(creator_item.creator_id)
-                            fancard_body = fancard_payload.get("body") or {}
-                            image_url = str(fancard_body.get("supporterCardImageUrl") or "")
-                            image_data = None
-                            content_type = None
-                            if image_url:
-                                image_data, content_type = post_session.fetch_binary(image_url)
-                            else:
-                                console.print(
-                                    f"[yellow]Fan Card {creator_item.creator_id}: "
-                                    "創作者未提供自訂卡面，將只保存方案資料。[/yellow]"
-                                )
-                            card_status, card_path = archive.save_fancard(
-                                fancard_payload, image_data, content_type
-                            )
-                            console.print(
-                                f"[cyan]Fan Card[/cyan] {creator_item.creator_id}: "
-                                f"{card_status}（{card_path}）"
-                            )
-                        except (AuthenticationError, RateLimitedError):
-                            raise
-                        except Exception as exc:
-                            get_logger().error(
-                                "Fan Card archive failed creator_id=%s: %s",
-                                creator_item.creator_id, exc,
-                            )
-                            console.print(
-                                f"[red]Fan Card {creator_item.creator_id}: {exc}[/red]"
-                            )
-                with Progress(
-                    SpinnerColumn(), TextColumn("{task.description}"), TextColumn("{task.completed} 項"),
-                    console=console, disable=not console.is_terminal, transient=True,
-                ) as progress:
-                    task = progress.add_task("準備下載", total=None)
-
-                    def resource_progress(asset, downloaded: int, total: int | None) -> None:
-                        name = getattr(asset, "original_name", None) or getattr(asset, "asset_id", "resource")
-                        amount = f"{decimal(downloaded)}/{decimal(total)}" if total else decimal(downloaded)
-                        progress.update(task, description=f"{name} {amount}")
-
-                    archive.progress_callback = resource_progress
-
-                    def report(item, status, unchanged: bool) -> None:
-                        progress.update(
-                            task, advance=1,
-                            description=f"{item.creator_id} / {item.summary.post_id}",
-                        )
-                        if isinstance(status, Exception):
-                            progress.console.print(f"[red]{item.summary.post_id}: {status}[/red]")
-                        elif unchanged:
-                            progress.console.print(f"{item.summary.post_id}: unchanged")
-                        else:
-                            progress.console.print(f"{item.summary.post_id}: {status.value}")
-
-                    result = syncing.execute(plan, on_item=report)
-                    archive.progress_callback = None
-            archive.db.finish_run(
-                run_id, result.success, result.failure,
-                discovered=plan.discovered, new=plan.new, updated=plan.updated,
-                skipped=plan.skipped + result.unchanged, retried=plan.retried,
-            )
-    except SyncStopped as stopped:
-        result = stopped.result
-        plan = result.plan
-        archive.db.finish_run(
-            run_id, result.success, result.failure,
-            discovered=plan.discovered, new=plan.new, updated=plan.updated,
-            skipped=plan.skipped + result.unchanged, retried=plan.retried,
-        )
-        raise stopped.reason
-    except Exception:
-        if result is None:
-            archive.db.finish_run(run_id, 0, 1)
-        raise
-    console.print(
-        f"完成：成功 {result.success}，內容未變 {result.unchanged}，未完成 {result.failure}"
-    )
-    get_logger().info(
-        "backup run %s finished success=%s unchanged=%s failure=%s",
-        run_id, result.success, result.unchanged, result.failure,
-    )
+    with Progress(
+        SpinnerColumn(), TextColumn("{task.description}"), TextColumn("{task.completed} 項"),
+        console=console, disable=not console.is_terminal, transient=True,
+    ) as progress:
+        task = progress.add_task("準備備份", total=None)
+        sink = RichBackupEventSink(progress, task)
+        BackupUseCase(settings, sink=sink).run(BackupRequest(
+            creator=creator,
+            dry_run=dry_run,
+            max_posts=max_posts,
+            browser=browser,
+            scope=scope,
+        ))
 
 
 @app.command()
@@ -524,6 +467,37 @@ def build_index(
     console.print(str(result.index_path))
     for warning in result.warnings:
         console.print(f"[yellow]{warning}[/yellow]")
+
+
+@app.command()
+def serve(
+    port: Annotated[int, typer.Option("--port", min=1, max=65535, help="本機閱讀伺服器連接埠")] = 8765,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="啟動後以預設瀏覽器開啟")] = True,
+    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+) -> None:
+    """啟動動態本機閱讀器；不需預先執行 index。"""
+    settings = load_config(config)
+    try:
+        import threading
+
+        import uvicorn
+
+        from .webapp import create_app
+
+        url = f"http://127.0.0.1:{port}/"
+        if open_browser:
+            threading.Timer(0.75, lambda: webbrowser.open(url)).start()
+        console.print(f"[green]動態閱讀器已啟動：[/green]{url}")
+        console.print("按 Ctrl+C 停止；下載完成後重新整理頁面即可看到新內容。")
+        uvicorn.run(
+            create_app(settings, config_path=config),
+            host="127.0.0.1", port=port, log_level="info",
+        )
+    except KeyboardInterrupt:
+        console.print("\n閱讀器已停止。")
+    except Exception as exc:
+        console.print(f"[red]閱讀器啟動失敗：[/red]{exc}")
+        raise typer.Exit(1) from exc
 
 
 @app.command("clear-posts")

@@ -39,6 +39,7 @@ def test_creator_pagination_accepts_current_page_urls_and_posts(monkeypatch):
         "post.paginateCreator": {"body": {"pageUrls": ["https://api.fanbox.cc/page/1"]}},
         "https://api.fanbox.cc/page/1": {"body": {"posts": [{
             "id": "123", "title": "Post", "updatedDatetime": "2026-01-02T03:04:05+09:00",
+            "isPinned": True,
         }]}},
     }
     monkeypatch.setattr(client, "_get", lambda path, params=None: responses[path])
@@ -51,6 +52,7 @@ def test_creator_pagination_accepts_current_page_urls_and_posts(monkeypatch):
     assert [(item.post_id, item.title, item.updated_at, item.is_restricted) for item in posts] == [
         ("123", "Post", "2026-01-02T03:04:05+09:00", False)
     ]
+    assert posts[0].is_pinned is True
 
 
 def test_metadata_requests_apply_configured_interval(monkeypatch):

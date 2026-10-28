@@ -69,6 +69,12 @@ class SyncStopped(RuntimeError):
         self.reason = reason
 
 
+class SyncCancelled(RuntimeError):
+    def __init__(self, result: SyncResult):
+        super().__init__("同步已取消")
+        self.result = result
+
+
 class SyncService:
     """Shared, conservative scheduler used by both ``backup`` and ``sync``."""
 
@@ -125,12 +131,14 @@ class SyncService:
             deferred=max(0, len(all_items) - len(selected)),
         )
 
-    def execute(self, plan: SyncPlan, *, on_item=None) -> SyncResult:
+    def execute(self, plan: SyncPlan, *, on_item=None, should_cancel=None) -> SyncResult:
         result = SyncResult(plan=plan)
         completed_ids: set[tuple[str, str]] = set()
         downloads = 0
         limit = len(plan.selected)
         for item in self._round_robin_all(plan.scans):
+            if should_cancel and should_cancel():
+                raise SyncCancelled(result)
             if downloads >= limit:
                 break
             try:
@@ -250,6 +258,8 @@ class SyncService:
         row = self.db.post_row(summary.post_id)
         if row is None:
             return SyncItem(creator_id, summary, "new", source)  # type: ignore[arg-type]
+        if bool(row["is_pinned"]) != summary.is_pinned:
+            self.db.set_post_pinned(summary.post_id, summary.is_pinned)
         if row["status"] != PostStatus.COMPLETED.value:
             return SyncItem(creator_id, summary, "retry", source)  # type: ignore[arg-type]
         if summary.updated_at and row["updated_at"] and _same_instant(summary.updated_at, row["updated_at"]):

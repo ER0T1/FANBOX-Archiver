@@ -7,7 +7,7 @@ from fanbox_archiver.client import (
 from fanbox_archiver.config import AppConfig, StorageConfig, SyncConfig
 from fanbox_archiver.models import Post, PostStatus
 from fanbox_archiver.service import ArchiveService
-from fanbox_archiver.syncing import SyncService, SyncStopped
+from fanbox_archiver.syncing import SyncCancelled, SyncService, SyncStopped
 
 
 class FakeClient:
@@ -92,6 +92,21 @@ def test_completed_unchanged_post_does_not_use_limit(tmp_path: Path):
     assert [item.summary.post_id for item in plan.selected] == ["2"]
 
 
+def test_scan_updates_pin_metadata_without_redownloading_post(tmp_path: Path):
+    pages = {"alice": [[
+        PostSummary("1", "2026-01-01T00:00:00+00:00", is_pinned=True),
+    ]]}
+    sync, archive, creators = make_service(tmp_path, pages, limit=1)
+    existing = post("1", "alice", "same")
+    existing.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
+    archive.db.upsert_post(existing, str(tmp_path / "old"), PostStatus.COMPLETED)
+
+    plan = sync.plan(creators, 1)
+
+    assert plan.selected == []
+    assert bool(archive.db.post_row("1")["is_pinned"]) is True
+
+
 def test_backfill_cursor_advances_across_runs(tmp_path: Path):
     pages = {"alice": [
         [PostSummary("1", "2026-01-01T00:00:00+00:00")],
@@ -150,3 +165,18 @@ def test_summary_marked_restricted_is_skipped_without_fetching(tmp_path: Path):
     plan = sync.plan(creators, 20)
     assert plan.skipped == 1
     assert [item.summary.post_id for item in plan.selected] == ["2"]
+
+
+def test_execute_can_cancel_safely_between_posts(tmp_path: Path):
+    pages = {"alice": [[PostSummary("1")]]}
+    sync, _, creators = make_service(
+        tmp_path, pages, posts={"1": post("1", "alice", "one")}
+    )
+    plan = sync.plan(creators, 1)
+    try:
+        sync.execute(plan, should_cancel=lambda: True)
+    except SyncCancelled as stopped:
+        assert stopped.result.success == 0
+        assert stopped.result.failure == 0
+    else:
+        raise AssertionError("expected SyncCancelled")

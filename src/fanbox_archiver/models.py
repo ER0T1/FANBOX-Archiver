@@ -4,6 +4,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
+import hashlib
+import json
+
 from pydantic import BaseModel, Field, HttpUrl
 
 
@@ -77,6 +80,42 @@ class Post(BaseModel):
     cover: Asset | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
     content_fingerprint: str | None = None
+
+
+class CreatorProfileItem(BaseModel):
+    item_id: str = ""
+    type: str = "unknown"
+    label: str = ""
+    url: str | None = None
+    description: str = ""
+    image_url: str | None = None
+    image_path: str | None = None
+    image_sha256: str | None = None
+
+
+class CreatorProfile(BaseModel):
+    creator_id: str
+    name: str
+    description: str = ""
+    icon_url: str | None = None
+    cover_url: str | None = None
+    profile_items: list[CreatorProfileItem] = Field(default_factory=list)
+    has_adult_content: bool = False
+    is_accepting_request: bool = False
+    is_stopped: bool = False
+    fanbox_url: str
+    raw: dict[str, Any] = Field(default_factory=dict)
+    content_fingerprint: str = ""
+
+    def calculate_fingerprint(self) -> str:
+        value = self.model_dump(mode="json", exclude={"raw", "content_fingerprint"})
+        for item in value.get("profile_items", []):
+            item.pop("image_path", None)
+            item.pop("image_sha256", None)
+        encoded = json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
 
 class VerificationIssue(BaseModel):

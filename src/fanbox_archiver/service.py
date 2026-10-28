@@ -17,8 +17,8 @@ from .downloader import (
     DownloadRateLimitedError, sha256_file,
 )
 from .markdown import render_markdown
-from .models import Asset, AssetStatus, Post, PostStatus, VerificationIssue
-from .security import confined_path, safe_filename
+from .models import Asset, AssetStatus, CreatorProfile, Post, PostStatus, VerificationIssue
+from .security import confined_path, safe_filename, validate_url
 from .storage import BackupStorage
 from .logging_setup import get_logger
 
@@ -41,6 +41,7 @@ class ArchiveService:
                 and previous["status"] == PostStatus.COMPLETED.value
                 and previous["content_fingerprint"] == post.content_fingerprint
                 and self._assets_intact(post)):
+            self.db.set_post_pinned(post.post_id, bool(post.raw.get("isPinned", False)))
             return PostStatus.COMPLETED
 
         # Carry verified metadata forward for unchanged URLs, so an edited post
@@ -236,6 +237,244 @@ class ArchiveService:
         if staging.exists():
             shutil.rmtree(staging)
         return count
+
+    def profile_status(self, profile: CreatorProfile) -> str:
+        latest = self.db.latest_profile_version(profile.creator_id)
+        if latest is None:
+            return "new"
+        if str(latest["content_fingerprint"]) != profile.content_fingerprint:
+            return "updated"
+        if latest["cover_path"]:
+            cover = Path(str(latest["cover_path"]))
+            if not cover.is_file() or not latest["cover_sha256"]:
+                return "updated"
+            if sha256_file(cover) != str(latest["cover_sha256"]):
+                return "updated"
+        if not self._profile_item_images_intact(latest):
+            return "updated"
+        return "unchanged"
+
+    def save_profile(self, profile: CreatorProfile) -> tuple[str, Path]:
+        latest = self.db.latest_profile_version(profile.creator_id)
+        status = self.profile_status(profile)
+        if status == "unchanged" and latest is not None:
+            root = self._profile_root(profile.creator_id)
+            self._update_profile_aliases(root, Path(str(latest["local_path"])))
+            return status, Path(str(latest["local_path"]))
+
+        repairing = bool(
+            latest and str(latest["content_fingerprint"]) == profile.content_fingerprint
+        )
+        number = int(latest["version_number"]) if repairing else (
+            int(latest["version_number"]) + 1 if latest else 1
+        )
+        root = self._profile_root(profile.creator_id)
+        versions = confined_path(root, Path("versions"))
+        final = confined_path(versions, Path(f"v{number:04d}"))
+        temp = confined_path(versions, Path(f".v{number:04d}.{uuid.uuid4().hex}.tmp"))
+        temp.mkdir(parents=True, exist_ok=False)
+        cover_name: str | None = None
+        cover_sha: str | None = None
+        try:
+            image_items = [item for item in profile.profile_items if item.image_url]
+            if profile.cover_url or image_items:
+                settings = self.config.download
+                with AssetDownloader(
+                    cookie=self.cookie, timeout=settings.timeout_seconds,
+                    retries=settings.retry_count, interval=settings.request_interval_seconds,
+                    resume=settings.resume, user_agent=self.user_agent,
+                    progress=self.progress_callback,
+                ) as downloader:
+                    if profile.cover_url:
+                        validate_url(profile.cover_url, download=True)
+                        suffix = self._profile_image_suffix(profile.cover_url)
+                        cover_name = f"cover{suffix}"
+                        cover_target = temp / cover_name
+                        reusable = self._reusable_profile_cover(profile, latest)
+                        if reusable:
+                            self.storage.link_or_copy(reusable, cover_target)
+                            cover_sha = sha256_file(cover_target)
+                        else:
+                            asset = Asset(
+                                asset_id="creator-profile-cover", type="cover", url=profile.cover_url,
+                                original_name=cover_name, local_path=cover_name,
+                            )
+                            downloader.download(asset, cover_target)
+                            cover_sha = asset.sha256
+                    previous = self._load_profile_version(latest)
+                    for index, item in enumerate(image_items, start=1):
+                        validate_url(item.image_url or "", download=True)
+                        identity = safe_filename(item.item_id, fallback=f"item-{index}", max_length=60)
+                        relative = Path("images") / f"{index:03d}_{identity}{self._profile_image_suffix(item.image_url or '')}"
+                        item.image_path = relative.as_posix()
+                        target = confined_path(temp, relative)
+                        reusable = self._reusable_profile_item(item.image_url or "", previous, latest)
+                        if reusable:
+                            self.storage.link_or_copy(reusable, target)
+                            item.image_sha256 = sha256_file(target)
+                        else:
+                            asset = Asset(
+                                asset_id=item.item_id or f"profile-item-{index}",
+                                type="image", url=item.image_url or "",
+                                original_name=target.name, local_path=item.image_path,
+                            )
+                            downloader.download(asset, target)
+                            item.image_sha256 = asset.sha256
+            captured_at = now_iso()
+            self._write_json(temp / "profile.json", profile.model_dump(mode="json"))
+            files = {"profile.json": sha256_file(temp / "profile.json")}
+            if cover_name and cover_sha:
+                files[cover_name] = cover_sha
+            for item in profile.profile_items:
+                if item.image_path and item.image_sha256:
+                    files[item.image_path] = item.image_sha256
+            self._write_json(temp / "manifest.json", {
+                "creator_id": profile.creator_id,
+                "version": number,
+                "captured_at": captured_at,
+                "content_fingerprint": profile.content_fingerprint,
+                "status": "completed",
+                "files": files,
+            })
+            self.storage.publish_version(temp, final)
+            self._update_profile_aliases(root, final)
+            self.db.register_profile_version(
+                profile.creator_id, profile.name, number, profile.content_fingerprint,
+                str(final), str(final / "profile.json"),
+                str(final / cover_name) if cover_name else None, cover_sha,
+            )
+            if profile.icon_url:
+                self._save_profile_icon(profile)
+            return status, final
+        except BaseException:
+            shutil.rmtree(temp, ignore_errors=True)
+            raise
+
+    def _profile_root(self, creator_id: str) -> Path:
+        return confined_path(
+            self.config.storage.output_dir, Path(safe_filename(creator_id)) / "profile"
+        )
+
+    def _reusable_profile_cover(self, profile: CreatorProfile, latest) -> Path | None:
+        if not latest or not latest["cover_path"] or not latest["cover_sha256"]:
+            return None
+        try:
+            previous = CreatorProfile.model_validate_json(
+                Path(str(latest["json_path"])).read_text(encoding="utf-8")
+            )
+            path = Path(str(latest["cover_path"]))
+            if (previous.cover_url == profile.cover_url and path.is_file()
+                    and sha256_file(path) == str(latest["cover_sha256"])):
+                return path
+        except (OSError, ValueError):
+            return None
+        return None
+
+    @staticmethod
+    def _profile_image_suffix(url: str) -> str:
+        suffix = Path(urlparse(url).path).suffix.lower()
+        return suffix if suffix in {".jpg", ".jpeg", ".png", ".gif", ".webp"} else ".img"
+
+    @staticmethod
+    def _load_profile_version(latest) -> CreatorProfile | None:
+        if not latest or not latest["json_path"]:
+            return None
+        try:
+            return CreatorProfile.model_validate_json(
+                Path(str(latest["json_path"])).read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _reusable_profile_item(
+        image_url: str, previous: CreatorProfile | None, latest,
+    ) -> Path | None:
+        if previous is None or latest is None:
+            return None
+        old = next(
+            (item for item in previous.profile_items if item.image_url == image_url), None
+        )
+        if not old or not old.image_path or not old.image_sha256:
+            return None
+        try:
+            path = confined_path(Path(str(latest["local_path"])), Path(old.image_path))
+        except ValueError:
+            return None
+        if path.is_file() and sha256_file(path) == old.image_sha256:
+            return path
+        return None
+
+    def _profile_item_images_intact(self, latest) -> bool:
+        previous = self._load_profile_version(latest)
+        if previous is None:
+            return False
+        for item in previous.profile_items:
+            if not item.image_url:
+                continue
+            if not item.image_path or not item.image_sha256:
+                return False
+            try:
+                path = confined_path(Path(str(latest["local_path"])), Path(item.image_path))
+            except ValueError:
+                return False
+            if not path.is_file() or sha256_file(path) != item.image_sha256:
+                return False
+        return True
+
+    def _update_profile_aliases(self, root: Path, version: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        for old in root.glob("cover.*"):
+            old.unlink(missing_ok=True)
+        for source in version.rglob("*"):
+            if not source.is_file():
+                continue
+            relative = source.relative_to(version)
+            target = confined_path(root, relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+            self.storage.link_or_copy(source, temporary)
+            os.replace(temporary, target)
+
+    def _save_profile_icon(self, profile: CreatorProfile) -> None:
+        validate_url(profile.icon_url or "", download=True)
+        row = self.db.creator_row(profile.creator_id)
+        existing = Path(str(row["icon_path"])) if row and row["icon_path"] else None
+        if (row and row["icon_url"] == profile.icon_url and existing and existing.is_file()
+                and row["icon_sha256"] and sha256_file(existing) == row["icon_sha256"]):
+            return
+        suffix = Path(urlparse(profile.icon_url or "").path).suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+            suffix = ".img"
+        target = confined_path(
+            self.config.storage.output_dir,
+            Path(safe_filename(profile.creator_id)) / f"creator-avatar{suffix}",
+        )
+        asset = Asset(
+            asset_id="creator-avatar", type="image", url=profile.icon_url or "",
+            original_name=target.name, local_path=target.name,
+        )
+        settings = self.config.download
+        try:
+            with AssetDownloader(
+                cookie=self.cookie, timeout=settings.timeout_seconds,
+                retries=settings.retry_count, interval=settings.request_interval_seconds,
+                resume=settings.resume, user_agent=self.user_agent,
+                progress=self.progress_callback,
+            ) as downloader:
+                downloader.download(asset, target)
+        except (DownloadAuthorizationError, DownloadRateLimitedError):
+            raise
+        except DownloadError as exc:
+            get_logger().warning(
+                "creator profile icon download failed creator_id=%s: %s",
+                profile.creator_id, exc,
+            )
+            return
+        if asset.sha256:
+            self.db.set_creator_icon(
+                profile.creator_id, profile.icon_url or "", str(target), asset.sha256
+            )
 
     def save_fancard(
         self, payload: dict, image_data: bytes | None, content_type: str | None = "image/jpeg",
@@ -526,6 +765,17 @@ class ArchiveService:
                         issues.append(VerificationIssue(path=str(path), reason="Fan Card SHA-256 不符"))
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 issues.append(VerificationIssue(path=str(manifest_path), reason=f"Fan Card manifest 無法驗證：{exc}"))
+        for manifest_path in root.glob("*/profile/versions/v*/manifest.json"):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                for relative, expected in (manifest.get("files") or {}).items():
+                    path = confined_path(manifest_path.parent, Path(str(relative)))
+                    if not path.exists():
+                        issues.append(VerificationIssue(path=str(path), reason="Profile 檔案遺失"))
+                    elif sha256_file(path) != str(expected):
+                        issues.append(VerificationIssue(path=str(path), reason="Profile SHA-256 不符"))
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                issues.append(VerificationIssue(path=str(manifest_path), reason=f"Profile manifest 無法驗證：{exc}"))
         for row in self.db.incomplete_versions():
             issues.append(VerificationIssue(
                 path=str(row["local_path"]),

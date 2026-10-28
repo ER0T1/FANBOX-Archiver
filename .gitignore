@@ -1,4 +1,5 @@
 .venv/
+node_modules/
 .fanbox-browser/
 .tmp/
 __pycache__/
@@ -10,3 +11,4 @@ build/
 FANBOX/
 config.yaml
 *.log
+規劃與想法/

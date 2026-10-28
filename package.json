@@ -1,0 +1,12 @@
+{
+  "name": "fanbox-archiver-web",
+  "private": true,
+  "scripts": {
+    "build:web": "tsc -p tsconfig.web.json",
+    "check:web": "tsc -p tsconfig.web.json --noEmit",
+    "test:web": "npm run build:web && node --test tests/web/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

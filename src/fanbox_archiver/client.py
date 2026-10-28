@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 import httpx
 
 from .parser import StructuredPostParser
+from .profile_parser import CreatorProfileParser
+from .models import CreatorProfile
 from .security import validate_url
 
 
@@ -41,6 +43,7 @@ class PostSummary:
     title: str = ""
     is_restricted: bool = False
     fee_required: int | None = None
+    is_pinned: bool = False
 
 
 class FanboxClient:
@@ -129,6 +132,11 @@ class FanboxClient:
                 ))
         return result
 
+    def creator_profile(self, creator_id: str) -> CreatorProfile:
+        normalized = self.creator_id(creator_id)
+        payload = self._get("creator.get", {"creatorId": normalized})
+        return CreatorProfileParser().parse(payload, normalized)
+
     @staticmethod
     def creator_id(value: str) -> str:
         """Normalize a Creator ID, creator URL, or post URL."""
@@ -170,6 +178,7 @@ class FanboxClient:
                 title=str(item.get("title") or ""),
                 is_restricted=bool(item.get("isRestricted", False)),
                 fee_required=(int(item["feeRequired"]) if item.get("feeRequired") is not None else None),
+                is_pinned=bool(item.get("isPinned", False)),
             ))
         return result
 
