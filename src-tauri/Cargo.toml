@@ -1,6 +1,6 @@
 [package]
 name = "fanbox-archiver-desktop"
-version = "1.3.2"
+version = "1.3.3"
 description = "Desktop GUI for the local FANBOX Archiver"
 authors = ["FANBOX Archiver contributors"]
 license = "MIT"
