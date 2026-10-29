@@ -271,6 +271,13 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("heading", name="本次備份摘要", exact=True)).to_be_visible()
     expect(page.get_by_text("cover.jpg", exact=True)).to_be_visible()
 
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    scroll_y = page.evaluate("window.scrollY")
+    assert scroll_y > 0
+    page.wait_for_timeout(1_200)
+    assert page.evaluate("window.scrollY") == scroll_y
+    expect(page.get_by_text("正在讀取工作狀態…", exact=True)).not_to_be_visible()
+
     page.get_by_role("button", name="維護", exact=True).click()
     expect(page.get_by_text("目前工作：完整備份", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="目前無法驗證", exact=True)).to_be_disabled()

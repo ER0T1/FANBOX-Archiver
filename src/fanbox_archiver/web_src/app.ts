@@ -42,10 +42,10 @@ namespace FanboxUI {
       void refreshView();
     }
 
-    function refreshView(): void | Promise<void> {
-      if (state.view === "backup") return loadBackup();
-      if (state.view === "maintenance") return loadMaintenance();
-      if (state.view === "settings") return loadSettings();
+    function refreshView(showLoading = true): void | Promise<void> {
+      if (state.view === "backup") return loadBackup(showLoading);
+      if (state.view === "maintenance") return loadMaintenance(showLoading);
+      if (state.view === "settings") return loadSettings("", showLoading);
       if (state.view === "creators") return loadCreators();
       if (state.view === "creator" && state.creatorId) return loadCreator(state.creatorId, state.creatorTab);
       return loadPosts();
@@ -59,7 +59,7 @@ namespace FanboxUI {
     function scheduleJobRefresh(): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
       if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)) {
-        jobTimer = window.setTimeout(() => void refreshView(), 900);
+        jobTimer = window.setTimeout(() => void refreshView(false), 900);
       }
     }
 
@@ -280,9 +280,9 @@ namespace FanboxUI {
       scheduleJobRefresh();
     }
 
-    async function loadBackup(): Promise<void> {
+    async function loadBackup(showLoading = true): Promise<void> {
       state.current = null;
-      app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
       try {
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
         updateActiveJob(jobData.items);
@@ -340,9 +340,9 @@ namespace FanboxUI {
       scheduleJobRefresh();
     }
 
-    async function loadMaintenance(): Promise<void> {
+    async function loadMaintenance(showLoading = true): Promise<void> {
       state.current = null;
-      app.replaceChildren(h("p", {class: "empty"}, "正在讀取驗證狀態…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取驗證狀態…"));
       try {
         const data = await getJobs();
         updateActiveJob(data.items);
@@ -373,9 +373,9 @@ namespace FanboxUI {
       }
     }
 
-    async function loadSettings(message = ""): Promise<void> {
+    async function loadSettings(message = "", showLoading = true): Promise<void> {
       state.current = null;
-      app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
         const [data, jobData] = await Promise.all([getSettings(), getJobs()]);
         updateActiveJob(jobData.items);

@@ -779,13 +779,13 @@ var FanboxUI;
             setSearch(view);
             void refreshView();
         }
-        function refreshView() {
+        function refreshView(showLoading = true) {
             if (state.view === "backup")
-                return loadBackup();
+                return loadBackup(showLoading);
             if (state.view === "maintenance")
-                return loadMaintenance();
+                return loadMaintenance(showLoading);
             if (state.view === "settings")
-                return loadSettings();
+                return loadSettings("", showLoading);
             if (state.view === "creators")
                 return loadCreators();
             if (state.view === "creator" && state.creatorId)
@@ -800,7 +800,7 @@ var FanboxUI;
             if (jobTimer !== undefined)
                 clearTimeout(jobTimer);
             if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)) {
-                jobTimer = window.setTimeout(() => void refreshView(), 900);
+                jobTimer = window.setTimeout(() => void refreshView(false), 900);
             }
         }
         async function loadPosts() {
@@ -1024,9 +1024,10 @@ var FanboxUI;
             }));
             scheduleJobRefresh();
         }
-        async function loadBackup() {
+        async function loadBackup(showLoading = true) {
             state.current = null;
-            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取工作狀態…"));
+            if (showLoading)
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取工作狀態…"));
             try {
                 const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
                 updateActiveJob(jobData.items);
@@ -1083,9 +1084,10 @@ var FanboxUI;
             }));
             scheduleJobRefresh();
         }
-        async function loadMaintenance() {
+        async function loadMaintenance(showLoading = true) {
             state.current = null;
-            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取驗證狀態…"));
+            if (showLoading)
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取驗證狀態…"));
             try {
                 const data = await FanboxUI.getJobs();
                 updateActiveJob(data.items);
@@ -1116,9 +1118,10 @@ var FanboxUI;
                 errorView(error);
             }
         }
-        async function loadSettings(message = "") {
+        async function loadSettings(message = "", showLoading = true) {
             state.current = null;
-            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
+            if (showLoading)
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
             try {
                 const [data, jobData] = await Promise.all([FanboxUI.getSettings(), FanboxUI.getJobs()]);
                 updateActiveJob(jobData.items);
