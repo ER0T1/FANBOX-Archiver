@@ -14,7 +14,7 @@ from .client import (
     RateLimitedError,
     RemoteUnavailableError,
 )
-from .models import PostStatus
+from .models import Post, PostStatus
 from .downloader import DownloadAuthorizationError, DownloadRateLimitedError
 from .service import ArchiveService
 
@@ -76,27 +76,101 @@ class SyncCancelled(RuntimeError):
 
 
 class SyncService:
-    """Shared, conservative scheduler used by both ``backup`` and ``sync``."""
+    """Conservative scheduler behind the shared backup use case."""
 
-    def __init__(self, client: FanboxClient, archive: ArchiveService):
+    def __init__(self, client: FanboxClient, archive: ArchiveService, *, mutate: bool = True):
         self.client = client
         self.archive = archive
         self.db = archive.db
+        self.mutate = mutate
 
     def supporting_creators(self) -> list[Creator]:
         creators = self.client.supporting_creators()
-        self.db.record_supporting_creators([(item.creator_id, item.name) for item in creators])
+        if self.mutate:
+            self.db.record_supporting_creators([(item.creator_id, item.name) for item in creators])
         return creators
 
-    def resolve_creators(self, requested: str | None = None) -> list[Creator]:
+    def resolve_creators(self, requested: Iterable[str] | str | None = None) -> list[Creator]:
         creators = self.supporting_creators()
         if requested is None:
             return creators
-        creator_id = FanboxClient.creator_id(requested)
-        matched = [item for item in creators if item.creator_id == creator_id]
-        if not matched:
-            raise ValueError(f"{creator_id} 不在目前支援清單中或帳號無權存取")
-        return matched
+        values = [requested] if isinstance(requested, str) else list(requested)
+        requested_ids = list(dict.fromkeys(FanboxClient.creator_id(value) for value in values))
+        by_id = {item.creator_id: item for item in creators}
+        missing = [creator_id for creator_id in requested_ids if creator_id not in by_id]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} 不在目前支援清單中或帳號無權存取")
+        return [by_id[creator_id] for creator_id in requested_ids]
+
+    def plan_posts(
+        self, post_ids: Iterable[str], max_posts: int | None = None,
+    ) -> tuple[SyncPlan, dict[str, Post]]:
+        posts: dict[str, Post] = {}
+        scans: dict[str, CreatorScan] = {}
+        items: list[SyncItem] = []
+        skipped = 0
+        counts = {"new": 0, "updated": 0, "retry": 0}
+        for post_id in dict.fromkeys(post_ids):
+            post = self.client.post(post_id)
+            posts[post.post_id] = post
+            scan = scans.setdefault(post.creator_id, CreatorScan(creator_id=post.creator_id))
+            scan.discovered += 1
+            row = self.db.post_row(post.post_id)
+            if row is None:
+                action: SyncAction = "new"
+            elif row["status"] != PostStatus.COMPLETED.value:
+                action = "retry"
+            elif row["content_fingerprint"] != post.content_fingerprint:
+                action = "updated"
+            else:
+                scan.skipped += 1
+                skipped += 1
+                continue
+            summary = PostSummary(
+                post_id=post.post_id,
+                updated_at=post.updated_at.isoformat() if post.updated_at else None,
+                title=post.title,
+                fee_required=post.fee_required,
+                is_pinned=bool(post.raw.get("isPinned", False)),
+            )
+            item = SyncItem(post.creator_id, summary, action, "recent")
+            scan.items.append(item)
+            items.append(item)
+            counts[action] += 1
+        limit = len(items) if max_posts is None else max_posts
+        selected = items[:limit]
+        return SyncPlan(
+            creators=list(scans), scans=list(scans.values()), selected=selected,
+            discovered=len(posts), new=counts["new"], updated=counts["updated"],
+            retried=counts["retry"], skipped=skipped,
+            deferred=max(0, len(items) - len(selected)),
+        ), posts
+
+    def execute_posts(
+        self, plan: SyncPlan, posts: dict[str, Post], *, on_item=None, should_cancel=None,
+    ) -> SyncResult:
+        result = SyncResult(plan=plan)
+        for item in plan.selected:
+            if should_cancel and should_cancel():
+                raise SyncCancelled(result)
+            try:
+                status = self.archive.save(posts[item.summary.post_id], download_assets=True)
+                if status == PostStatus.COMPLETED:
+                    result.success += 1
+                else:
+                    result.failure += 1
+                if on_item:
+                    on_item(item, status, False)
+            except Exception as exc:
+                result.failure += 1
+                if on_item:
+                    on_item(item, exc, False)
+                if isinstance(exc, (
+                    AuthenticationError, RateLimitedError,
+                    DownloadAuthorizationError, DownloadRateLimitedError,
+                )):
+                    raise SyncStopped(result, exc) from exc
+        return result
 
     def plan(self, creators: Iterable[Creator], max_posts: int) -> SyncPlan:
         creator_list = list(creators)
@@ -258,7 +332,7 @@ class SyncService:
         row = self.db.post_row(summary.post_id)
         if row is None:
             return SyncItem(creator_id, summary, "new", source)  # type: ignore[arg-type]
-        if bool(row["is_pinned"]) != summary.is_pinned:
+        if self.mutate and bool(row["is_pinned"]) != summary.is_pinned:
             self.db.set_post_pinned(summary.post_id, summary.is_pinned)
         if row["status"] != PostStatus.COMPLETED.value:
             return SyncItem(creator_id, summary, "retry", source)  # type: ignore[arg-type]

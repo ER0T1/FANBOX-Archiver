@@ -5,7 +5,7 @@ from fanbox_archiver.application import BackupRequest, BackupUseCase
 from fanbox_archiver.application.events import CollectingEventSink
 from fanbox_archiver.client import Creator, PostSummary
 from fanbox_archiver.config import AppConfig, AuthConfig, StorageConfig
-from fanbox_archiver.models import CreatorProfile
+from fanbox_archiver.models import ContentBlock, CreatorProfile, Post
 
 
 class DryRunClient:
@@ -28,7 +28,7 @@ class DryRunClient:
         return [PostSummary("123", title="example")]
 
 
-def test_dry_run_use_case_emits_serializable_events_and_records_run(monkeypatch, tmp_path: Path):
+def test_dry_run_use_case_emits_serializable_events_without_recording_run(monkeypatch, tmp_path: Path):
     config = AppConfig(
         auth=AuthConfig(profile_dir=tmp_path / "profile"),
         storage=StorageConfig(
@@ -49,10 +49,8 @@ def test_dry_run_use_case_emits_serializable_events_and_records_run(monkeypatch,
     assert sink.events[1].model_dump()["data"]["selected"] == 1
     assert sink.events[1].model_dump()["data"]["creators"] == 1
     assert sink.events[1].model_dump()["data"]["creator_ids"] == ["alice"]
-    run = backup_module.ArchiveService(config).db.latest_run()
-    assert run["dry_run"] == 1
-    assert run["new_count"] == 1
-    assert run["failure_count"] == 0
+    assert outcome.run_id == 0
+    assert backup_module.ArchiveService(config).db.latest_run() is None
 
 
 def test_cancelled_use_case_stops_before_network_client(monkeypatch, tmp_path: Path):
@@ -184,3 +182,44 @@ def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, tmp_path: Pat
     assert any(event.kind == "fancard_finished" for event in sink.events)
     row = backup_module.ArchiveService(config).db.latest_fancard_version("alice", "2026-10")
     assert row is not None
+
+
+def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch, tmp_path: Path):
+    class PostClient(DryRunClient):
+        def supporting_creators(self):
+            raise AssertionError("targeted posts must not scan supporting creators")
+
+        def post(self, post_id):
+            return Post(
+                post_id=str(post_id), creator_id="alice", creator_name="Alice",
+                title=f"Post {post_id}", url=f"https://alice.fanbox.cc/posts/{post_id}",
+                blocks=[ContentBlock(type="paragraph", text="body")], raw={},
+                content_fingerprint=f"target-{post_id}",
+            )
+
+    config = AppConfig(
+        auth=AuthConfig(profile_dir=tmp_path / "profile"),
+        storage=StorageConfig(
+            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
+        ),
+    )
+    sink = CollectingEventSink()
+    monkeypatch.setattr(backup_module, "FanboxClient", PostClient)
+    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
+
+    preview = BackupUseCase(config, sink=sink).run(BackupRequest(
+        posts=("123", "456"), dry_run=True,
+    ))
+    preview_archive = backup_module.ArchiveService(config)
+    assert preview.run_id == 0
+    assert preview_archive.db.latest_run() is None
+    assert preview_archive.db.post_row("123") is None
+    assert preview_archive.db.post_row("456") is None
+
+    outcome = BackupUseCase(config, sink=sink).run(BackupRequest(posts=("123", "456")))
+
+    assert [item.summary.post_id for item in outcome.plan.selected] == ["123", "456"]
+    assert outcome.result is not None and outcome.result.success == 2
+    archive = backup_module.ArchiveService(config)
+    assert archive.db.post_row("123") is not None
+    assert archive.db.post_row("456") is not None

@@ -18,11 +18,15 @@ from .events import BackupCancelled, BackupEvent, CancellationToken, EventSink, 
 @dataclass(frozen=True, slots=True)
 class BackupRequest:
     creator: str | None = None
+    creators: tuple[str, ...] = ()
+    posts: tuple[str, ...] = ()
     dry_run: bool = False
     max_posts: int | None = None
     browser: str | None = None
     scope: str = "supporting"
     mode: Literal["full", "profile", "fancard"] = "full"
+    include_profile: bool | None = None
+    include_fancard: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +52,7 @@ class BackupUseCase:
         self.cancellation.raise_if_cancelled()
         use_profile, cookie, user_agent = self._auth_material(request.browser)
         archive = ArchiveService(self.config, cookie=cookie, user_agent=user_agent)
-        run_id = archive.db.begin_run(request.scope, dry_run=request.dry_run)
+        run_id = 0 if request.dry_run else archive.db.begin_run(request.scope)
         self._emit(
             "job_started", run_id=run_id, scope=request.scope,
             dry_run=request.dry_run, mode=request.mode,
@@ -68,27 +72,54 @@ class BackupUseCase:
                 user_agent=user_agent,
                 request_interval=self.config.download.request_interval_seconds,
             ) as client:
-                syncing = SyncService(client, archive)
-                creators = syncing.resolve_creators(request.creator)
-                plan = (
-                    syncing.plan(creators, request.max_posts or self.config.sync.max_posts_per_run)
-                    if request.mode == "full" else self._metadata_plan(creators)
+                syncing = SyncService(client, archive, mutate=not request.dry_run)
+                requested_creators = request.creators or ((request.creator,) if request.creator else ())
+                selected_posts: dict[str, Any] = {}
+                if request.posts:
+                    planning_session = (
+                        BrowserPostSession(
+                            self.config.auth.profile_dir,
+                            channel=self.config.auth.browser_channel,
+                            request_interval=self.config.download.request_interval_seconds,
+                        )
+                        if use_profile else nullcontext(None)
+                    )
+                    with planning_session as post_session:
+                        if post_session is not None:
+                            client.post_payload_fetcher = post_session.fetch
+                        plan, selected_posts = syncing.plan_posts(request.posts, request.max_posts)
+                        client.post_payload_fetcher = None
+                    creators = []
+                else:
+                    creators = syncing.resolve_creators(requested_creators or None)
+                    plan = (
+                        syncing.plan(creators, request.max_posts or self.config.sync.max_posts_per_run)
+                        if request.mode == "full" else self._metadata_plan(creators)
+                    )
+                include_profile = request.mode == "profile" or (
+                    request.mode == "full"
+                    and (request.include_profile if request.include_profile is not None else True)
+                    and not request.posts
+                )
+                include_fancard = request.mode == "fancard" or (
+                    request.mode == "full"
+                    and (request.include_fancard if request.include_fancard is not None else True)
+                    and not request.posts
                 )
                 profile_results = (
                     self._archive_profiles(creators, client, archive, dry_run=request.dry_run)
-                    if request.mode in {"full", "profile"} else {}
+                    if include_profile else {}
                 )
                 self._emit(
                     "plan_ready", mode=request.mode,
                     **self._plan_data(plan, profile_results),
                 )
                 if request.dry_run:
-                    self._finish(archive, run_id, plan, None)
                     finished = True
                     self._emit("job_finished", run_id=run_id, dry_run=True, success=0, failure=0)
                     return BackupOutcome(run_id, plan, None, True)
 
-                if request.mode == "profile":
+                if not plan.selected and not include_fancard:
                     self._finish(archive, run_id, plan, None)
                     finished = True
                     self._emit(
@@ -97,24 +128,28 @@ class BackupUseCase:
                     )
                     return BackupOutcome(run_id, plan, None, False)
 
-                if request.mode == "fancard" and not use_profile:
+                if include_fancard and not use_profile:
                     raise RuntimeError("單獨拉取 Fan Card 需要先以專用瀏覽器完成登入")
 
+                needs_session = use_profile and (
+                    include_fancard or (bool(plan.selected) and not selected_posts)
+                )
                 session_context = (
                     BrowserPostSession(
                         self.config.auth.profile_dir,
                         channel=self.config.auth.browser_channel,
                         request_interval=self.config.download.request_interval_seconds,
                     )
-                    if use_profile else nullcontext(None)
+                    if needs_session else nullcontext(None)
                 )
                 with session_context as post_session:
                     if post_session is not None:
-                        if request.mode == "full":
+                        if plan.selected and not selected_posts:
                             client.post_payload_fetcher = post_session.fetch
-                        self._archive_fancards(creators, post_session, archive)
+                        if include_fancard:
+                            self._archive_fancards(creators, post_session, archive)
 
-                    if request.mode == "full":
+                    if plan.selected:
                         def resource_progress(asset: Any, downloaded: int, total: int | None) -> None:
                             self._emit(
                                 "asset_progress",
@@ -136,8 +171,10 @@ class BackupUseCase:
 
                         archive.progress_callback = resource_progress
                         try:
-                            result = syncing.execute(
-                                plan, on_item=item_finished,
+                            execute = syncing.execute_posts if selected_posts else syncing.execute
+                            execute_args = (plan, selected_posts) if selected_posts else (plan,)
+                            result = execute(
+                                *execute_args, on_item=item_finished,
                                 should_cancel=lambda: self.cancellation.cancelled,
                             )
                         finally:
@@ -173,12 +210,12 @@ class BackupUseCase:
             self._emit("job_cancelled", run_id=run_id)
             raise BackupCancelled("備份已由使用者取消") from stopped
         except BackupCancelled:
-            if not finished:
+            if not finished and not request.dry_run:
                 self._finish_failure(archive, run_id, plan, result)
             self._emit("job_cancelled", run_id=run_id)
             raise
         except Exception as exc:
-            if not finished:
+            if not finished and not request.dry_run:
                 self._finish_failure(archive, run_id, plan, result)
             self._emit("job_failed", run_id=run_id, error=str(exc))
             raise

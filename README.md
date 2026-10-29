@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**正式版本：v1.3.7（2026-10-29）**
+**正式版本：v1.3.8（2026-10-29）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -20,6 +20,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.8 更新重點
+
+- `backup` 成為 CLI 唯一下載入口，支援重複指定多個 `--creator` 或 `--post`，並接受 Creator／Post ID、標準 FANBOX 網址與 Creator 子網域網址。
+- `--creator` 與 `--post` 明確互斥；`--profile`、`--fancard` 只可搭配 Creator 使用。指定 Post、Creator、GUI 與完整支援中備份都共用 `BackupUseCase`。
+- 移除沒有獨立責任的 `download` 與 `sync` 指令；`--dry-run` 不再寫入備份執行紀錄、創作者同步狀態或封存內容。
 
 ## v1.3.7 更新重點
 
@@ -151,11 +157,11 @@ fanbox-archiver auth
 fanbox-archiver auth login
 ```
 
-登入成功後，`auth`、`download`、`sync` 和 `retry` 會自動沿用 `.fanbox-browser/` 中的工作階段：
+登入成功後，`auth`、`backup` 和 `retry` 會自動沿用 `.fanbox-browser/` 中的工作階段：
 
 ```powershell
 fanbox-archiver auth check
-fanbox-archiver download "https://www.fanbox.cc/@creator/posts/123456"
+fanbox-archiver backup --post "https://www.fanbox.cc/@creator/posts/123456"
 ```
 
 程式不讀取帳號、密碼、2FA 或 CAPTCHA；這些資訊只會由你直接輸入 FANBOX／pixiv 頁面。專用設定檔含有敏感的登入 Cookie，已加入 `.gitignore`，不可分享或上傳。
@@ -197,10 +203,11 @@ CLI 與動態閱讀器共用相同的備份應用層。備份計畫、Fan Card�
 fanbox-archiver import-html ".\範例1.html" --metadata-only
 ```
 
-下載單篇目前有權存取的投稿：
+備份一篇或多篇目前有權存取的投稿（重複使用 `--post`）：
 
 ```powershell
-fanbox-archiver download "https://www.fanbox.cc/@creator/posts/123456"
+fanbox-archiver backup --post "https://www.fanbox.cc/@creator/posts/123456"
+fanbox-archiver backup --post 123456 --post "https://creator.fanbox.cc/posts/789012"
 ```
 
 有限範圍同步、預覽及本機驗證：
@@ -209,10 +216,10 @@ fanbox-archiver download "https://www.fanbox.cc/@creator/posts/123456"
 fanbox-archiver backup --dry-run
 fanbox-archiver backup
 fanbox-archiver backup --creator "https://www.fanbox.cc/@creator-id"
+fanbox-archiver backup --creator creator-a --creator "https://creator-b.fanbox.cc"
+fanbox-archiver backup --creator creator-id --profile --fancard
 fanbox-archiver creators --refresh
 fanbox-archiver creators --json
-fanbox-archiver sync --creator creator-id --dry-run
-fanbox-archiver sync --creator creator-id
 fanbox-archiver creators
 fanbox-archiver verify
 fanbox-archiver retry
@@ -220,7 +227,9 @@ fanbox-archiver status
 fanbox-archiver versions 123456
 ```
 
-`backup` 是日常使用入口；它會輪替處理支援中創作者、持續保存歷史回補游標，且已完成未更新的投稿不占 `sync.max_posts_per_run` 額度。`sync --creator` 與 `sync --supporting` 保留為相容指令。先執行 `--dry-run` 並確認使用範圍符合平台規範。
+`backup` 是唯一下載入口；不帶 selector 時會輪替處理支援中創作者、保存 Profile 與 Fan Card，並持續保存歷史回補游標。指定 `--creator` 時預設備份投稿，可用 `--profile`、`--fancard` 加入對應資料；指定 `--post` 時只處理明列投稿。`--creator` 與 `--post` 互斥。已完成且未更新的投稿不占 `sync.max_posts_per_run` 額度。`--dry-run` 只查詢並顯示計畫，不寫入封存內容、同步狀態或執行紀錄。
+
+舊指令遷移：`download <post>` 改用 `backup --post <post>`；`sync --creator <creator>` 改用 `backup --creator <creator>`；`sync --supporting` 改用不帶 selector 的 `backup`。
 
 互動終端會顯示目前投稿、資源名稱與下載大小；非互動環境不輸出動畫。執行日誌位於 `FANBOX/logs/` 並按日輪替，Cookie、Authorization 與常見查詢憑證會先遮蔽。`status` 會另外顯示最近一次執行、失敗投稿及尚未完成歷史回補的創作者。
 
@@ -274,7 +283,7 @@ fanbox-archiver clear-posts
 
 ```powershell
 fanbox-archiver --help
-fanbox-archiver download --help
+fanbox-archiver backup --help
 ```
 
 ## 輸出格式

@@ -149,6 +149,12 @@ class FanboxClient:
             return value
         validate_url(value)
         parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower()
+        if hostname.endswith(".fanbox.cc") and hostname not in {"www.fanbox.cc", "api.fanbox.cc"}:
+            creator_id = hostname.removesuffix(".fanbox.cc")
+            if not creator_id or parsed.path.rstrip("/"):
+                raise ValueError("創作者 URL 格式錯誤")
+            return creator_id
         parts = [part for part in parsed.path.split("/") if part]
         if not parts or not parts[0].startswith("@") or len(parts[0]) == 1:
             raise ValueError("創作者 URL 格式錯誤")

@@ -24,16 +24,11 @@ from .client import (
     RateLimitedError,
     RemoteUnavailableError,
 )
-from .browser_session import (
-    fetch_post_payload,
-    interactive_login,
-    profile_auth_material,
-    profile_is_authenticated,
-)
+from .browser_session import interactive_login, profile_is_authenticated
 from .config import AppConfig
 from .credentials import cookie_header
-from .models import Post, PostStatus
-from .parser import HtmlPostParser, StructuredPostParser
+from .models import Post
+from .parser import HtmlPostParser
 from .service import ArchiveService
 from .application import BackupEvent, BackupRequest, BackupUseCase
 from .logging_setup import configure_logging, get_logger
@@ -95,27 +90,6 @@ def get_cookie(settings: AppConfig, browser: str | None = None) -> str:
         profile_dir=None if browser else settings.auth.profile_dir,
         browser_channel=settings.auth.browser_channel,
     )
-
-
-def save_with_progress(
-    service: ArchiveService, post: Post, *, download_assets: bool, force: bool = False,
-) -> PostStatus:
-    with Progress(
-        SpinnerColumn(), TextColumn("{task.description}"), console=console,
-        disable=not console.is_terminal,
-    ) as progress:
-        task = progress.add_task(f"{post.post_id}：準備儲存", total=None)
-
-        def resource_progress(asset, downloaded: int, total: int | None) -> None:
-            name = getattr(asset, "original_name", None) or getattr(asset, "asset_id", "resource")
-            amount = f"{decimal(downloaded)}/{decimal(total)}" if total else decimal(downloaded)
-            progress.update(task, description=f"{name} {amount}")
-
-        service.progress_callback = resource_progress
-        try:
-            return service.save(post, download_assets=download_assets, force=force)
-        finally:
-            service.progress_callback = None
 
 
 def verify_login(settings: AppConfig, browser: str | None = None) -> None:
@@ -247,49 +221,6 @@ def import_html(
     console.print(f"[green]已匯入[/green] {post.post_id}：{post.title}（{status.value}）")
 
 
-@app.command()
-def download(
-    url: Annotated[str, typer.Argument(help="單篇 FANBOX 投稿 URL")],
-    force: Annotated[bool, typer.Option("--force", help="忽略增量判斷並重新處理")] = False,
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
-) -> None:
-    """下載一篇目前登入帳號有權存取的投稿。"""
-    settings = load_config(config)
-    try:
-        if browser is None and settings.auth.profile_dir.exists():
-            post_id = FanboxClient.post_id_from_url(url)
-            payload = fetch_post_payload(
-                settings.auth.profile_dir,
-                url,
-                post_id,
-                channel=settings.auth.browser_channel,
-            )
-            post = StructuredPostParser().parse(payload)
-            material = profile_auth_material(
-                settings.auth.profile_dir,
-                channel=settings.auth.browser_channel,
-            )
-            cookie = material.cookie_header
-            user_agent = material.user_agent
-        else:
-            cookie = get_cookie(settings, browser)
-            user_agent = None
-            with FanboxClient(
-                cookie=cookie, timeout=settings.download.timeout_seconds,
-                request_interval=settings.download.request_interval_seconds,
-            ) as client:
-                post = client.post(url)
-        status = save_with_progress(
-            ArchiveService(settings, cookie=cookie, user_agent=user_agent),
-            post, download_assets=True, force=force,
-        )
-    except Exception as exc:
-        handle_remote_error(exc)
-        return
-    console.print(f"[green]完成[/green] {post.post_id}：{post.title}（{status.value}）")
-
-
 def _print_plan(data: dict) -> None:
     table = Table("Creator ID", "Profile", "發現", "新增/更新/重試", "略過")
     for scan in data["scans"]:
@@ -364,8 +295,9 @@ class RichBackupEventSink:
 
 
 def _run_backup(
-    settings: AppConfig, *, creator: str | None, dry_run: bool,
-    max_posts: int | None, browser: str | None, scope: str,
+    settings: AppConfig, *, creators: tuple[str, ...], posts: tuple[str, ...],
+    dry_run: bool, max_posts: int | None, browser: str | None, scope: str,
+    include_profile: bool, include_fancard: bool,
 ) -> None:
     with Progress(
         SpinnerColumn(), TextColumn("{task.description}"), TextColumn("{task.completed} 項"),
@@ -374,53 +306,53 @@ def _run_backup(
         task = progress.add_task("準備備份", total=None)
         sink = RichBackupEventSink(progress, task)
         BackupUseCase(settings, sink=sink).run(BackupRequest(
-            creator=creator,
+            creators=creators,
+            posts=posts,
             dry_run=dry_run,
             max_posts=max_posts,
             browser=browser,
             scope=scope,
+            include_profile=include_profile,
+            include_fancard=include_fancard,
         ))
 
 
 @app.command()
 def backup(
-    creator: Annotated[str | None, typer.Option("--creator", help="只備份指定 Creator ID、首頁或投稿網址")] = None,
+    creator: Annotated[list[str] | None, typer.Option("--creator", help="指定 Creator ID 或首頁網址；可重複使用")] = None,
+    post: Annotated[list[str] | None, typer.Option("--post", help="指定 Post ID 或投稿網址；可重複使用")] = None,
+    fancard: Annotated[bool, typer.Option("--fancard", help="同時保存指定創作者當月份 Fan Card")] = False,
+    profile: Annotated[bool, typer.Option("--profile", help="同時保存指定創作者的 Creator Profile")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="只查詢並顯示備份計畫，不下載投稿或資源")] = False,
     max_posts: Annotated[int | None, typer.Option("--max-posts", min=1, max=100, help="覆寫本次實際下載上限")] = None,
     browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
     config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
 ) -> None:
-    """一鍵增量備份全部支援中創作者，或只備份指定創作者。"""
+    """唯一下載入口；備份全部支援中創作者、指定創作者或指定投稿。"""
     settings = load_config(config)
     try:
-        normalized = FanboxClient.creator_id(creator) if creator else None
-        _run_backup(
-            settings, creator=normalized, dry_run=dry_run, max_posts=max_posts,
-            browser=browser, scope=f"creator:{normalized}" if normalized else "supporting",
+        creators = tuple(dict.fromkeys(FanboxClient.creator_id(value) for value in (creator or [])))
+        posts = tuple(dict.fromkeys(
+            value.strip() if value.strip().isdigit() else FanboxClient.post_id_from_url(value)
+            for value in (post or [])
+        ))
+        if creators and posts:
+            raise ValueError("--creator 與 --post 不可同時使用")
+        if (fancard or profile) and not creators:
+            raise ValueError("--fancard 與 --profile 只能搭配 --creator 使用")
+        scope = (
+            f"posts:{','.join(posts)}" if posts else
+            f"creators:{','.join(creators)}" if creators else "supporting"
         )
-    except Exception as exc:
-        handle_remote_error(exc)
-
-
-@app.command()
-def sync(
-    creator: Annotated[str | None, typer.Option("--creator", help="只同步指定 Creator ID（相容指令）")] = None,
-    supporting: Annotated[bool, typer.Option("--supporting", help="同步目前支援中的繪師（受 max_posts_per_run 限制）")] = False,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="只列出投稿，不下載")] = False,
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
-) -> None:
-    """進階／相容指令；使用與 backup 相同的同步服務。"""
-    if bool(creator) == supporting:
-        console.print("[red]請擇一指定 --creator 或 --supporting。[/red]")
-        raise typer.Exit(2)
-    settings = load_config(config)
-    try:
-        normalized = FanboxClient.creator_id(creator) if creator else None
         _run_backup(
-            settings, creator=normalized, dry_run=dry_run, max_posts=None,
-            browser=browser, scope=f"creator:{normalized}" if normalized else "supporting",
+            settings, creators=creators, posts=posts, dry_run=dry_run,
+            max_posts=max_posts, browser=browser, scope=scope,
+            include_profile=profile if creators else True,
+            include_fancard=fancard if creators else True,
         )
+    except ValueError as exc:
+        console.print(f"[red]備份參數錯誤：[/red]{exc}")
+        raise typer.Exit(2) from exc
     except Exception as exc:
         handle_remote_error(exc)
 

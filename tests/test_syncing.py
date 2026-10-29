@@ -56,6 +56,7 @@ def post(post_id: str, creator_id: str, fingerprint: str) -> Post:
 def test_creator_input_accepts_id_home_and_post_url():
     assert FanboxClient.creator_id("alice") == "alice"
     assert FanboxClient.creator_id("https://www.fanbox.cc/@alice") == "alice"
+    assert FanboxClient.creator_id("https://alice.fanbox.cc") == "alice"
     assert FanboxClient.creator_id("https://www.fanbox.cc/@alice/posts/123") == "alice"
 
 
