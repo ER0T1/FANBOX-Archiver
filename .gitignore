@@ -13,4 +13,5 @@ src-tauri/binaries/*.exe
 FANBOX/
 config.yaml
 *.log
-規劃與想法/
+規劃與想法/*
+!規劃與想法/開發規劃.md
