@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**正式版本：v1.3.10（2026-10-30）**
+**正式版本：v1.3.11（2026-10-30）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -20,6 +20,11 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.11 更新重點
+
+- 重新設計備份頁右上角「工作歷史」為符合深色／淺色主題的膠囊式次要操作，補齊 hover 與鍵盤焦點狀態。
+- Creator 搜尋下拉選單現在會在點擊元件外空白處時關閉，並同步更新 `aria-expanded`；再次點擊搜尋框仍可正常開啟。
 
 ## v1.3.10 更新重點
 

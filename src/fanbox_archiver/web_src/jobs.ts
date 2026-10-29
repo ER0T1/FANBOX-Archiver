@@ -292,7 +292,29 @@ namespace FanboxUI {
     const input = h("input", {type: "search", placeholder: "搜尋名稱或 Creator ID…", autocomplete: "off",
       role: "combobox", "aria-label": "搜尋並加入創作者", "aria-expanded": "false"}) as HTMLInputElement;
     const menu = h("div", {class: "creator-combobox-menu", role: "listbox", hidden: true});
+    const combobox = h("div", {class: "creator-combobox form-field"}, h("span", {}, "加入創作者"), input, menu);
     let activeIndex = 0;
+    let listeningOutside = false;
+    const closeMenu = (): void => {
+      menu.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      if (listeningOutside) {
+        document.removeEventListener("pointerdown", handleOutsidePointer);
+        listeningOutside = false;
+      }
+    };
+    const handleOutsidePointer = (event: PointerEvent): void => {
+      if (!combobox.isConnected || !combobox.contains(event.target as Node)) closeMenu();
+    };
+    const openMenu = (): void => {
+      renderCandidates();
+      menu.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      if (!listeningOutside) {
+        document.addEventListener("pointerdown", handleOutsidePointer);
+        listeningOutside = true;
+      }
+    };
     const renderSelected = (): void => {
       count.textContent = `已選 ${selected.length} 位`;
       selectedList.replaceChildren(...(selected.length ? selected.map(id => {
@@ -306,7 +328,7 @@ namespace FanboxUI {
     const choose = (id: string): void => {
       if (!selected.includes(id)) selected.push(id);
       input.value = ""; activeIndex = 0; renderSelected(); renderCandidates();
-      menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.focus();
+      input.focus(); closeMenu();
     };
     const renderCandidates = (): void => {
       const matches = filterBackupCreators(creators, input.value, selected);
@@ -316,11 +338,12 @@ namespace FanboxUI {
         onclick: () => choose(item.creator_id)}, h("strong", {}, item.name), h("small", {}, `@${item.creator_id}`)))
         : [h("p", {class: "empty compact"}, "沒有符合的創作者。")]))
     };
-    input.addEventListener("focus", () => { renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
-    input.addEventListener("input", () => { activeIndex = 0; renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
+    input.addEventListener("focus", openMenu);
+    input.addEventListener("click", () => { if (menu.hidden) openMenu(); });
+    input.addEventListener("input", () => { activeIndex = 0; openMenu(); });
     input.addEventListener("keydown", event => {
       const matches = filterBackupCreators(creators, input.value, selected);
-      if (event.key === "Escape") { menu.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
+      if (event.key === "Escape") { closeMenu(); return; }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault(); activeIndex = Math.max(0, Math.min(matches.length - 1,
           activeIndex + (event.key === "ArrowDown" ? 1 : -1))); renderCandidates(); return;
@@ -335,10 +358,10 @@ namespace FanboxUI {
       actions.onStart([...selected], preview, Number(maxPosts.value), mode, includeProfile.checked, includeFancard.checked);
     return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
       h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")),
-      h("button", {type: "button", class: "secondary", onclick: actions.onHistory}, "工作歷史")),
+      h("button", {type: "button", class: "history-button", "aria-label": "工作歷史", onclick: actions.onHistory}, "工作歷史")),
     activeJobNotice(activeJob),
     h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); if (!blocked) start("full", dryRun.checked); }},
-      h("div", {class: "creator-combobox form-field"}, h("span", {}, "加入創作者"), input, menu),
+      combobox,
       h("section", {class: "selected-creators", "aria-live": "polite"}, h("div", {class: "selected-creators-heading"},
         h("span", {}, "本次備份清單"), count), selectedList),
       h("label", {}, h("span", {}, "本次投稿上限"), maxPosts),

@@ -756,7 +756,30 @@ var FanboxUI;
         const input = FanboxUI.h("input", { type: "search", placeholder: "搜尋名稱或 Creator ID…", autocomplete: "off",
             role: "combobox", "aria-label": "搜尋並加入創作者", "aria-expanded": "false" });
         const menu = FanboxUI.h("div", { class: "creator-combobox-menu", role: "listbox", hidden: true });
+        const combobox = FanboxUI.h("div", { class: "creator-combobox form-field" }, FanboxUI.h("span", {}, "加入創作者"), input, menu);
         let activeIndex = 0;
+        let listeningOutside = false;
+        const closeMenu = () => {
+            menu.hidden = true;
+            input.setAttribute("aria-expanded", "false");
+            if (listeningOutside) {
+                document.removeEventListener("pointerdown", handleOutsidePointer);
+                listeningOutside = false;
+            }
+        };
+        const handleOutsidePointer = (event) => {
+            if (!combobox.isConnected || !combobox.contains(event.target))
+                closeMenu();
+        };
+        const openMenu = () => {
+            renderCandidates();
+            menu.hidden = false;
+            input.setAttribute("aria-expanded", "true");
+            if (!listeningOutside) {
+                document.addEventListener("pointerdown", handleOutsidePointer);
+                listeningOutside = true;
+            }
+        };
         const renderSelected = () => {
             count.textContent = `已選 ${selected.length} 位`;
             selectedList.replaceChildren(...(selected.length ? selected.map(id => {
@@ -776,9 +799,8 @@ var FanboxUI;
             activeIndex = 0;
             renderSelected();
             renderCandidates();
-            menu.hidden = true;
-            input.setAttribute("aria-expanded", "false");
             input.focus();
+            closeMenu();
         };
         const renderCandidates = () => {
             const matches = filterBackupCreators(creators, input.value, selected);
@@ -788,13 +810,14 @@ var FanboxUI;
                 onclick: () => choose(item.creator_id) }, FanboxUI.h("strong", {}, item.name), FanboxUI.h("small", {}, `@${item.creator_id}`)))
                 : [FanboxUI.h("p", { class: "empty compact" }, "沒有符合的創作者。")]));
         };
-        input.addEventListener("focus", () => { renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
-        input.addEventListener("input", () => { activeIndex = 0; renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
+        input.addEventListener("focus", openMenu);
+        input.addEventListener("click", () => { if (menu.hidden)
+            openMenu(); });
+        input.addEventListener("input", () => { activeIndex = 0; openMenu(); });
         input.addEventListener("keydown", event => {
             const matches = filterBackupCreators(creators, input.value, selected);
             if (event.key === "Escape") {
-                menu.hidden = true;
-                input.setAttribute("aria-expanded", "false");
+                closeMenu();
                 return;
             }
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -811,8 +834,8 @@ var FanboxUI;
         });
         renderSelected();
         const start = (mode, preview) => actions.onStart([...selected], preview, Number(maxPosts.value), mode, includeProfile.checked, includeFancard.checked);
-        return FanboxUI.h("section", { class: "page backup-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP CONTROL"), FanboxUI.h("h1", {}, "開始備份"), FanboxUI.h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")), FanboxUI.h("button", { type: "button", class: "secondary", onclick: actions.onHistory }, "工作歷史")), activeJobNotice(activeJob), FanboxUI.h("form", { class: "backup-form", onsubmit: (event) => { event.preventDefault(); if (!blocked)
-                start("full", dryRun.checked); } }, FanboxUI.h("div", { class: "creator-combobox form-field" }, FanboxUI.h("span", {}, "加入創作者"), input, menu), FanboxUI.h("section", { class: "selected-creators", "aria-live": "polite" }, FanboxUI.h("div", { class: "selected-creators-heading" }, FanboxUI.h("span", {}, "本次備份清單"), count), selectedList), FanboxUI.h("label", {}, FanboxUI.h("span", {}, "本次投稿上限"), maxPosts), FanboxUI.h("label", { class: "checkbox" }, dryRun, FanboxUI.h("span", {}, "完整備份只預覽，不下載")), FanboxUI.h("label", { class: "checkbox" }, includeProfile, FanboxUI.h("span", {}, "拉取個人資料")), FanboxUI.h("label", { class: "checkbox" }, includeFancard, FanboxUI.h("span", {}, "拉取粉絲卡")), FanboxUI.h("button", { type: "submit", class: "primary", disabled: blocked }, "開始完整備份"), FanboxUI.h("div", { class: "metadata-actions" }, FanboxUI.h("div", {}, FanboxUI.h("strong", {}, "單項拉取"), FanboxUI.h("small", {}, "立即寫入封存，不掃描或下載投稿。")), FanboxUI.h("div", { class: "metadata-buttons" }, FanboxUI.h("button", { type: "button", disabled: blocked,
+        return FanboxUI.h("section", { class: "page backup-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP CONTROL"), FanboxUI.h("h1", {}, "開始備份"), FanboxUI.h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")), FanboxUI.h("button", { type: "button", class: "history-button", "aria-label": "工作歷史", onclick: actions.onHistory }, "工作歷史")), activeJobNotice(activeJob), FanboxUI.h("form", { class: "backup-form", onsubmit: (event) => { event.preventDefault(); if (!blocked)
+                start("full", dryRun.checked); } }, combobox, FanboxUI.h("section", { class: "selected-creators", "aria-live": "polite" }, FanboxUI.h("div", { class: "selected-creators-heading" }, FanboxUI.h("span", {}, "本次備份清單"), count), selectedList), FanboxUI.h("label", {}, FanboxUI.h("span", {}, "本次投稿上限"), maxPosts), FanboxUI.h("label", { class: "checkbox" }, dryRun, FanboxUI.h("span", {}, "完整備份只預覽，不下載")), FanboxUI.h("label", { class: "checkbox" }, includeProfile, FanboxUI.h("span", {}, "拉取個人資料")), FanboxUI.h("label", { class: "checkbox" }, includeFancard, FanboxUI.h("span", {}, "拉取粉絲卡")), FanboxUI.h("button", { type: "submit", class: "primary", disabled: blocked }, "開始完整備份"), FanboxUI.h("div", { class: "metadata-actions" }, FanboxUI.h("div", {}, FanboxUI.h("strong", {}, "單項拉取"), FanboxUI.h("small", {}, "立即寫入封存，不掃描或下載投稿。")), FanboxUI.h("div", { class: "metadata-buttons" }, FanboxUI.h("button", { type: "button", disabled: blocked,
             onclick: () => start("profile", false) }, "拉取個人資料"), FanboxUI.h("button", { type: "button", disabled: blocked, onclick: () => start("fancard", false) }, "拉取粉絲卡")))), FanboxUI.h("p", { class: "notice" }, "同一時間只允許一個備份工作；安全停止會在目前投稿處理完成後生效。"));
     }
     FanboxUI.renderBackupFormPage = renderBackupFormPage;

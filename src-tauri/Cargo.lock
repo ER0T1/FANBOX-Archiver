@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "fanbox-archiver-desktop"
-version = "1.3.10"
+version = "1.3.11"
 dependencies = [
  "log",
  "rfd",
