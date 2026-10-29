@@ -193,8 +193,9 @@ def test_retry_creates_new_job_with_same_request(tmp_path: Path):
     manager = BackupJobManager(config(tmp_path), use_case_factory=FailsOnceUseCase)
     try:
         first = manager.submit(BackupRequest(
-            creator="alice", dry_run=False, max_posts=7,
-            scope="creator:alice", mode="profile",
+            creators=("alice", "bob"), dry_run=False, max_posts=7,
+            scope="creators:alice,bob", mode="full",
+            include_profile=False, include_fancard=True,
         ))
         failed = manager.wait(first["job_id"])
         assert failed["status"] == "failed"
@@ -205,6 +206,9 @@ def test_retry_creates_new_job_with_same_request(tmp_path: Path):
         completed = manager.wait(retried["job_id"])
         assert completed["status"] == "completed"
         assert completed["request"] == failed["request"]
+        assert completed["request"]["creators"] == ("alice", "bob")
+        assert completed["request"]["include_profile"] is False
+        assert completed["request"]["include_fancard"] is True
         assert manager.get(first["job_id"])["status"] == "failed"
     finally:
         manager.close()

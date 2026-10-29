@@ -35,8 +35,14 @@ namespace FanboxUI {
     const checkUpdates = settingCheckbox("檢查遠端更新", value.sync.check_updates);
     const preserveDeleted = settingCheckbox("保留遠端已刪除投稿的本機備份", value.sync.preserve_deleted_posts);
     const rotate = settingCheckbox("輪替創作者處理順序", value.sync.rotate_creators);
-    const maxPosts = settingNumber("每次投稿上限", value.sync.max_posts_per_run, 1, 100);
+    const maxPosts = settingNumber(
+      "備份表單預設投稿上限", value.sync.max_posts_per_run, 1, 100, 1,
+      "建立工作時可針對單次備份覆寫，不會反向修改此設定。",
+    );
     const unchangedStop = settingNumber("連續未變時停止回補", value.sync.recent_unchanged_stop_count, 1, 500);
+    const defaultDryRun = settingCheckbox("完整備份只預覽，不下載", value.backup_defaults.dry_run);
+    const defaultProfile = settingCheckbox("預設拉取個人資料", value.backup_defaults.include_profile);
+    const defaultFancard = settingCheckbox("預設拉取粉絲卡", value.backup_defaults.include_fancard);
     const markdown = settingCheckbox("產生 Markdown", value.markdown.enabled);
     const frontMatter = settingCheckbox("加入 YAML front matter", value.markdown.yaml_front_matter);
     const relativePaths = settingCheckbox("Markdown 使用相對圖片路徑", value.markdown.relative_image_paths);
@@ -59,6 +65,9 @@ namespace FanboxUI {
         preserve_deleted_posts: preserveDeleted.input.checked, rotate_creators: rotate.input.checked,
         max_posts_per_run: Number(maxPosts.input.value),
         recent_unchanged_stop_count: Number(unchangedStop.input.value),
+      }, backup_defaults: {
+        dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
+        include_fancard: defaultFancard.input.checked,
       }, markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
@@ -72,6 +81,9 @@ namespace FanboxUI {
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "SYNC"), h("h2", {}, "同步"),
       h("div", {class: "settings-grid"}, maxPosts.node, unchangedStop.node),
       h("div", {class: "setting-toggles"}, skipCompleted.node, checkUpdates.node, preserveDeleted.node, rotate.node)),
+    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "BACKUP DEFAULTS"), h("h2", {}, "新備份表單預設值"),
+      h("p", {class: "setting-help"}, "每次進入新工作表單時套用；重試工作仍沿用原工作設定。"),
+      h("div", {class: "setting-toggles"}, defaultDryRun.node, defaultProfile.node, defaultFancard.node)),
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT"), h("h2", {}, "Markdown 與日誌"),
       h("div", {class: "settings-grid"}, h("label", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
       h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node, fileLogs.node)),

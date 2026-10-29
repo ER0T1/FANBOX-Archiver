@@ -175,10 +175,13 @@ namespace FanboxUI {
     error?: string | null;
     request: {
       creator?: string | null;
+      creators?: string[];
       dry_run?: boolean;
       max_posts?: number;
       mode?: string;
       scope?: string;
+      include_profile?: boolean | null;
+      include_fancard?: boolean | null;
     };
     result?: WebJobResult | null;
     events?: WebJobEvent[];
@@ -211,10 +214,12 @@ namespace FanboxUI {
   }
 
   export interface BackupJobPayload {
-    creator: string | null;
+    creators: string[];
     dry_run: boolean;
     max_posts: number;
     mode: "full" | "profile" | "fancard";
+    include_profile: boolean;
+    include_fancard: boolean;
   }
 
   export interface DownloadSettings {
@@ -239,6 +244,12 @@ namespace FanboxUI {
     recent_unchanged_stop_count: number;
   }
 
+  export interface BackupDefaultsSettings {
+    dry_run: boolean;
+    include_profile: boolean;
+    include_fancard: boolean;
+  }
+
   export interface MarkdownSettings {
     enabled: boolean;
     yaml_front_matter: boolean;
@@ -255,6 +266,7 @@ namespace FanboxUI {
   export interface EditableSettings {
     download: DownloadSettings;
     sync: SyncSettings;
+    backup_defaults: BackupDefaultsSettings;
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }
@@ -269,6 +281,7 @@ namespace FanboxUI {
   export interface SettingsPatch {
     download: Omit<DownloadSettings, "max_concurrent">;
     sync: Omit<SyncSettings, "supporting_only">;
+    backup_defaults: BackupDefaultsSettings;
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }

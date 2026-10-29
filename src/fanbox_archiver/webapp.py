@@ -44,9 +44,14 @@ class SecurityHeadersMiddleware:
 
 class BackupJobBody(BaseModel):
     creator: str | None = Field(default=None, max_length=200)
-    dry_run: bool = True
+    creators: list[Annotated[str, Field(max_length=200)]] = Field(
+        default_factory=list, max_length=100
+    )
+    dry_run: bool = False
     max_posts: int | None = Field(default=None, ge=1, le=100)
     mode: Literal["full", "profile", "fancard"] = "full"
+    include_profile: bool = True
+    include_fancard: bool = True
 
 
 class DownloadConfigPatch(BaseModel):
@@ -72,6 +77,13 @@ class SyncConfigPatch(BaseModel):
     recent_unchanged_stop_count: int | None = Field(None, ge=1, le=500)
 
 
+class BackupDefaultsConfigPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dry_run: bool | None = None
+    include_profile: bool | None = None
+    include_fancard: bool | None = None
+
+
 class MarkdownConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool | None = None
@@ -91,6 +103,7 @@ class ConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     download: DownloadConfigPatch | None = None
     sync: SyncConfigPatch | None = None
+    backup_defaults: BackupDefaultsConfigPatch | None = None
     markdown: MarkdownConfigPatch | None = None
     logging: LoggingConfigPatch | None = None
 
@@ -177,17 +190,28 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     @app.post("/api/jobs/backup", status_code=202, dependencies=[Depends(require_mutation_token)])
     async def start_backup(body: BackupJobBody):
         try:
-            creator = FanboxClient.creator_id(body.creator) if body.creator else None
+            raw_creators = [*body.creators]
+            if body.creator:
+                raw_creators.append(body.creator)
+            creators = tuple(dict.fromkeys(
+                FanboxClient.creator_id(value) for value in raw_creators
+            ))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
-            base_scope = f"creator:{creator}" if creator else "supporting"
+            base_scope = (
+                "supporting" if not creators else
+                f"creator:{creators[0]}" if len(creators) == 1 else
+                f"creators:{','.join(creators)}"
+            )
             return app.state.jobs.submit(BackupRequest(
-                creator=creator,
+                creators=creators,
                 dry_run=body.dry_run,
                 max_posts=body.max_posts,
                 scope=(base_scope if body.mode == "full" else f"{base_scope}:{body.mode}"),
                 mode=body.mode,
+                include_profile=body.include_profile,
+                include_fancard=body.include_fancard,
             ))
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

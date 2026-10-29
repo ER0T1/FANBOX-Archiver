@@ -19,6 +19,29 @@ test("TypeScript core creates independent initial state", () => {
   assert.equal(second.view, "posts");
   assert.equal(second.postNavigation, null);
   assert.equal(second.activeJob, null);
+  assert.equal(second.backupScreen, "form");
+  assert.equal(second.backupJobId, null);
+});
+
+test("backup creator helpers filter selected items and summarize scope", () => {
+  const creators = [
+    {creator_id: "alice", name: "Alice"},
+    {creator_id: "bob-studio", name: "Bob Studio"},
+  ];
+  assert.deepEqual(
+    Array.from(ui.filterBackupCreators(creators, "BOB", ["alice"]), item => item.creator_id),
+    ["bob-studio"],
+  );
+  assert.equal(ui.jobCreatorLabel({request: {creators: []}}, creators), "全部創作者");
+  assert.equal(
+    ui.jobCreatorLabel({request: {creators: ["alice"]}}, creators),
+    "Alice（@alice）",
+  );
+  assert.equal(
+    ui.jobCreatorLabel({request: {creators: ["alice", "bob-studio"]}}, creators),
+    "2 位創作者",
+  );
+  assert.deepEqual(Array.from(ui.requestCreators({creator: "alice"})), ["alice"]);
 });
 
 test("TypeScript core identifies active jobs and labels global work", () => {

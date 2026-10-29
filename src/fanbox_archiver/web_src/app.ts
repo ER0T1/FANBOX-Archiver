@@ -36,6 +36,10 @@ namespace FanboxUI {
       state.view = view;
       state.current = null;
       state.page = 1;
+      if (view === "backup") {
+        state.backupScreen = "form";
+        state.backupJobId = null;
+      }
       if (view !== "creator") state.creatorId = null;
       setActiveNav(view);
       setSearch(view);
@@ -243,6 +247,8 @@ namespace FanboxUI {
 
     async function showJob(jobId: string, creators: CreatorSummary[], jobs: WebJob[]): Promise<void> {
       try {
+        state.backupScreen = "job";
+        state.backupJobId = jobId;
         renderJob(await getJob(jobId), creators, jobs);
       } catch (error) {
         errorView(error);
@@ -255,7 +261,8 @@ namespace FanboxUI {
       const page = renderBackupJobPage(job, creators, jobs, state.jobFilter, state.activeJob, {
         onCancel: jobId => void cancelBackupJob(jobId),
         onRetry: jobId => void retryBackupJob(jobId),
-        onNew: () => renderBackupForm(creators, jobs),
+        onNew: () => { state.backupScreen = "form"; state.backupJobId = null; void loadBackup(false); },
+        onHistory: () => { state.backupScreen = "history"; state.backupJobId = null; void loadBackup(false); },
         onShow: jobId => void showJob(jobId, creators, jobs),
         onFilter: value => {
           state.jobFilter = value;
@@ -268,39 +275,62 @@ namespace FanboxUI {
       scheduleJobRefresh();
     }
 
-    function renderBackupForm(creators: CreatorSummary[], jobs: WebJob[] = []): void {
-      app.replaceChildren(renderBackupFormPage(creators, jobs, state.jobFilter, state.activeJob, {
-        onStart: (creator, dryRun, maxPosts, mode) => void startBackup(creator, dryRun, maxPosts, mode),
-        onShow: jobId => void showJob(jobId, creators, jobs),
-        onFilter: value => {
-          state.jobFilter = value;
-          renderBackupForm(creators, jobs);
-        },
+    function renderBackupForm(creators: CreatorSummary[], settings: SettingsResponse): void {
+      const value = settings.editable;
+      app.replaceChildren(renderBackupFormPage(creators, {
+        dryRun: value.backup_defaults.dry_run,
+        includeProfile: value.backup_defaults.include_profile,
+        includeFancard: value.backup_defaults.include_fancard,
+        maxPosts: value.sync.max_posts_per_run,
+      }, state.activeJob, {
+        onStart: (creators, dryRun, maxPosts, mode, includeProfile, includeFancard) =>
+          void startBackup(creators, dryRun, maxPosts, mode, includeProfile, includeFancard),
+        onHistory: () => { state.backupScreen = "history"; void loadBackup(false); },
       }));
       scheduleJobRefresh();
+    }
+
+    function renderBackupHistory(creators: CreatorSummary[], jobs: WebJob[]): void {
+      app.replaceChildren(renderBackupHistoryPage(jobs, creators, state.jobFilter, {
+        onNew: () => { state.backupScreen = "form"; void loadBackup(false); },
+        onShow: jobId => void showJob(jobId, creators, jobs),
+        onFilter: value => { state.jobFilter = value; renderBackupHistory(creators, jobs); },
+      }));
     }
 
     async function loadBackup(showLoading = true): Promise<void> {
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
       try {
-        const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+        const [creatorData, jobData, settings] = await Promise.all([getCreators(), getJobs(), getSettings()]);
         updateActiveJob(jobData.items);
         const backupJobs = jobData.items.filter(item => item.kind === "backup");
-        const selected = backupJobs.find(isActiveJob) ?? backupJobs[0];
-        if (selected) renderJob(await getJob(selected.job_id), creatorData.items, backupJobs);
-        else renderBackupForm(creatorData.items);
+        const active = backupJobs.find(isActiveJob);
+        if (active) {
+          state.backupScreen = "job";
+          state.backupJobId = active.job_id;
+          renderJob(await getJob(active.job_id), creatorData.items, backupJobs);
+        } else if (state.backupScreen === "job" && state.backupJobId) {
+          const selected = backupJobs.find(item => item.job_id === state.backupJobId);
+          if (selected) renderJob(await getJob(selected.job_id), creatorData.items, backupJobs);
+          else { state.backupScreen = "form"; state.backupJobId = null; renderBackupForm(creatorData.items, settings); }
+        } else if (state.backupScreen === "history") renderBackupHistory(creatorData.items, backupJobs);
+        else renderBackupForm(creatorData.items, settings);
       } catch (error) {
         errorView(error);
       }
     }
 
     async function startBackup(
-      creator: string, dryRun: boolean, maxPosts: number,
+      creators: string[], dryRun: boolean, maxPosts: number,
       mode: "full" | "profile" | "fancard" = "full",
+      includeProfile = true, includeFancard = true,
     ): Promise<void> {
       try {
-        const job = await startBackupJob({creator: creator || null, dry_run: dryRun, max_posts: maxPosts, mode}, sessionToken);
+        const job = await startBackupJob({creators, dry_run: dryRun, max_posts: maxPosts, mode,
+          include_profile: includeProfile, include_fancard: includeFancard}, sessionToken);
+        state.backupScreen = "job";
+        state.backupJobId = job.job_id;
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
         updateActiveJob(jobData.items);
         renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));

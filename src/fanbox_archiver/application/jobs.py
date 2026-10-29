@@ -245,7 +245,7 @@ class BackupJobManager:
             ]
             self._jobs[str(row["job_id"])] = BackupJob(
                 job_id=str(row["job_id"]),
-                request=(BackupRequest(**request_data) if kind == "backup" else request_data),
+                request=(self._restore_backup_request(request_data) if kind == "backup" else request_data),
                 cancellation=CancellationToken(),
                 kind=kind,
                 status=str(row["status"]),
@@ -296,3 +296,10 @@ class BackupJobManager:
         if is_dataclass(request):
             return asdict(request)
         return dict(request)
+
+    @staticmethod
+    def _restore_backup_request(value: dict[str, Any]) -> BackupRequest:
+        data = dict(value)
+        data["creators"] = tuple(data.get("creators") or ())
+        data["posts"] = tuple(data.get("posts") or ())
+        return BackupRequest(**data)

@@ -131,12 +131,31 @@ async def test_backup_job_mutations_require_session_token(tmp_path: Path):
 
         accepted = await client.post(
             "/api/jobs/backup",
-            json={"creator": "https://www.fanbox.cc/@alice", "dry_run": True, "max_posts": 3},
+            json={
+                "creators": [
+                    "https://www.fanbox.cc/@alice", "https://bob.fanbox.cc", "alice",
+                ],
+                "dry_run": True, "max_posts": 3,
+                "include_profile": False, "include_fancard": True,
+            },
             headers={"X-Fanbox-Token": app.state.session_token},
         )
         assert accepted.status_code == 202
         assert accepted.json()["job_id"] == "job-1"
-        assert app.state.jobs.submitted[-1].mode == "full"
+        request = app.state.jobs.submitted[-1]
+        assert request.mode == "full"
+        assert request.creators == ("alice", "bob")
+        assert request.scope == "creators:alice,bob"
+        assert request.include_profile is False
+        assert request.include_fancard is True
+
+        all_creators = await client.post(
+            "/api/jobs/backup", json={"creators": [], "dry_run": False},
+            headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert all_creators.status_code == 202
+        assert app.state.jobs.submitted[-1].creators == ()
+        assert app.state.jobs.submitted[-1].scope == "supporting"
 
         profile = await client.post(
             "/api/jobs/backup",
@@ -145,6 +164,7 @@ async def test_backup_job_mutations_require_session_token(tmp_path: Path):
         )
         assert profile.status_code == 202
         assert app.state.jobs.submitted[-1].mode == "profile"
+        assert app.state.jobs.submitted[-1].creators == ("alice",)
         assert app.state.jobs.submitted[-1].scope == "creator:alice:profile"
 
         retry = await client.post(
@@ -165,6 +185,9 @@ async def test_web_settings_are_validated_and_saved(tmp_path: Path):
         settings = await client.get("/api/config")
         assert settings.status_code == 200
         assert settings.json()["editable"]["download"]["request_interval_seconds"] == 3.0
+        assert settings.json()["editable"]["backup_defaults"] == {
+            "dry_run": False, "include_profile": True, "include_fancard": True,
+        }
         assert settings.json()["writable"] is True
 
         denied = await client.patch("/api/config", json={"sync": {"max_posts_per_run": 30}})
@@ -178,14 +201,24 @@ async def test_web_settings_are_validated_and_saved(tmp_path: Path):
 
         saved = await client.patch(
             "/api/config",
-            json={"sync": {"max_posts_per_run": 30}, "logging": {"level": "debug"}},
+            json={
+                "sync": {"max_posts_per_run": 30},
+                "backup_defaults": {
+                    "dry_run": True, "include_profile": False, "include_fancard": True,
+                },
+                "logging": {"level": "debug"},
+            },
             headers={"X-Fanbox-Token": app.state.session_token},
         )
         assert saved.status_code == 200
         assert saved.json()["editable"]["sync"]["max_posts_per_run"] == 30
         assert saved.json()["editable"]["logging"]["level"] == "DEBUG"
+        assert saved.json()["editable"]["backup_defaults"]["dry_run"] is True
+        assert saved.json()["editable"]["backup_defaults"]["include_profile"] is False
         reloaded = type(config).load(config_path)
         assert reloaded.sync.max_posts_per_run == 30
+        assert reloaded.backup_defaults.dry_run is True
+        assert reloaded.backup_defaults.include_profile is False
         assert reloaded.storage.database == config.storage.database
 
 

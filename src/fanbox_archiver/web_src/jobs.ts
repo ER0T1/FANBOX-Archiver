@@ -5,14 +5,24 @@ namespace FanboxUI {
     onCancel(jobId: string): void;
     onRetry(jobId: string): void;
     onNew(): void;
+    onHistory(): void;
     onShow(jobId: string): void;
     onFilter(value: string): void;
   }
 
   export interface BackupFormActions {
-    onStart(creator: string, dryRun: boolean, maxPosts: number, mode: "full" | "profile" | "fancard"): void;
-    onShow(jobId: string): void;
-    onFilter(value: string): void;
+    onStart(
+      creators: string[], dryRun: boolean, maxPosts: number,
+      mode: "full" | "profile" | "fancard", includeProfile: boolean, includeFancard: boolean,
+    ): void;
+    onHistory(): void;
+  }
+
+  export interface BackupFormDefaults {
+    dryRun: boolean;
+    includeProfile: boolean;
+    includeFancard: boolean;
+    maxPosts: number;
   }
 
   export interface MaintenanceActions {
@@ -49,6 +59,28 @@ namespace FanboxUI {
 
   export function isActiveJob(job: WebJob | null | undefined): boolean {
     return Boolean(job && activeStatuses.has(job.status));
+  }
+
+  export function requestCreators(request: WebJob["request"]): string[] {
+    if (Array.isArray(request.creators)) return [...new Set(request.creators.filter(Boolean))];
+    return request.creator ? [request.creator] : [];
+  }
+
+  export function filterBackupCreators(
+    creators: CreatorSummary[], query: string, selected: string[],
+  ): CreatorSummary[] {
+    const term = query.trim().toLocaleLowerCase();
+    const chosen = new Set(selected);
+    return creators.filter(item => !chosen.has(item.creator_id)
+      && (!term || `${item.name} ${item.creator_id}`.toLocaleLowerCase().includes(term)));
+  }
+
+  export function jobCreatorLabel(job: WebJob, creators: CreatorSummary[]): string {
+    const selected = requestCreators(job.request);
+    if (!selected.length) return "全部創作者";
+    if (selected.length > 1) return `${selected.length} 位創作者`;
+    const item = creators.find(creator => creator.creator_id === selected[0]);
+    return item ? `${item.name}（@${item.creator_id}）` : `@${selected[0]}`;
   }
 
   export function statusText(status: JobStatus): string {
@@ -201,11 +233,11 @@ namespace FanboxUI {
       disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => actions.onShow(item.job_id)},
     h("span", {class: `history-status status-${item.status}`}, statusText(item.status)),
     h("span", {class: "history-main"}, h("strong", {}, jobModeLabel(item)),
-      h("small", {}, `${item.request.creator ? `@${item.request.creator}` : "全部創作者"} · ${formatDate(item.created_at)}`)),
+      h("small", {}, `${jobCreatorLabel(item, creators)} · ${formatDate(item.created_at)}`)),
     h("span", {class: "history-result"}, item.result
       ? `成功 ${item.result.success ?? 0} · 失敗 ${item.result.failure ?? 0}` : item.error ? "查看錯誤" : "查看詳情")));
     return h("section", {class: "job-history"}, h("div", {class: "history-heading"},
-      h("div", {}, h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h2", {}, "工作歷史")), filter),
+      h("div", {}, h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h2", {}, "備份紀錄")), filter),
       active ? h("p", {class: "history-notice"}, "工作執行期間會鎖定其他歷史項目，避免離開目前進度畫面。") : null,
       h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "沒有符合條件的工作紀錄。")));
   }
@@ -218,52 +250,118 @@ namespace FanboxUI {
     const blocked = Boolean(activeJob && activeJob.job_id !== job.job_id);
     const plan = (job.events ?? []).find(item => item.kind === "plan_ready");
     const retryable = ["failed", "cancelled", "interrupted"].includes(job.status);
+    const selectedCreators = requestCreators(job.request);
+    const creatorNames = new Map(creators.map(item => [item.creator_id, item.name]));
     const controls = h("div", {class: "job-actions"},
       active ? h("button", {type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id)},
         job.status === "cancelling" ? "正在安全停止…" : "安全停止") : null,
       retryable ? h("button", {type: "button", class: "retry", disabled: blocked,
         onclick: () => actions.onRetry(job.job_id)}, "使用相同設定重試") : null,
-      !active ? h("button", {type: "button", disabled: blocked, onclick: actions.onNew}, "建立新工作") : null);
+      !active ? h("button", {type: "button", disabled: blocked, onclick: actions.onNew}, "建立新工作") : null,
+      h("button", {type: "button", class: "secondary", disabled: active, onclick: actions.onHistory}, "工作歷史"));
     return h("section", {class: "page backup-page", "data-job-id": job.job_id},
       jobPart(h("header", {class: "heading job-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "BACKUP JOB"),
         h("h1", {}, "備份工作"), h("p", {}, jobModeLabel(job))),
       h("span", {class: `job-status status-${job.status}`}, statusText(job.status))), "header"),
       jobPart(activeJobNotice(blocked ? activeJob : null) || h("div", {hidden: true}), "global-active"),
+      jobPart(h("section", {class: "job-scope"}, h("p", {class: "eyebrow"}, "BACKUP SCOPE"),
+        h("h2", {}, jobCreatorLabel(job, creators)), selectedCreators.length
+          ? h("ul", {}, selectedCreators.map(id => h("li", {}, h("strong", {}, creatorNames.get(id) || id), h("span", {}, `@${id}`))))
+          : h("p", {}, "本次工作涵蓋全部支援中的創作者。")), "scope"),
       jobPart(planSummary(plan, creators) || h("div", {hidden: true}), "plan"),
       jobPart(currentActivity(job), "activity"),
       jobPart(h("p", {class: "job-error", hidden: !job.error}, h("strong", {}, "錯誤："), job.error || ""), "error"),
       jobPart(h("div", {class: "result-strip", hidden: !job.result}, job.result ? [
         h("span", {}, "選取 ", h("strong", {}, job.result.selected ?? 0)), h("span", {}, "成功 ", h("strong", {}, job.result.success ?? 0)),
         h("span", {}, "未變 ", h("strong", {}, job.result.unchanged ?? 0)), h("span", {}, "失敗 ", h("strong", {}, job.result.failure ?? 0)),
-      ] : null), "result"), jobPart(controls, "actions"), jobPart(eventLog(job.events ?? []), "details"),
-      jobPart(jobHistory(jobs, job.job_id, creators, filterValue, actions), "history"));
+      ] : null), "result"), jobPart(controls, "actions"), jobPart(eventLog(job.events ?? []), "details"));
   }
 
   export function renderBackupFormPage(
-    creators: CreatorSummary[], jobs: WebJob[], filterValue: string,
+    creators: CreatorSummary[], defaults: BackupFormDefaults,
     activeJob: WebJob | null, actions: BackupFormActions,
   ): HTMLElement {
     const blocked = Boolean(activeJob);
-    const creatorSelect = customSelect({id: "backup-creator", label: "備份範圍", value: "", options: [
-      {value: "", label: "全部支援中的創作者"}, ...creators.map(item => ({value: item.creator_id, label: `${item.name}（${item.creator_id}）`})),
-    ]});
-    const dryRun = h("input", {id: "backup-dry-run", type: "checkbox", checked: true}) as HTMLInputElement;
-    const maxPosts = h("input", {id: "backup-max-posts", type: "number", min: 1, max: 100, value: 20}) as HTMLInputElement;
+    const selected: string[] = [];
+    const dryRun = h("input", {id: "backup-dry-run", type: "checkbox", checked: defaults.dryRun}) as HTMLInputElement;
+    const includeProfile = h("input", {id: "backup-include-profile", type: "checkbox", checked: defaults.includeProfile}) as HTMLInputElement;
+    const includeFancard = h("input", {id: "backup-include-fancard", type: "checkbox", checked: defaults.includeFancard}) as HTMLInputElement;
+    const maxPosts = h("input", {id: "backup-max-posts", type: "number", min: 1, max: 100, value: defaults.maxPosts}) as HTMLInputElement;
+    const selectedList = h("div", {class: "selected-creator-list"});
+    const count = h("strong", {}, "已選 0 位");
+    const input = h("input", {type: "search", placeholder: "搜尋名稱或 Creator ID…", autocomplete: "off",
+      role: "combobox", "aria-label": "搜尋並加入創作者", "aria-expanded": "false"}) as HTMLInputElement;
+    const menu = h("div", {class: "creator-combobox-menu", role: "listbox", hidden: true});
+    let activeIndex = 0;
+    const renderSelected = (): void => {
+      count.textContent = `已選 ${selected.length} 位`;
+      selectedList.replaceChildren(...(selected.length ? selected.map(id => {
+        const creator = creators.find(item => item.creator_id === id);
+        return h("div", {class: "selected-creator"}, h("button", {type: "button", class: "remove-creator",
+          "aria-label": `移除 ${creator?.name || id} @${id}`, onclick: () => {
+            selected.splice(selected.indexOf(id), 1); renderSelected(); renderCandidates();
+          }}, "×"), h("span", {}, h("strong", {}, creator?.name || id), h("small", {}, `@${id}`)));
+      }) : [h("p", {class: "empty compact"}, "尚未指定創作者；將備份全部支援中的創作者")]))
+    };
+    const choose = (id: string): void => {
+      if (!selected.includes(id)) selected.push(id);
+      input.value = ""; activeIndex = 0; renderSelected(); renderCandidates();
+      menu.hidden = true; input.setAttribute("aria-expanded", "false"); input.focus();
+    };
+    const renderCandidates = (): void => {
+      const matches = filterBackupCreators(creators, input.value, selected);
+      activeIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
+      menu.replaceChildren(...(matches.length ? matches.map((item, index) => h("button", {type: "button", role: "option",
+        class: index === activeIndex ? "active" : "", "aria-selected": index === activeIndex ? "true" : "false",
+        onclick: () => choose(item.creator_id)}, h("strong", {}, item.name), h("small", {}, `@${item.creator_id}`)))
+        : [h("p", {class: "empty compact"}, "沒有符合的創作者。")]))
+    };
+    input.addEventListener("focus", () => { renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
+    input.addEventListener("input", () => { activeIndex = 0; renderCandidates(); menu.hidden = false; input.setAttribute("aria-expanded", "true"); });
+    input.addEventListener("keydown", event => {
+      const matches = filterBackupCreators(creators, input.value, selected);
+      if (event.key === "Escape") { menu.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); activeIndex = Math.max(0, Math.min(matches.length - 1,
+          activeIndex + (event.key === "ArrowDown" ? 1 : -1))); renderCandidates(); return;
+      }
+      const candidate = matches[activeIndex];
+      if (event.key === "Enter" && !menu.hidden && candidate) {
+        event.preventDefault(); choose(candidate.creator_id);
+      }
+    });
+    renderSelected();
     const start = (mode: "full" | "profile" | "fancard", preview: boolean): void =>
-      actions.onStart(creatorSelect.value, preview, Number(maxPosts.value), mode);
+      actions.onStart([...selected], preview, Number(maxPosts.value), mode, includeProfile.checked, includeFancard.checked);
     return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
-      h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "先預覽本次變更，再執行正式備份。"))),
+      h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")),
+      h("button", {type: "button", class: "secondary", onclick: actions.onHistory}, "工作歷史")),
     activeJobNotice(activeJob),
     h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); if (!blocked) start("full", dryRun.checked); }},
-      h("label", {}, h("span", {}, "創作者"), creatorSelect), h("label", {}, h("span", {}, "本次投稿上限"), maxPosts),
+      h("div", {class: "creator-combobox form-field"}, h("span", {}, "加入創作者"), input, menu),
+      h("section", {class: "selected-creators", "aria-live": "polite"}, h("div", {class: "selected-creators-heading"},
+        h("span", {}, "本次備份清單"), count), selectedList),
+      h("label", {}, h("span", {}, "本次投稿上限"), maxPosts),
       h("label", {class: "checkbox"}, dryRun, h("span", {}, "完整備份只預覽，不下載")),
+      h("label", {class: "checkbox"}, includeProfile, h("span", {}, "拉取個人資料")),
+      h("label", {class: "checkbox"}, includeFancard, h("span", {}, "拉取粉絲卡")),
       h("button", {type: "submit", class: "primary", disabled: blocked}, "開始完整備份"),
       h("div", {class: "metadata-actions"}, h("div", {}, h("strong", {}, "單項拉取"), h("small", {}, "立即寫入封存，不掃描或下載投稿。")),
         h("div", {class: "metadata-buttons"}, h("button", {type: "button", disabled: blocked,
           onclick: () => start("profile", false)}, "拉取個人資料"),
           h("button", {type: "button", disabled: blocked, onclick: () => start("fancard", false)}, "拉取粉絲卡")))),
-    h("p", {class: "notice"}, "同一時間只允許一個備份工作；安全停止會在目前投稿處理完成後生效。"),
-    jobs.length ? jobHistory(jobs, null, creators, filterValue, actions) : null);
+    h("p", {class: "notice"}, "同一時間只允許一個備份工作；安全停止會在目前投稿處理完成後生效。"));
+  }
+
+  export function renderBackupHistoryPage(
+    jobs: WebJob[], creators: CreatorSummary[], filterValue: string,
+    actions: Pick<BackupViewActions, "onShow" | "onFilter" | "onNew">,
+  ): HTMLElement {
+    return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
+      h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h1", {}, "工作歷史"),
+      h("p", {}, "選擇一筆工作查看進度、結果與完整執行紀錄。")),
+      h("button", {type: "button", class: "primary", onclick: actions.onNew}, "建立新工作")),
+    jobHistory(jobs, null, creators, filterValue, actions));
   }
 
   function verificationHistory(jobs: WebJob[], selectedId: string | null, onShow: (jobId: string) => void): HTMLElement {

@@ -48,6 +48,12 @@ class SyncConfig(BaseModel):
     recent_unchanged_stop_count: int = Field(default=20, ge=1, le=500)
 
 
+class BackupDefaultsConfig(BaseModel):
+    dry_run: bool = False
+    include_profile: bool = True
+    include_fancard: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     write_to_file: bool = True
@@ -68,6 +74,7 @@ class AppConfig(BaseModel):
     download: DownloadConfig = DownloadConfig()
     markdown: MarkdownConfig = MarkdownConfig()
     sync: SyncConfig = SyncConfig()
+    backup_defaults: BackupDefaultsConfig = BackupDefaultsConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
@@ -91,6 +98,7 @@ class AppConfig(BaseModel):
         return {
             "download": value["download"],
             "sync": value["sync"],
+            "backup_defaults": value["backup_defaults"],
             "markdown": value["markdown"],
             "logging": value["logging"],
         }
@@ -98,7 +106,7 @@ class AppConfig(BaseModel):
     def with_editable_patch(self, patch: dict[str, Any]) -> "AppConfig":
         merged = self.model_dump(mode="python")
         for section, values in patch.items():
-            if section not in {"download", "sync", "markdown", "logging"}:
+            if section not in {"download", "sync", "backup_defaults", "markdown", "logging"}:
                 raise ValueError(f"不允許修改設定區段：{section}")
             merged[section] = {**merged[section], **values}
         return type(self).model_validate(merged)

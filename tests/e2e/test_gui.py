@@ -4,6 +4,7 @@ import os
 import socket
 import threading
 import time
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,6 +32,7 @@ class PollingJobFixture:
         self.verify_get_calls = 0
         self.verify_submitted = False
         self.hold_backup = True
+        self.submitted: list = []
 
     def _snapshot(self, *, include_events: bool = True) -> dict:
         completed = not self.hold_backup
@@ -82,6 +84,8 @@ class PollingJobFixture:
 
     def list(self) -> list[dict]:
         items = [self._snapshot(include_events=False)]
+        if self.submitted:
+            items.insert(0, self._submitted_snapshot(include_events=False))
         if self.verify_submitted:
             items.insert(0, self._verify_snapshot(include_events=False))
         return items
@@ -91,8 +95,26 @@ class PollingJobFixture:
             self.verify_get_calls += 1
             return self._verify_snapshot()
         if job_id != "e2e-job":
-            return None
+            return self._submitted_snapshot() if job_id == "submitted-job" and self.submitted else None
         return self._snapshot()
+
+    def submit(self, request) -> dict:
+        self.submitted.append(request)
+        return self._submitted_snapshot()
+
+    def _submitted_snapshot(self, *, include_events: bool = True) -> dict:
+        request = asdict(self.submitted[-1])
+        value = {
+            "job_id": "submitted-job", "kind": "backup", "status": "completed",
+            "created_at": "2026-10-30T00:00:00+00:00", "started_at": None,
+            "finished_at": "2026-10-30T00:00:01+00:00", "updated_at": "2026-10-30T00:00:01+00:00",
+            "error": None, "request": request,
+            "result": {"selected": 0, "success": 0, "failure": 0, "unchanged": 0},
+            "event_count": 0,
+        }
+        if include_events:
+            value["events"] = []
+        return value
 
     def has_active(self) -> bool:
         return self.hold_backup or (self.verify_submitted and self.verify_get_calls < 1)
@@ -144,6 +166,7 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
         database=tmp_path / "FANBOX" / "backup.db",
     ))
     archive = ArchiveService(config)
+    archive.db.record_supporting_creators([("bob", "Bob")])
     start = datetime(2026, 1, 1, tzinfo=UTC)
     for number in range(55):
         title = f"投稿 {number:02d}"
@@ -313,14 +336,46 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     jobs.hold_backup = False
     expect(save_button).to_be_enabled(timeout=5_000)
     expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
-    max_posts = page.get_by_role("spinbutton", name="每次投稿上限")
+    max_posts = page.get_by_role("spinbutton", name="備份表單預設投稿上限")
     max_posts.fill("25")
+    page.get_by_role("checkbox", name="完整備份只預覽，不下載").check()
+    page.get_by_role("checkbox", name="預設拉取個人資料").uncheck()
     save_button.click()
     expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     assert AppConfig.load(config_path).sync.max_posts_per_run == 25
+    assert AppConfig.load(config_path).backup_defaults.dry_run is True
+    assert AppConfig.load(config_path).backup_defaults.include_profile is False
+
+    page.get_by_role("button", name="備份", exact=True).click()
+    expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()
+    expect(page.get_by_role("spinbutton", name="本次投稿上限")).to_have_value("25")
+    expect(page.get_by_role("checkbox", name="完整備份只預覽，不下載")).to_be_checked()
+    expect(page.get_by_role("checkbox", name="拉取個人資料", exact=True)).not_to_be_checked()
+    expect(page.get_by_role("checkbox", name="拉取粉絲卡", exact=True)).to_be_checked()
+    expect(page.get_by_text("尚未指定創作者；將備份全部支援中的創作者", exact=True)).to_be_visible()
+    page.get_by_role("button", name="工作歷史", exact=True).click()
+    expect(page.get_by_role("heading", name="工作歷史", exact=True)).to_be_visible()
+    page.get_by_role("button", name="建立新工作", exact=True).click()
+    creator_search = page.get_by_role("combobox", name="搜尋並加入創作者")
+    creator_search.fill("ali")
+    page.keyboard.press("Enter")
+    creator_search.fill("BOB")
+    page.keyboard.press("Enter")
+    expect(page.get_by_text("已選 2 位", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="移除 Alice @alice")).to_be_visible()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.get_by_role("button", name="開始完整備份", exact=True).click()
+    expect(page.get_by_role("heading", name="2 位創作者", exact=True)).to_be_visible()
+    assert jobs.submitted[-1].creators == ("alice", "bob")
+    assert jobs.submitted[-1].dry_run is True
+    assert jobs.submitted[-1].max_posts == 25
+    assert jobs.submitted[-1].include_profile is False
+    assert jobs.submitted[-1].include_fancard is True
 
     page.get_by_role("button", name="創作者", exact=True).click()
-    page.locator(".creator-card").click()
+    page.locator(".creator-card").filter(has_text="Alice").click()
     expect(page.get_by_role("heading", name="關於創作者", exact=True)).to_be_visible()
     expect(page.get_by_text("離線保存的創作者介紹", exact=True)).to_be_visible()
     expect(page.get_by_role("link", name="作品集", exact=False)).to_be_visible()

@@ -14,6 +14,8 @@ namespace FanboxUI {
     creatorProfile: CreatorProfile | null;
     jobFilter: string;
     activeJob: WebJob | null;
+    backupScreen: "form" | "history" | "job";
+    backupJobId: string | null;
   }
 
   export function createInitialState(): AppState {
@@ -29,6 +31,8 @@ namespace FanboxUI {
       creatorProfile: null,
       jobFilter: "all",
       activeJob: null,
+      backupScreen: "form",
+      backupJobId: null,
     };
   }
 }
