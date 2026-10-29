@@ -79,7 +79,7 @@ function Invoke-SilentInstall([string]$Path) {
     }
 }
 
-function Assert-InstalledPayload {
+function Assert-InstalledPayload([string]$ExpectedVersion) {
     $Application = Join-Path $InstallDirectory "fanbox-archiver-desktop.exe"
     $Sidecar = Join-Path $InstallDirectory "fanbox-archiver-sidecar.exe"
     $Uninstaller = Join-Path $InstallDirectory "uninstall.exe"
@@ -88,18 +88,24 @@ function Assert-InstalledPayload {
             throw "Installed payload is missing: $Path"
         }
     }
+    $InstalledVersion = (Get-Item -LiteralPath $Application).VersionInfo.ProductVersion
+    if ($InstalledVersion -ne $ExpectedVersion) {
+        throw "Installed application version is $InstalledVersion; expected $ExpectedVersion."
+    }
 }
 
 $Installed = $false
 $Succeeded = $false
 try {
     $FirstInstaller = if ($PreviousInstallerPath) { $PreviousInstallerPath } else { $InstallerPath }
+    $FirstVersion = (Get-Item -LiteralPath $FirstInstaller).VersionInfo.ProductVersion
+    $CurrentVersion = (Get-Item -LiteralPath $InstallerPath).VersionInfo.ProductVersion
     Invoke-SilentInstall $FirstInstaller
     $Installed = $true
-    Assert-InstalledPayload
+    Assert-InstalledPayload $FirstVersion
 
     Invoke-SilentInstall $InstallerPath
-    Assert-InstalledPayload
+    Assert-InstalledPayload $CurrentVersion
     if ((Get-Content -LiteralPath $SentinelPath -Raw).Trim() -ne "installer-smoke-data") {
         throw "Archive sentinel changed during the overwrite upgrade."
     }
@@ -124,7 +130,7 @@ try {
 
     $Succeeded = $true
     Write-Host "Installer lifecycle smoke test passed."
-    Write-Host "Install, overwrite upgrade, uninstall, and archive retention were verified."
+    Write-Host "Install $FirstVersion -> $CurrentVersion upgrade, uninstall, and archive retention were verified."
 }
 finally {
     if ($Installed) {

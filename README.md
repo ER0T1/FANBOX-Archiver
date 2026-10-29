@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**正式版本：v1.3.0（2026-10-29）**
+**正式版本：v1.3.1（2026-10-29）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -20,6 +20,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.1 更新重點
+
+- 安裝生命週期測試新增主程式 `ProductVersion` 斷言，確保覆蓋升級不只是檔案存在，而是真的換成目標版本。
+- 使用保存的舊版 NSIS 安裝器實測 `1.2.0 → 1.3.0` 及 `1.3.0 → 1.3.1`，確認版本更新、解除安裝、登錄清理及外部封存資料保留。
+- 新增儲存庫層級 `AGENTS.md`，要求所有後續程式更新同步 README、增加 PATCH 版本、執行驗證並建立本機 Git commit；未經明確要求不得推送。
 
 ## v1.3.0 更新重點
 
@@ -316,7 +322,7 @@ npm run desktop:check
 npm run desktop:dev
 ```
 
-`desktop:sidecar` 會產生 Tauri 規定的 `fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe`；該建置產物不納入 Git。`desktop:build` 會重新產生 sidecar 並建立 NSIS 安裝程式，輸出位於 `src-tauri/target/release/bundle/nsis/`。`desktop:test-installer` 只會在 `build/installer-smoke/` 安裝測試副本，先拒絕覆蓋環境中既有的 FANBOX Archiver，再驗證靜默安裝、覆蓋升級、解除安裝與外部封存資料保留。若要測試真正的跨版本升級，可直接執行 `scripts/test-installer.ps1 -PreviousInstallerPath <舊版安裝程式>`。目前安裝器是未簽章的開發建置；正式公開散發前需加入 Windows 程式碼簽章憑證與簽章驗證。
+`desktop:sidecar` 會產生 Tauri 規定的 `fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe`；該建置產物不納入 Git。`desktop:build` 會重新產生 sidecar 並建立 NSIS 安裝程式，輸出位於 `src-tauri/target/release/bundle/nsis/`。`desktop:test-installer` 只會在 `build/installer-smoke/` 安裝測試副本，先拒絕覆蓋環境中既有的 FANBOX Archiver，再驗證靜默安裝、覆蓋升級、主程式版本、解除安裝與外部封存資料保留。`1.2.0 → 1.3.0` 與 `1.3.0 → 1.3.1` 已用保存的舊版安裝器實測通過；後續版本可執行 `scripts/test-installer.ps1 -PreviousInstallerPath <舊版安裝程式>` 延續驗證。目前本機安裝器是未簽章的開發建置；正式公開散發需由 release workflow 使用 Windows PFX 憑證完成簽章。
 
 ### Windows 正式發布
 
@@ -328,7 +334,7 @@ npm run desktop:dev
 - Secret `WINDOWS_CERTIFICATE_PASSWORD`：PFX 匯出密碼。
 - Variable `WINDOWS_TIMESTAMP_URL`：憑證提供者的 RFC 3161 時間戳服務；未設定時使用 `http://timestamp.digicert.com`。
 
-一般 push／pull request 仍只產生未簽章的 CI artifact，不會接觸正式憑證。Tauri 設定已禁止靜默降級；正式跨版本升級仍應把上一版安裝器傳給 `scripts/test-installer.ps1 -PreviousInstallerPath` 驗證。
+一般 push／pull request 仍只產生未簽章的 CI artifact，不會接觸正式憑證。Tauri 設定已禁止靜默降級；每次正式升版都應把上一版安裝器傳給 `scripts/test-installer.ps1 -PreviousInstallerPath` 驗證。
 
 ## 已知限制
 
