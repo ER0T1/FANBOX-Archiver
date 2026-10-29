@@ -358,7 +358,7 @@ namespace FanboxUI {
       actions.onStart([...selected], preview, Number(maxPosts.value), mode, includeProfile.checked, includeFancard.checked);
     return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
       h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")),
-      h("button", {type: "button", class: "history-button", "aria-label": "工作歷史", onclick: actions.onHistory}, "工作歷史")),
+      h("button", {type: "button", class: "primary", onclick: actions.onHistory}, "工作歷史")),
     activeJobNotice(activeJob),
     h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); if (!blocked) start("full", dryRun.checked); }},
       combobox,

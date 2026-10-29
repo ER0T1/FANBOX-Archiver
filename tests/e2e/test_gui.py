@@ -354,7 +354,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("checkbox", name="拉取粉絲卡", exact=True)).to_be_checked()
     expect(page.get_by_text("尚未指定創作者；將備份全部支援中的創作者", exact=True)).to_be_visible()
     history_button = page.get_by_role("button", name="工作歷史", exact=True)
-    expect(history_button).to_have_class("history-button")
+    expect(history_button).to_have_class("primary")
     creator_search = page.get_by_role("combobox", name="搜尋並加入創作者")
     creator_menu = page.locator(".creator-combobox-menu")
     creator_search.click()

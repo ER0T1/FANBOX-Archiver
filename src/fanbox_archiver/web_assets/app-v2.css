@@ -195,9 +195,6 @@ pre { padding:1rem; overflow:auto; border-radius:12px; background:var(--surface-
 .checkbox input { width:1.15rem; height:1.15rem; accent-color:var(--accent); }
 .primary,.job-actions button { width:max-content; padding:.7rem 1.05rem; border:0; border-radius:11px; color:#fff; background:var(--accent); cursor:pointer; font-weight:750; }
 .primary:hover,.job-actions button:hover { transform:translateY(-1px); filter:brightness(1.04); }
-.history-button { display:inline-flex; flex:0 0 auto; min-height:42px; align-items:center; gap:.7rem; padding:.62rem .78rem .62rem 1rem; color:var(--blue); background:color-mix(in srgb,var(--blue) 9%,var(--surface)); border:1px solid color-mix(in srgb,var(--blue) 36%,var(--line)); border-radius:999px; box-shadow:0 3px 12px color-mix(in srgb,var(--blue) 9%,transparent); cursor:pointer; font-weight:800; }
-.history-button::after { content:"›"; display:grid; width:1.5rem; height:1.5rem; place-items:center; color:var(--blue); background:color-mix(in srgb,var(--blue) 14%,var(--surface)); border-radius:50%; font-size:1.15rem; line-height:1; }
-.history-button:hover,.history-button:focus-visible { color:var(--text); background:color-mix(in srgb,var(--blue) 15%,var(--surface)); border-color:var(--blue); box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 14%,transparent); outline:none; transform:translateY(-1px); }
 .metadata-actions { display:grid; gap:.8rem; margin-top:.35rem; padding-top:1.1rem; border-top:1px solid var(--line); }
 .metadata-actions>div:first-child { display:grid; gap:.2rem; }.metadata-actions small { color:var(--muted); font-weight:400; }
 .metadata-buttons { display:flex; flex-wrap:wrap; gap:.65rem; }
