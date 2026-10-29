@@ -14,6 +14,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect, sync_playwright
 
 from fanbox_archiver.config import AppConfig, StorageConfig
+from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.models import ContentBlock, CreatorProfile, CreatorProfileItem, Post
 from fanbox_archiver.service import ArchiveService
 from fanbox_archiver.webapp import create_app
@@ -182,6 +183,28 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
         "supporterCardImageUrl": None,
     }}, None, None)
     return config, tmp_path / "config.yaml"
+
+
+def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tmp_path: Path):
+    config, _ = _archive_fixture(tmp_path)
+    IndexBuilder(config).build()
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+    index_url = (config.storage.output_dir / "index.html").as_uri()
+
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(f"{index_url}#view=creators")
+    expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    expect(page.get_by_role("link", name="Creator Profile")).to_be_visible()
+    page.get_by_role("link", name="Creator Profile").click()
+    expect(page.get_by_role("heading", name="Alice", exact=True)).to_be_visible()
+    expect(page.get_by_text("離線保存的創作者介紹")).to_be_visible()
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{index_url}#view=creators")
+    expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert not any(url.startswith(("http://", "https://")) for url in requests)
 
 
 @pytest.fixture

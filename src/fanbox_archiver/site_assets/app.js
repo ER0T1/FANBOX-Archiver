@@ -173,15 +173,35 @@
   }
 
   function creatorsView() {
-    return node("div", {}, heading("創作者", "備份範圍、文章數與 Fan Card 月份"), node("div", {class:"creator-grid"}, ...data.creators.map(item =>
-      node("article", {class:"creator-card"}, item.avatar ? node("img", {class:"creator-avatar", src:item.avatar, alt:`${item.name} 頭像`, loading:"lazy"}) : node("div", {class:"avatar-fallback"}, item.name.slice(0,1)), node("div", {}, node("h2", {}, item.name), node("code", {}, item.creator_id),
-        node("p", {class:"muted"}, `${item.post_count} 篇文章 · ${item.fancard_months || 0} 個 Fan Card 月份`),
-        node("button", {class:"text-button", onclick:() => {state.creator=item.creator_id; state.view="posts"; writeHash(); render();}}, "查看內容 →"))))));
+    const terms = normalise(state.q).split(" ").filter(Boolean);
+    const creators = data.creators
+      .filter(item => terms.every(term => normalise(`${item.name} ${item.creator_id}`).includes(term)))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
+    const cards = creators.map(item => node("article", {class:"creator-card"},
+      item.avatar
+        ? node("img", {class:"creator-avatar", src:item.avatar, alt:`${item.name} 頭像`, loading:"lazy"})
+        : node("div", {class:"avatar-fallback"}, item.name.slice(0,1)),
+      node("div", {},
+        node("h2", {}, item.name),
+        node("code", {}, item.creator_id),
+        node("p", {class:"muted"}, `${item.post_count} 篇文章 · ${item.fancard_months || 0} 個 Fan Card 月份 · ${item.profile_version_count || 0} 版 Profile`),
+        node("div", {class:"creator-actions"},
+          item.profile_latest_path ? node("a", {class:"secondary", href:item.profile_latest_path}, "Creator Profile") : null,
+          node("button", {class:"text-button", onclick:() => {
+            state.creator = item.creator_id;
+            state.view = "posts";
+            writeHash();
+            render();
+          }}, "查看文章 →")))));
+    return node("div", {}, heading("創作者", `${creators.length} 位符合目前條件`),
+      node("div", {class:"creator-grid"}, ...(cards.length ? cards : [node("p", {class:"empty"}, "沒有符合條件的創作者。")])));
   }
 
   function fancardsView() {
     const term = normalise(state.q);
-    const cards = data.fancards.filter(card => (!state.creator || card.creator_id === state.creator) && (!term || normalise(`${card.creator_id} ${card.target_month} ${card.plan_title}`).includes(term)));
+    const cards = data.fancards
+      .filter(card => (!state.creator || card.creator_id === state.creator) && (!term || normalise(`${card.creator_id} ${card.target_month} ${card.plan_title}`).includes(term)))
+      .sort((a, b) => String(b.target_month || "").localeCompare(String(a.target_month || "")) || a.creator_id.localeCompare(b.creator_id));
     return node("div", {}, heading("Fan Card", "卡面與方案資訊只保存在本機"), controls(), node("div", {class:"fancard-grid"}, ...(cards.length ? cards.map(card =>
       node("article", {class:"fancard-card"}, card.thumbnail ? node("img", {src:card.thumbnail, alt:`${card.creator_id} ${card.target_month} Fan Card`, loading:"lazy"}) : node("div", {class:"image-placeholder"}, "無卡面"),
         node("div", {class:"fancard-body"}, node("p", {class:"eyebrow"}, card.target_month), node("h2", {}, card.creator_id), node("p", {}, card.plan_title),

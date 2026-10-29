@@ -23,6 +23,7 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         assert 'data-view="posts">投稿' in home.text
         assert 'data-view="fancards"' not in home.text
         assert "/assets/core.js" in home.text
+        assert "/assets/design-tokens.css" in home.text
         assert "/assets/app-v2.js" not in home.text
         assert not (config.storage.output_dir / "_site").exists()
 
@@ -32,6 +33,11 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         assert 'data-command="choose_existing_config"' in desktop.text
         assert 'data-command="choose_archive_folder"' in desktop.text
         assert 'data-command="use_default_config"' in desktop.text
+        assert 'href="design-tokens.css"' in desktop.text
+
+        tokens = await client.get("/assets/design-tokens.css")
+        assert tokens.status_code == 200
+        assert "--accent:#db6611" in tokens.text
 
         listing = await client.get("/api/posts")
         assert listing.status_code == 200

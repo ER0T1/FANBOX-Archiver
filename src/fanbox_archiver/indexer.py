@@ -14,12 +14,12 @@ from urllib.parse import quote, unquote, urlparse
 from .config import AppConfig
 from .database import Database
 from .downloader import sha256_file
-from .models import Post
-from .security import confined_path
+from .models import CreatorProfile, Post
+from .security import confined_path, safe_filename
 from .storage import BackupStorage
 
 
-TEMPLATE_VERSION = 8
+TEMPLATE_VERSION = 9
 TAIPEI = timezone(timedelta(hours=8))
 
 
@@ -37,6 +37,7 @@ class IndexBuilder:
         self.root = config.storage.output_dir.resolve()
         self.db = Database(config.storage.database)
         self.package_assets = Path(__file__).with_name("site_assets")
+        self.shared_assets = Path(__file__).with_name("web_assets")
 
     def build(self, *, force: bool = False) -> IndexBuildResult:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -56,6 +57,16 @@ class IndexBuilder:
             assets.mkdir()
             for name in ("app.css", "app.js", "theme.js", "icons.svg"):
                 shutil.copy2(self.package_assets / name, assets / name)
+            shutil.copy2(self.shared_assets / "design-tokens.css", assets / "design-tokens.css")
+
+            for creator in creators:
+                page_rendered, page_reused, page_warnings, page_state = self._build_profile_pages(
+                    creator, staging, current_site, old_state
+                )
+                rendered += page_rendered
+                reused += page_reused
+                warnings.extend(page_warnings)
+                state_pages.update(page_state)
 
             with self.db.connect() as db:
                 post_rows = list(db.execute("SELECT * FROM posts ORDER BY published_at DESC,post_id DESC"))
@@ -65,6 +76,19 @@ class IndexBuilder:
             self._readable_post_ids = {
                 str(row["post_id"]) for row in completed_versions
                 if row["json_path"] and Path(str(row["json_path"])).is_file()
+            }
+            ordered_readable_ids = [
+                str(row["post_id"]) for row in post_rows
+                if str(row["post_id"]) in self._readable_post_ids
+            ]
+            self._post_neighbors = {
+                post_id: {
+                    "previous": ordered_readable_ids[index - 1] if index > 0 else None,
+                    "next": ordered_readable_ids[index + 1] if index + 1 < len(ordered_readable_ids) else None,
+                    "position": index + 1,
+                    "total": len(ordered_readable_ids),
+                }
+                for index, post_id in enumerate(ordered_readable_ids)
             }
             for row in post_rows:
                 item, page_rendered, page_reused, page_warnings, page_state = self._build_post_pages(
@@ -152,7 +176,8 @@ class IndexBuilder:
         issues: list[str] = []
         site = self.root / "_site"
         for path in (self.root / "index.html", site / "data.js", site / "build.json", site / "state.json",
-                     site / "assets/app.css", site / "assets/app.js"):
+                     site / "assets/app.css", site / "assets/app.js",
+                     site / "assets/design-tokens.css"):
             if not path.is_file():
                 issues.append(f"缺少索引檔案：{path}")
         state = self._read_json(site / "state.json")
@@ -187,8 +212,61 @@ class IndexBuilder:
                 "status": row["status"],
                 "avatar": self._relative_url(self.root / "index.html", icon) if icon.is_file() else None,
                 "fancard_months": 0,
+                "profile_version_count": 0,
+                "profile_latest_path": None,
             })
         return result
+
+    def _build_profile_pages(
+        self, creator: dict, staging: Path, current: Path, old_state: dict,
+    ) -> tuple[int, int, list[str], dict[str, str]]:
+        creator_id = str(creator["creator_id"])
+        versions = self.db.profile_versions(creator_id)
+        creator["profile_version_count"] = len(versions)
+        rendered = reused = 0
+        warnings: list[str] = []
+        state: dict[str, str] = {}
+        completed_pages: list[tuple[int, str]] = []
+        safe_creator = safe_filename(creator_id, fallback="unknown")
+        for version in versions:
+            number = int(version["version_number"])
+            relative = f"creators/{safe_creator}/profile/v{number:04d}.html"
+            source_json = Path(str(version["json_path"] or ""))
+            manifest = Path(str(version["local_path"])) / "manifest.json"
+            manifest_hash = sha256_file(manifest) if manifest.is_file() else "missing"
+            fingerprint = (
+                f"profile:{version['content_fingerprint']}:{manifest_hash}:"
+                f"{version['status']}:{TEMPLATE_VERSION}"
+            )
+            if not source_json.is_file():
+                warnings.append(f"Creator Profile {creator_id} v{number:04d} 缺少 profile.json")
+                continue
+            try:
+                profile = CreatorProfile.model_validate_json(source_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                warnings.append(f"Creator Profile {creator_id} v{number:04d} 無法讀取：{exc}")
+                continue
+            destination = confined_path(staging, Path(relative))
+            if self._reuse_page(relative, fingerprint, current, old_state, destination):
+                reused += 1
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                BackupStorage.atomic_write_text(
+                    destination, self._profile_html(profile, version, destination, versions)
+                )
+                rendered += 1
+            state[relative] = fingerprint
+            if version["status"] == "completed":
+                completed_pages.append((number, relative))
+        if completed_pages:
+            _, latest_relative = max(completed_pages)
+            latest_out = f"creators/{safe_creator}/profile/latest.html"
+            latest_destination = confined_path(staging, Path(latest_out))
+            latest_destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(confined_path(staging, Path(latest_relative)), latest_destination)
+            state[latest_out] = state[latest_relative]
+            creator["profile_latest_path"] = f"_site/{latest_out}"
+        return rendered, reused, warnings, state
 
     def _build_post_pages(self, row, staging: Path, current: Path, old_state: dict):
         post_id = str(row["post_id"])
@@ -374,6 +452,23 @@ class IndexBuilder:
                 blocks.append('<p class="notice">無法解析的內容區塊；完整資料請見 post.json。</p>')
         number = int(version["version_number"])
         nav = self._version_nav(all_versions, number, output, "posts", post.post_id)
+        neighbors = getattr(self, "_post_neighbors", {}).get(post.post_id, {})
+        previous_id = neighbors.get("previous")
+        next_id = neighbors.get("next")
+        post_nav = '<nav class="post-navigation" aria-label="投稿導覽">'
+        post_nav += (
+            f'<a href="../{html.escape(str(previous_id), quote=True)}/latest.html">← 上一篇</a>'
+            if previous_id else '<span></span>'
+        )
+        if neighbors:
+            post_nav += (
+                f'<span>{int(neighbors["position"])} / {int(neighbors["total"])}</span>'
+            )
+        post_nav += (
+            f'<a href="../{html.escape(str(next_id), quote=True)}/latest.html">下一篇 →</a>'
+            if next_id else '<span></span>'
+        )
+        post_nav += "</nav>"
         source_url = html.escape(post.url, quote=True) if self._safe_https(post.url) else "#"
         body = "".join(blocks) or '<p class="empty">此版本沒有可顯示的正文。</p>'
         return self._reader_shell(
@@ -382,9 +477,71 @@ class IndexBuilder:
             metadata=(f"發布 {self._date(post.published_at)} · 更新 {self._date(post.updated_at)} · "
                       f"{self._fee_label(post.fee_required)} · v{number:04d}"),
             body=body,
-            navigation=nav,
+            navigation=post_nav + nav,
             actions=f'<a rel="noreferrer noopener" href="{source_url}">開啟 FANBOX 原文</a>',
             asset_prefix="../../assets",
+        )
+
+    def _profile_html(self, profile: CreatorProfile, version, output: Path, all_versions) -> str:
+        version_root = Path(str(version["local_path"]))
+        blocks: list[str] = []
+        cover_path = Path(str(version["cover_path"] or ""))
+        if cover_path.is_file():
+            cover_url = self._relative_url(output, cover_path)
+            blocks.append(
+                f'<figure class="profile-cover"><a href="{cover_url}">'
+                f'<img src="{cover_url}" alt="Creator Profile 封面"></a></figure>'
+            )
+        description = html.escape(profile.description).replace("\n", "<br>")
+        blocks.append(
+            '<section class="profile-about"><h2>關於創作者</h2>'
+            f'<p>{description or "尚無自我介紹。"}</p></section>'
+        )
+        if profile.profile_items:
+            items: list[str] = []
+            for item in profile.profile_items:
+                image = ""
+                if item.image_path:
+                    source = confined_path(version_root, Path(item.image_path))
+                    if source.is_file():
+                        image_url = self._relative_url(output, source)
+                        image = f'<img loading="lazy" src="{image_url}" alt="">'
+                label = html.escape(item.label or item.type or "Profile 項目")
+                item_description = html.escape(item.description).replace("\n", "<br>")
+                content = f"<strong>{label}</strong>"
+                if item_description:
+                    content += f"<p>{item_description}</p>"
+                if item.url and self._safe_https(item.url):
+                    content = (
+                        f'<a rel="noreferrer noopener" href="{html.escape(item.url, quote=True)}">'
+                        f"{content}</a>"
+                    )
+                items.append(f'<li class="profile-item">{image}<div>{content}</div></li>')
+            blocks.append(
+                '<section class="profile-links"><h2>公開連結與項目</h2>'
+                f'<ul>{"".join(items)}</ul></section>'
+            )
+        flags = [
+            "接受委託" if profile.is_accepting_request else "未開放委託",
+            "已停止活動" if profile.is_stopped else "持續活動",
+        ]
+        if profile.has_adult_content:
+            flags.append("包含成人內容")
+        blocks.append(
+            '<section class="profile-flags" aria-label="Profile 狀態">'
+            + "".join(f'<span class="badge">{html.escape(flag)}</span>' for flag in flags)
+            + "</section>"
+        )
+        number = int(version["version_number"])
+        nav = self._version_nav(all_versions, number, output, "profiles", profile.creator_id)
+        source_url = html.escape(profile.fanbox_url, quote=True) if self._safe_https(profile.fanbox_url) else "#"
+        return self._reader_shell(
+            title=profile.name,
+            eyebrow=f"{profile.creator_id} · Creator Profile",
+            metadata=f"保存 {self._date(version['captured_at'])} · v{number:04d}",
+            body="".join(blocks), navigation=nav,
+            actions=f'<a rel="noreferrer noopener" href="{source_url}">開啟 FANBOX Profile</a>',
+            asset_prefix="../../../assets",
         )
 
     def _embed_html(self, post: Post, block, assets: dict, version_root: Path, output: Path) -> str:
@@ -521,7 +678,7 @@ class IndexBuilder:
         return f"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
-<link rel="icon" href="data:,"><title>{html.escape(title)} · FANBOX Archive</title><script src="{asset_prefix}/theme.js"></script><link rel="stylesheet" href="{asset_prefix}/app.css"></head>
+<link rel="icon" href="data:,"><title>{html.escape(title)} · FANBOX Archive</title><script src="{asset_prefix}/theme.js"></script><link rel="stylesheet" href="{asset_prefix}/app.css"><link rel="stylesheet" href="{asset_prefix}/design-tokens.css"></head>
 <body class="reader-page"><header class="reader-header"><a href="{asset_prefix}/../../index.html">← 回到索引</a><div class="reader-header-actions"><span>私人本機備份</span><button class="icon-button" type="button" data-theme-toggle>◐</button></div></header>
 <main class="reader"><p class="eyebrow">{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1>
 <p class="metadata">{html.escape(metadata)}</p>{navigation}<div class="reader-actions">{actions}</div>
@@ -537,13 +694,14 @@ class IndexBuilder:
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark"><title>FANBOX Archive</title>
-<link rel="icon" href="data:,"><script src="_site/assets/theme.js"></script><link rel="stylesheet" href="_site/assets/app.css"></head><body>
+<link rel="icon" href="data:,"><script src="_site/assets/theme.js"></script><link rel="stylesheet" href="_site/assets/app.css"><link rel="stylesheet" href="_site/assets/design-tokens.css"></head><body>
 <div id="app"><header class="topbar"><strong>FANBOX Archive</strong><span>正在載入本機索引…</span></header>
 <noscript><main class="noscript"><h1>本機備份</h1><p>JavaScript 已停用，以下顯示最近文章。</p><ul>{fallback}</ul></main></noscript></div>
 <script src="_site/data.js"></script><script src="_site/assets/app.js"></script></body></html>"""
 
     def _validate_staging(self, staging: Path, pages: dict[str, str]) -> None:
-        for required in ("assets/app.css", "assets/app.js", "assets/theme.js", "data.js", "build.json", "state.json"):
+        for required in ("assets/app.css", "assets/app.js", "assets/theme.js",
+                         "assets/design-tokens.css", "data.js", "build.json", "state.json"):
             if not confined_path(staging, Path(required)).is_file():
                 raise ValueError(f"索引建置缺少必要檔案：{required}")
         for relative in pages:

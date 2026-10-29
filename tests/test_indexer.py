@@ -7,7 +7,13 @@ from typer.testing import CliRunner
 from fanbox_archiver.cli import app
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.indexer import IndexBuilder
-from fanbox_archiver.models import ContentBlock, Post, TextStyle
+from fanbox_archiver.models import (
+    ContentBlock,
+    CreatorProfile,
+    CreatorProfileItem,
+    Post,
+    TextStyle,
+)
 from fanbox_archiver.service import ArchiveService
 
 
@@ -52,6 +58,27 @@ def archive_fixture(tmp_path: Path) -> tuple[AppConfig, ArchiveService]:
     second.updated_at = datetime(2026, 10, 3)
     second.content_fingerprint = "fingerprint-2"
     archive.save(second, download_assets=False)
+    profile = CreatorProfile(
+        creator_id="alice",
+        name="Alice <作者>",
+        description="第一版介紹 <script>danger</script>",
+        profile_items=[CreatorProfileItem(
+            item_id="website",
+            type="website",
+            label="官方網站",
+            description="公開連結",
+            url="https://example.test/alice",
+        )],
+        is_accepting_request=True,
+        fanbox_url="https://alice.fanbox.cc/",
+        raw={"private": "profile-secret"},
+    )
+    profile.content_fingerprint = profile.calculate_fingerprint()
+    archive.save_profile(profile)
+    updated_profile = profile.model_copy(deep=True)
+    updated_profile.description = "第二版介紹\n仍然離線可讀"
+    updated_profile.content_fingerprint = updated_profile.calculate_fingerprint()
+    archive.save_profile(updated_profile)
     archive.save_fancard({"body": {
         "plan": {"id": "plan", "title": "Gold", "fee": 1000,
                  "description": "Password: private-value", "creatorId": "alice",
@@ -70,11 +97,12 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     result = builder.build()
 
     root = config.storage.output_dir
-    assert result.rendered == 3
+    assert result.rendered == 5
     assert result.reused == 0
     assert (root / "index.html").is_file()
     assert (root / "_site/assets/app.js").is_file()
     assert (root / "_site/assets/theme.js").is_file()
+    assert (root / "_site/assets/design-tokens.css").is_file()
     post_page = (root / "_site/posts/123/v0001.html").read_text(encoding="utf-8")
     assert "安全正文 &lt;b&gt;不是 HTML&lt;/b&gt;" in post_page
     assert "<strong>粗體</strong>" in post_page
@@ -82,6 +110,7 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     assert "UTC+8" not in post_page
     assert "¥500" in post_page
     assert 'src="../../assets/theme.js"' in post_page
+    assert 'href="../../assets/design-tokens.css"' in post_page
     assert "data-theme-toggle" in post_page
     assert "script-src 'none'" not in post_page
     assert 'class="embed-card"' in post_page
@@ -99,12 +128,22 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     assert "data-theme-toggle" in card_page
     assert "方案資訊" in card_page
     assert "方案說明／密碼" not in card_page
+    profile_page = (root / "_site/creators/alice/profile/v0002.html").read_text(encoding="utf-8")
+    assert "第二版介紹<br>仍然離線可讀" in profile_page
+    assert 'href="https://example.test/alice"' in profile_page
+    assert "接受委託" in profile_page
+    assert 'href="v0001.html"' in profile_page
+    assert "profile-secret" not in profile_page
+    assert (root / "_site/creators/alice/profile/latest.html").is_file()
 
     data = (root / "_site/data.js").read_text(encoding="utf-8")
     assert "private-value" not in data
     assert "private-tx" not in data
     assert "private-user" not in data
     assert "不應進入索引" not in data
+    assert "profile-secret" not in data
+    assert '"profile_version_count":2' in data
+    assert '"profile_latest_path":"_site/creators/alice/profile/latest.html"' in data
     assert builder.check() == []
 
 
@@ -142,6 +181,8 @@ def test_fanbox_embed_links_to_local_backup_only_when_readable(tmp_path: Path):
     builder.build(force=True)
     local_page = page_path.read_text(encoding="utf-8")
     assert 'href="../99/latest.html"' in local_page
+    assert '<nav class="post-navigation" aria-label="投稿導覽">' in local_page
+    assert "1 / 2" in local_page
     assert "FANBOX Post · 本機備份" in local_page
     assert (config.storage.output_dir / "_site/posts/99/latest.html").is_file()
 
@@ -152,7 +193,7 @@ def test_index_reuses_pages_and_check_reports_missing_page(tmp_path: Path):
     builder.build()
     second = builder.build()
     assert second.rendered == 0
-    assert second.reused == 3
+    assert second.reused == 5
     rebuilt_data = (config.storage.output_dir / "_site/data.js").read_text(encoding="utf-8")
     assert "測試" in rebuilt_data
     assert '"fee_required":500' in rebuilt_data

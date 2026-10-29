@@ -1,0 +1,71 @@
+:root {
+  color-scheme: light dark;
+  --bg:#f4f6f9;
+  --surface:#fff;
+  --surface-2:#f7f8fb;
+  --text:#1d2430;
+  --muted:#687181;
+  --line:#dce1e8;
+  --accent:#db6611;
+  --accent-soft:#fff0e3;
+  --blue:#3478c9;
+  --green:#16855a;
+  --yellow:#ba7500;
+  --red:#bd3f45;
+  --purple:#7657c8;
+  --amber:#ba7500;
+  --danger:#bd3f45;
+  --success:#16855a;
+  --shadow:0 10px 30px rgba(28,35,48,.07);
+  --radius:16px;
+  font-family:Inter,"Noto Sans TC","Segoe UI",system-ui,sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme:light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme:dark;
+  --bg:#101419;
+  --surface:#181d24;
+  --surface-2:#212731;
+  --text:#eef1f5;
+  --muted:#a4adba;
+  --line:#343c48;
+  --accent:#ff983f;
+  --accent-soft:#35271d;
+  --blue:#74aff3;
+  --green:#5bd3a0;
+  --yellow:#f0b754;
+  --red:#ff858a;
+  --purple:#b3a0f1;
+  --amber:#f0b754;
+  --danger:#ff858a;
+  --success:#5bd3a0;
+  --shadow:0 12px 34px rgba(0,0,0,.2);
+}
+
+@media (prefers-color-scheme:dark) {
+  :root:not([data-theme]),
+  :root[data-theme="auto"] {
+    color-scheme:dark;
+    --bg:#101419;
+    --surface:#181d24;
+    --surface-2:#212731;
+    --text:#eef1f5;
+    --muted:#a4adba;
+    --line:#343c48;
+    --accent:#ff983f;
+    --accent-soft:#35271d;
+    --blue:#74aff3;
+    --green:#5bd3a0;
+    --yellow:#f0b754;
+    --red:#ff858a;
+    --purple:#b3a0f1;
+    --amber:#f0b754;
+    --danger:#ff858a;
+    --success:#5bd3a0;
+    --shadow:0 12px 34px rgba(0,0,0,.2);
+  }
+}
