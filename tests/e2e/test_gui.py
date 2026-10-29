@@ -23,16 +23,16 @@ pytestmark = pytest.mark.e2e
 
 
 class PollingJobFixture:
-    """Deterministic running-to-completed job used to exercise browser polling."""
+    """Controllable running-to-completed job used to exercise browser polling."""
 
     def __init__(self) -> None:
         self.config: AppConfig | None = None
-        self.get_calls = 0
         self.verify_get_calls = 0
         self.verify_submitted = False
+        self.hold_backup = True
 
     def _snapshot(self, *, include_events: bool = True) -> dict:
-        completed = self.get_calls >= 2
+        completed = not self.hold_backup
         events = [
             {
                 "kind": "plan_ready",
@@ -91,11 +91,10 @@ class PollingJobFixture:
             return self._verify_snapshot()
         if job_id != "e2e-job":
             return None
-        self.get_calls += 1
         return self._snapshot()
 
     def has_active(self) -> bool:
-        return self.get_calls < 2 or (self.verify_submitted and self.verify_get_calls < 1)
+        return self.hold_backup or (self.verify_submitted and self.verify_get_calls < 1)
 
     def submit_verify(self) -> dict:
         self.verify_submitted = True
@@ -271,14 +270,22 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("heading", name="備份工作", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="本次備份摘要", exact=True)).to_be_visible()
     expect(page.get_by_text("cover.jpg", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="完成：成功 2、未完成 0", exact=True)).to_be_visible(timeout=5_000)
-    assert jobs.get_calls >= 2
+
+    page.get_by_role("button", name="維護", exact=True).click()
+    expect(page.get_by_text("目前工作：完整備份", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="目前無法驗證", exact=True)).to_be_disabled()
 
     page.get_by_role("button", name="設定", exact=True).click()
     expect(page.get_by_role("heading", name="設定", exact=True)).to_be_visible()
+    expect(page.get_by_text("目前工作：完整備份", exact=True)).to_be_visible()
+    save_button = page.get_by_role("button", name="儲存設定", exact=True)
+    expect(save_button).to_be_disabled()
+    jobs.hold_backup = False
+    expect(save_button).to_be_enabled(timeout=5_000)
+    expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
     max_posts = page.get_by_role("spinbutton", name="每次投稿上限")
     max_posts.fill("25")
-    page.get_by_role("button", name="儲存設定", exact=True).click()
+    save_button.click()
     expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     assert AppConfig.load(config_path).sync.max_posts_per_run == 25
 

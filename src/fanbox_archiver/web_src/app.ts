@@ -51,6 +51,18 @@ namespace FanboxUI {
       return loadPosts();
     }
 
+    function updateActiveJob(jobs: WebJob[]): WebJob | null {
+      state.activeJob = jobs.find(isActiveJob) ?? null;
+      return state.activeJob;
+    }
+
+    function scheduleJobRefresh(): void {
+      if (jobTimer !== undefined) clearTimeout(jobTimer);
+      if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)) {
+        jobTimer = window.setTimeout(() => void refreshView(), 900);
+      }
+    }
+
     async function loadPosts(): Promise<void> {
       state.current = null;
       app.replaceChildren(h("p", {class: "empty"}, "正在讀取投稿…"));
@@ -240,7 +252,7 @@ namespace FanboxUI {
     function renderJob(job: WebJob, creators: CreatorSummary[], jobs: WebJob[] = [job]): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
       const active = isActiveJob(job);
-      const page = renderBackupJobPage(job, creators, jobs, state.jobFilter, {
+      const page = renderBackupJobPage(job, creators, jobs, state.jobFilter, state.activeJob, {
         onCancel: jobId => void cancelBackupJob(jobId),
         onRetry: jobId => void retryBackupJob(jobId),
         onNew: () => renderBackupForm(creators, jobs),
@@ -253,11 +265,11 @@ namespace FanboxUI {
       const currentPage = app.querySelector<HTMLElement>(".backup-page[data-job-id]");
       if (currentPage?.dataset.jobId === job.job_id) updateJobPage(currentPage, page, active);
       else app.replaceChildren(page);
-      if (active) jobTimer = window.setTimeout(() => void pollJob(job.job_id, creators), 900);
+      scheduleJobRefresh();
     }
 
     function renderBackupForm(creators: CreatorSummary[], jobs: WebJob[] = []): void {
-      app.replaceChildren(renderBackupFormPage(creators, jobs, state.jobFilter, {
+      app.replaceChildren(renderBackupFormPage(creators, jobs, state.jobFilter, state.activeJob, {
         onStart: (creator, dryRun, maxPosts, mode) => void startBackup(creator, dryRun, maxPosts, mode),
         onShow: jobId => void showJob(jobId, creators, jobs),
         onFilter: value => {
@@ -265,6 +277,7 @@ namespace FanboxUI {
           renderBackupForm(creators, jobs);
         },
       }));
+      scheduleJobRefresh();
     }
 
     async function loadBackup(): Promise<void> {
@@ -272,6 +285,7 @@ namespace FanboxUI {
       app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
       try {
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+        updateActiveJob(jobData.items);
         const backupJobs = jobData.items.filter(item => item.kind === "backup");
         const selected = backupJobs.find(isActiveJob) ?? backupJobs[0];
         if (selected) renderJob(await getJob(selected.job_id), creatorData.items, backupJobs);
@@ -288,17 +302,8 @@ namespace FanboxUI {
       try {
         const job = await startBackupJob({creator: creator || null, dry_run: dryRun, max_posts: maxPosts, mode}, sessionToken);
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+        updateActiveJob(jobData.items);
         renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
-      } catch (error) {
-        errorView(error);
-      }
-    }
-
-    async function pollJob(jobId: string, creators: CreatorSummary[]): Promise<void> {
-      if (state.view !== "backup") return;
-      try {
-        const [job, jobData] = await Promise.all([getJob(jobId), getJobs()]);
-        renderJob(job, creators, jobData.items.filter(item => item.kind === "backup"));
       } catch (error) {
         errorView(error);
       }
@@ -308,6 +313,7 @@ namespace FanboxUI {
       try {
         const job = await cancelJob(jobId, sessionToken);
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+        updateActiveJob(jobData.items);
         renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
       } catch (error) {
         errorView(error);
@@ -318,6 +324,7 @@ namespace FanboxUI {
       try {
         const job = await retryJob(jobId, sessionToken);
         const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+        updateActiveJob(jobData.items);
         renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
       } catch (error) {
         errorView(error);
@@ -326,12 +333,11 @@ namespace FanboxUI {
 
     function renderMaintenance(job: WebJob | null = null, jobs: WebJob[] = []): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
-      const active = isActiveJob(job);
-      app.replaceChildren(renderMaintenancePage(job, jobs, {
+      app.replaceChildren(renderMaintenancePage(job, jobs, state.activeJob, {
         onStart: () => void startVerification(),
         onShow: jobId => void showVerification(jobId, jobs),
       }));
-      if (active && job) jobTimer = window.setTimeout(() => void pollVerification(job.job_id), 900);
+      scheduleJobRefresh();
     }
 
     async function loadMaintenance(): Promise<void> {
@@ -339,6 +345,7 @@ namespace FanboxUI {
       app.replaceChildren(h("p", {class: "empty"}, "正在讀取驗證狀態…"));
       try {
         const data = await getJobs();
+        updateActiveJob(data.items);
         const jobs = data.items.filter(item => item.kind === "verify");
         const selected = jobs.find(isActiveJob) ?? jobs[0];
         renderMaintenance(selected ? await getJob(selected.job_id) : null, jobs);
@@ -351,16 +358,7 @@ namespace FanboxUI {
       try {
         const job = await startVerificationJob(sessionToken);
         const data = await getJobs();
-        renderMaintenance(job, data.items.filter(item => item.kind === "verify"));
-      } catch (error) {
-        errorView(error);
-      }
-    }
-
-    async function pollVerification(jobId: string): Promise<void> {
-      if (state.view !== "maintenance") return;
-      try {
-        const [job, data] = await Promise.all([getJob(jobId), getJobs()]);
+        updateActiveJob(data.items);
         renderMaintenance(job, data.items.filter(item => item.kind === "verify"));
       } catch (error) {
         errorView(error);
@@ -379,8 +377,11 @@ namespace FanboxUI {
       state.current = null;
       app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
-        const data = await getSettings();
-        app.replaceChildren(renderSettingsPage(data, message, patch => void saveSettingsForm(patch)));
+        const [data, jobData] = await Promise.all([getSettings(), getJobs()]);
+        updateActiveJob(jobData.items);
+        app.replaceChildren(renderSettingsPage(data, message, state.activeJob,
+          patch => void saveSettingsForm(patch)));
+        scheduleJobRefresh();
       } catch (error) {
         errorView(error);
       }

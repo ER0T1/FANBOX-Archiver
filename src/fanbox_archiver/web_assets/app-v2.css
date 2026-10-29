@@ -357,3 +357,26 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
   .embed-content { grid-row:2; }
   .desktop-onboarding { align-content:start; padding:1.5rem 0 2rem; }.desktop-options { grid-template-columns:1fr; }.desktop-options button { min-height:0; grid-template-columns:auto minmax(0,1fr); }
 }
+.global-job-notice {
+  display: grid;
+  gap: .2rem;
+  padding: .85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.global-job-notice span {
+  color: var(--muted);
+}
+
+.settings-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-form fieldset:disabled {
+  opacity: .68;
+}

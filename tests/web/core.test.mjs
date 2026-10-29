@@ -18,6 +18,16 @@ test("TypeScript core creates independent initial state", () => {
   assert.equal(second.page, 1);
   assert.equal(second.view, "posts");
   assert.equal(second.postNavigation, null);
+  assert.equal(second.activeJob, null);
+});
+
+test("TypeScript core identifies active jobs and labels global work", () => {
+  const backup = {kind: "backup", status: "running", request: {mode: "full", dry_run: false}};
+  const verify = {kind: "verify", status: "completed", request: {}};
+  assert.equal(ui.isActiveJob(backup), true);
+  assert.equal(ui.isActiveJob(verify), false);
+  assert.equal(ui.jobLabel(backup), "完整備份");
+  assert.equal(ui.jobLabel(verify), "封存完整性驗證");
 });
 
 test("TypeScript core formats archive values", () => {

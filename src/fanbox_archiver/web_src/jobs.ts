@@ -20,6 +20,19 @@ namespace FanboxUI {
     onShow(jobId: string): void;
   }
 
+  export function jobLabel(job: WebJob): string {
+    if (job.kind === "verify") return "封存完整性驗證";
+    return ({profile: "個人資料拉取", fancard: "粉絲卡拉取"})[job.request.mode ?? ""]
+      || (job.request.dry_run ? "完整備份預覽" : "完整備份");
+  }
+
+  export function activeJobNotice(job: WebJob | null): HTMLElement | null {
+    if (!job) return null;
+    return h("p", {class: "global-job-notice", role: "status"},
+      h("strong", {}, `目前工作：${jobLabel(job)}`), `（${statusText(job.status)}）`,
+      h("span", {}, "同一時間只允許一項寫入或維護操作；完成、失敗或取消後會自動解鎖。"));
+  }
+
   function valueNumber(data: Record<string, unknown>, key: string): number {
     const value = Number(data[key] ?? 0);
     return Number.isFinite(value) ? value : 0;
@@ -198,20 +211,24 @@ namespace FanboxUI {
   }
 
   export function renderBackupJobPage(
-    job: WebJob, creators: CreatorSummary[], jobs: WebJob[], filterValue: string, actions: BackupViewActions,
+    job: WebJob, creators: CreatorSummary[], jobs: WebJob[], filterValue: string,
+    activeJob: WebJob | null, actions: BackupViewActions,
   ): HTMLElement {
     const active = isActiveJob(job);
+    const blocked = Boolean(activeJob && activeJob.job_id !== job.job_id);
     const plan = (job.events ?? []).find(item => item.kind === "plan_ready");
     const retryable = ["failed", "cancelled", "interrupted"].includes(job.status);
     const controls = h("div", {class: "job-actions"},
       active ? h("button", {type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id)},
         job.status === "cancelling" ? "正在安全停止…" : "安全停止") : null,
-      retryable ? h("button", {type: "button", class: "retry", onclick: () => actions.onRetry(job.job_id)}, "使用相同設定重試") : null,
-      !active ? h("button", {type: "button", onclick: actions.onNew}, "建立新工作") : null);
+      retryable ? h("button", {type: "button", class: "retry", disabled: blocked,
+        onclick: () => actions.onRetry(job.job_id)}, "使用相同設定重試") : null,
+      !active ? h("button", {type: "button", disabled: blocked, onclick: actions.onNew}, "建立新工作") : null);
     return h("section", {class: "page backup-page", "data-job-id": job.job_id},
       jobPart(h("header", {class: "heading job-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "BACKUP JOB"),
         h("h1", {}, "備份工作"), h("p", {}, jobModeLabel(job))),
       h("span", {class: `job-status status-${job.status}`}, statusText(job.status))), "header"),
+      jobPart(activeJobNotice(blocked ? activeJob : null) || h("div", {hidden: true}), "global-active"),
       jobPart(planSummary(plan, creators) || h("div", {hidden: true}), "plan"),
       jobPart(currentActivity(job), "activity"),
       jobPart(h("p", {class: "job-error", hidden: !job.error}, h("strong", {}, "錯誤："), job.error || ""), "error"),
@@ -223,8 +240,10 @@ namespace FanboxUI {
   }
 
   export function renderBackupFormPage(
-    creators: CreatorSummary[], jobs: WebJob[], filterValue: string, actions: BackupFormActions,
+    creators: CreatorSummary[], jobs: WebJob[], filterValue: string,
+    activeJob: WebJob | null, actions: BackupFormActions,
   ): HTMLElement {
+    const blocked = Boolean(activeJob);
     const creatorSelect = customSelect({id: "backup-creator", label: "備份範圍", value: "", options: [
       {value: "", label: "全部支援中的創作者"}, ...creators.map(item => ({value: item.creator_id, label: `${item.name}（${item.creator_id}）`})),
     ]});
@@ -234,12 +253,15 @@ namespace FanboxUI {
       actions.onStart(creatorSelect.value, preview, Number(maxPosts.value), mode);
     return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
       h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "先預覽本次變更，再執行正式備份。"))),
-    h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); start("full", dryRun.checked); }},
+    activeJobNotice(activeJob),
+    h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); if (!blocked) start("full", dryRun.checked); }},
       h("label", {}, h("span", {}, "創作者"), creatorSelect), h("label", {}, h("span", {}, "本次投稿上限"), maxPosts),
-      h("label", {class: "checkbox"}, dryRun, h("span", {}, "完整備份只預覽，不下載")), h("button", {type: "submit", class: "primary"}, "開始完整備份"),
+      h("label", {class: "checkbox"}, dryRun, h("span", {}, "完整備份只預覽，不下載")),
+      h("button", {type: "submit", class: "primary", disabled: blocked}, "開始完整備份"),
       h("div", {class: "metadata-actions"}, h("div", {}, h("strong", {}, "單項拉取"), h("small", {}, "立即寫入封存，不掃描或下載投稿。")),
-        h("div", {class: "metadata-buttons"}, h("button", {type: "button", onclick: () => start("profile", false)}, "拉取個人資料"),
-          h("button", {type: "button", onclick: () => start("fancard", false)}, "拉取粉絲卡")))),
+        h("div", {class: "metadata-buttons"}, h("button", {type: "button", disabled: blocked,
+          onclick: () => start("profile", false)}, "拉取個人資料"),
+          h("button", {type: "button", disabled: blocked, onclick: () => start("fancard", false)}, "拉取粉絲卡")))),
     h("p", {class: "notice"}, "同一時間只允許一個備份工作；安全停止會在目前投稿處理完成後生效。"),
     jobs.length ? jobHistory(jobs, null, creators, filterValue, actions) : null);
   }
@@ -258,8 +280,10 @@ namespace FanboxUI {
       h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "尚無驗證紀錄。")));
   }
 
-  export function renderMaintenancePage(job: WebJob | null, jobs: WebJob[], actions: MaintenanceActions): HTMLElement {
-    const active = isActiveJob(job);
+  export function renderMaintenancePage(
+    job: WebJob | null, jobs: WebJob[], activeJob: WebJob | null, actions: MaintenanceActions,
+  ): HTMLElement {
+    const active = Boolean(activeJob);
     const result = job?.result;
     const issues = result?.issues ?? [];
     const issueRows = issues.map(item => h("li", {}, h("strong", {}, item.reason), h("code", {}, item.path),
@@ -268,9 +292,12 @@ namespace FanboxUI {
       h("p", {class: "eyebrow"}, "ARCHIVE MAINTENANCE"), h("h1", {}, "封存驗證"),
       h("p", {}, "檢查投稿、Profile、粉絲卡、歷史版本與資源的檔案大小及 SHA-256。")),
       job ? h("span", {class: `job-status status-${job.status}`}, statusText(job.status)) : null),
-    h("section", {class: "maintenance-action"}, h("div", {}, h("h2", {}, active ? "正在驗證封存…" : "完整性檢查"),
+    activeJobNotice(activeJob),
+    h("section", {class: "maintenance-action"}, h("div", {}, h("h2", {},
+      activeJob?.kind === "verify" ? "正在驗證封存…" : activeJob ? "其他工作執行中" : "完整性檢查"),
       h("p", {}, "驗證可能需要一段時間；執行期間不能同時開始備份或修改設定。")),
-      h("button", {type: "button", class: "primary", disabled: active, onclick: actions.onStart}, active ? "驗證中…" : "開始驗證")),
+      h("button", {type: "button", class: "primary", disabled: active, onclick: actions.onStart},
+        activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")),
     job?.error ? h("p", {class: "job-error"}, h("strong", {}, "錯誤："), job.error) : null,
     result ? h("section", {class: `verification-result ${result.passed ? "passed" : "issues"}`},
       h("div", {class: "verification-summary"}, h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`),

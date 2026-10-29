@@ -13,6 +13,7 @@ namespace FanboxUI {
     creator: CreatorDetail | null;
     creatorProfile: CreatorProfile | null;
     jobFilter: string;
+    activeJob: WebJob | null;
   }
 
   export function createInitialState(): AppState {
@@ -27,6 +28,7 @@ namespace FanboxUI {
       creator: null,
       creatorProfile: null,
       jobFilter: "all",
+      activeJob: null,
     };
   }
 }

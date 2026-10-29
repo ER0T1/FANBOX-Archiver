@@ -18,7 +18,8 @@ namespace FanboxUI {
   }
 
   export function renderSettingsPage(
-    data: SettingsResponse, message: string, onSave: (patch: SettingsPatch) => void,
+    data: SettingsResponse, message: string, activeJob: WebJob | null,
+    onSave: (patch: SettingsPatch) => void,
   ): HTMLElement {
     const value = data.editable;
     const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
@@ -44,8 +45,10 @@ namespace FanboxUI {
     const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
-    const form = h("form", {class: "settings-form", onsubmit: (event: Event) => {
+    const blocked = Boolean(activeJob);
+    const form = h("form", {class: "settings-form", "aria-disabled": blocked, onsubmit: (event: Event) => {
       event.preventDefault();
+      if (blocked) return;
       onSave({download: {
         original_images: originalImages.input.checked, download_attachments: attachments.input.checked,
         download_cover: covers.input.checked, resume: resume.input.checked, verify_sha256: hashes.input.checked,
@@ -62,6 +65,7 @@ namespace FanboxUI {
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
         keep_days: Number(keepDays.input.value)}});
     }},
+    h("fieldset", {disabled: blocked},
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "DOWNLOAD"), h("h2", {}, "下載"),
       h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node),
       h("div", {class: "setting-toggles"}, originalImages.node, attachments.node, covers.node, resume.node, hashes.node)),
@@ -71,12 +75,15 @@ namespace FanboxUI {
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT"), h("h2", {}, "Markdown 與日誌"),
       h("div", {class: "settings-grid"}, h("label", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
       h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node, fileLogs.node)),
-    h("div", {class: "settings-actions"}, h("button", {type: "submit", class: "primary", disabled: !data.writable}, "儲存設定"),
-      !data.writable ? h("span", {class: "notice"}, "目前伺服器未指定可寫入的設定檔。") : null));
+    h("div", {class: "settings-actions"}, h("button", {type: "submit", class: "primary",
+      disabled: !data.writable || blocked}, "儲存設定"),
+      !data.writable ? h("span", {class: "notice"}, "目前伺服器未指定可寫入的設定檔。") : null,
+      blocked ? h("span", {class: "notice"}, "工作結束後即可儲存設定。") : null)));
     return h("section", {class: "page settings-page"},
       h("header", {class: "heading"}, h("div", {}, h("p", {class: "eyebrow"}, "LOCAL SETTINGS"), h("h1", {}, "設定"),
         h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))),
       message ? h("p", {class: "settings-saved", role: "status"}, message) : null,
+      activeJobNotice(activeJob),
       h("section", {class: "settings-paths"},
         h("div", {}, h("span", {}, "封存目錄"), h("code", {}, data.storage.output_dir)),
         h("div", {}, h("span", {}, "資料庫"), h("code", {}, data.storage.database)),
