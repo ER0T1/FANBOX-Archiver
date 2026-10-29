@@ -10,8 +10,8 @@ namespace FanboxUI {
     postNavigation: PostNavigation | null;
     creatorId: string | null;
     creatorTab: CreatorTab;
-    creator: CreatorSummary | null;
-    creatorProfile: Record<string, unknown> | null;
+    creator: CreatorDetail | null;
+    creatorProfile: CreatorProfile | null;
     jobFilter: string;
   }
 

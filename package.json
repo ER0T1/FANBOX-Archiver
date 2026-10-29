@@ -4,9 +4,18 @@
   "scripts": {
     "build:web": "tsc -p tsconfig.web.json",
     "check:web": "tsc -p tsconfig.web.json --noEmit",
-    "test:web": "npm run build:web && node --test tests/web/*.test.mjs"
+    "test:web": "npm run build:web && node --test tests/web/*.test.mjs",
+    "test:e2e": ".venv\\Scripts\\python.exe -m pytest tests/e2e -m e2e",
+    "desktop:check": "%USERPROFILE%\\.cargo\\bin\\cargo.exe check --manifest-path src-tauri/Cargo.toml",
+    "desktop:dev": "set PATH=%USERPROFILE%\\.cargo\\bin;%PATH%&& tauri dev",
+    "desktop:build": "npm run desktop:sidecar && set PATH=%USERPROFILE%\\.cargo\\bin;%PATH%&& tauri build",
+    "desktop:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",
+    "desktop:test-sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-sidecar.ps1",
+    "desktop:test-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-installer.ps1",
+    "release:check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-version.ps1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
     "typescript": "^5.9.3"
   }
 }

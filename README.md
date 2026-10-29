@@ -1,13 +1,14 @@
 # FANBOX Archiver
 
-**正式版本：v1.2.0（2026-10-28）**
+**正式版本：v1.3.0（2026-10-29）**
 
-FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的命令列個人備份工具。它只保存目前登入帳號有權瀏覽的 pixivFANBOX 投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
+FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
 > pixivFANBOX 的介面並非穩定的公開 API，平台規範也可能限制自動化蒐集。請只在你有權備份且符合現行服務條款的範圍使用。本工具預設單一下載佇列、每次請求至少間隔 3 秒，遇到 401、403 或 429 會停止或回報，而非規避限制。
 
 ## 功能
 
+- 提供 Tauri 2 Windows 桌面程式，自動管理本機 Python sidecar，並可沿用既有 CLI 封存。
 - 解析 `article`、`image`、`file`、`text` 等結構化投稿，另提供渲染後 HTML 備援解析。
 - 保留文字、粗體、原圖、cover、附件、外部連結卡片與原始順序，輸出 UTF-8 `post.md` 與完整 `post.json`。
 - 原始圖片及任意附件串流下載；使用 `.part` 暫存檔及 HTTP Range 續傳。
@@ -19,6 +20,18 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的命令列個人備份工
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.0 更新重點
+
+- 新增 Tauri 2 Windows 桌面程式，啟動時自動選擇空閒的 loopback 連接埠、啟動 PyInstaller Python sidecar，並在視窗關閉時停止完整程序樹。
+- 新增首次啟動封存設定，可選擇既有 `config.yaml`、匯入包含 `backup.db` 的 FANBOX 封存資料夾，或建立新的預設封存；選擇結果會保存在本機並於後續啟動沿用。
+- 新增「封存 → 變更封存位置」與啟動失敗復原流程；切換資料來源只清除桌面選擇狀態，不會刪除設定檔、資料庫或投稿。
+- 瀏覽器 GUI 完整拆分為型別化 TypeScript 模組，涵蓋 API client、投稿、創作者、設定、工作佇列、導覽與桌面啟動頁，正式頁面只載入單一編譯後的 `core.js`。
+- 新增隔離的 localhost GUI E2E 測試，涵蓋投稿導覽、搜尋、分頁、置頂排序、Creator Profile、Fan Card、設定保存、封存驗證與工作輪詢。
+- 新增 sidecar 健康檢查、Rust 測試、NSIS 安裝／覆蓋升級／解除安裝生命週期測試，以及外部封存資料保留驗證。
+- 新增 Windows CI 與正式發布工作流程；一般 push 產生未簽章測試 artifact，`vMAJOR.MINOR.PATCH` tag 則驗證版本、簽章安裝器並建立附有 SHA-256 校驗檔的 GitHub Release。
+- 新增跨 Python、Rust 與 Tauri 設定的版本一致性檢查，並禁止安裝器靜默降級。
+- 保留原有 `fanbox-archiver` CLI、`serve` 指令與靜態網站匯出流程，既有使用方式不受影響。
 
 ## v1.2.0 更新重點
 
@@ -32,7 +45,7 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的命令列個人備份工
 - 修正 Profile 版本選單排列方向、備份歷史篩選重設、詳細紀錄捲動位置跳動等操作問題。
 - 投稿 Cover 與內嵌預覽圖改為完整顯示，避免裁切文字或內容；內嵌投稿贊助檔位統一為膠囊樣式。
 - 備份控制板取消固定最大寬度，會依頁面容器自適應延展。
-- 新增 TypeScript 瀏覽器核心的型別檢查與 Node.js 測試流程；編譯產物會隨 Python wheel 發布，一般使用者不需安裝 Node.js。
+- 瀏覽器 GUI（包含啟動、導覽、搜尋、鍵盤操作與工作輪詢）已完整搬至 TypeScript，頁面只載入單一 `core.js`；編譯產物會隨 Python wheel 發布，一般使用者不需安裝 Node.js。
 - 保留 `index`／`open` 靜態匯出流程，供搬移封存或不啟動伺服器的環境使用。
 
 ## v1.1.2 更新重點
@@ -275,11 +288,47 @@ python -m pytest
 npm install
 npm run check:web
 npm run test:web
+npm run test:e2e
+npm run desktop:test-sidecar
+npm run desktop:test-installer
+npm run release:check
 ```
 
-測試包含規劃書提供的 HTML：應辨識 `範例1.html` 的 9 張正文原圖，且不把 `/w/1200/` 預覽圖當作原圖。
+測試包含規劃書提供的 HTML：應辨識 `範例1.html` 的 9 張正文原圖，且不把 `/w/1200/` 預覽圖當作原圖。`test:e2e` 會以系統現有的 Chrome 啟動隔離的 localhost GUI，使用暫存封存驗證投稿導覽、搜尋、分頁、置頂排序、Creator Profile、Fan Card、設定保存、封存驗證與工作輪詢，不會讀寫正式資料。`desktop:test-sidecar` 會啟動已封裝的 sidecar、檢查健康端點，再終止完整程序樹。
 
-瀏覽器核心的 TypeScript 原始碼位於 `src/fanbox_archiver/web_src/`。修改後執行 `npm run build:web`，將編譯結果更新至會隨 Python wheel 發布的 `web_assets/core.js`；一般使用者執行 GUI 時不需要安裝 Node.js。
+`.github/workflows/windows.yml` 會在 Windows runner 執行 Python、TypeScript、Node、Chromium GUI E2E、Rust 與 sidecar 測試，接著產生 NSIS 安裝程式並上傳為 workflow artifact。CI 使用 Playwright Chromium；若瀏覽器無法啟動會直接失敗，不會將測試標記為略過。
+
+瀏覽器 GUI 的 TypeScript 原始碼位於 `src/fanbox_archiver/web_src/`，已涵蓋型別化 API client、投稿與創作者閱讀元件、共用控制項、設定、備份工作、封存驗證，以及頁面啟動、導覽、搜尋、鍵盤事件與工作輪詢。修改後執行 `npm run build:web`，將編譯結果更新至會隨 Python wheel 發布的單一 `web_assets/core.js`；一般使用者執行 GUI 時不需要安裝 Node.js。
+
+### Windows 桌面版開發
+
+Tauri 2 骨架位於 `src-tauri/`。桌面程式會選擇空閒的 loopback 連接埠、啟動以 PyInstaller 封裝的 Python sidecar，等待健康檢查通過後才顯示既有 GUI；關閉桌面視窗時也會停止 sidecar。原本的 `fanbox-archiver` CLI 與 `serve` 指令保持不變。
+
+首次啟動會顯示桌面設定頁，可選擇既有 `config.yaml`、直接匯入包含 `backup.db` 的 FANBOX 封存資料夾，或在應用程式資料目錄建立全新封存。選擇結果會保存在本機 `desktop-state.json`，後續啟動會直接沿用；匯入資料夾只會建立相容的設定檔，不會搬移或改寫原有投稿。需要切換資料來源時，可使用桌面程式的「封存 → 變更封存位置」回到選擇頁；這只會清除目前選擇，不會刪除設定檔、資料庫或投稿。若 sidecar 因設定檔已移動、內容無效或磁碟無法存取而啟動失敗，錯誤頁也會提供「重新選擇封存」按鈕。若先設定 `FANBOX_ARCHIVER_CONFIG`，桌面程式仍會優先使用該路徑，方便開發與自動化測試。
+
+首次建置需安裝 Rust stable（MSVC）、Visual Studio C++ Build Tools、Node.js，以及 Python 桌面建置依賴：
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[test,desktop]"
+npm install
+npm run desktop:sidecar
+npm run desktop:check
+npm run desktop:dev
+```
+
+`desktop:sidecar` 會產生 Tauri 規定的 `fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe`；該建置產物不納入 Git。`desktop:build` 會重新產生 sidecar 並建立 NSIS 安裝程式，輸出位於 `src-tauri/target/release/bundle/nsis/`。`desktop:test-installer` 只會在 `build/installer-smoke/` 安裝測試副本，先拒絕覆蓋環境中既有的 FANBOX Archiver，再驗證靜默安裝、覆蓋升級、解除安裝與外部封存資料保留。若要測試真正的跨版本升級，可直接執行 `scripts/test-installer.ps1 -PreviousInstallerPath <舊版安裝程式>`。目前安裝器是未簽章的開發建置；正式公開散發前需加入 Windows 程式碼簽章憑證與簽章驗證。
+
+### Windows 正式發布
+
+推送 `vMAJOR.MINOR.PATCH` tag 會觸發 `.github/workflows/release.yml`。發布工作會先確認 `pyproject.toml`、Python 套件、`Cargo.toml` 與 `tauri.conf.json` 的版本完全相同，再執行測試、建立 sidecar、匯入暫時的 Windows PFX 憑證、產生並驗證 Authenticode 簽章、跑安裝生命週期測試，最後建立附有安裝程式及 `SHA256SUMS.txt` 的 GitHub Release。正式發布不接受未簽章安裝器。
+
+需在 GitHub repository 設定：
+
+- Secret `WINDOWS_CERTIFICATE`：PFX 檔案的 Base64 內容。
+- Secret `WINDOWS_CERTIFICATE_PASSWORD`：PFX 匯出密碼。
+- Variable `WINDOWS_TIMESTAMP_URL`：憑證提供者的 RFC 3161 時間戳服務；未設定時使用 `http://timestamp.digicert.com`。
+
+一般 push／pull request 仍只產生未簽章的 CI artifact，不會接觸正式憑證。Tauri 設定已禁止靜默降級；正式跨版本升級仍應把上一版安裝器傳給 `scripts/test-installer.ps1 -PreviousInstallerPath` 驗證。
 
 ## 已知限制
 

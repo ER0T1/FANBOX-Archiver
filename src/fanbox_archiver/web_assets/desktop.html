@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>設定 FANBOX Archiver</title>
+  <link rel="stylesheet" href="app-v2.css">
+</head>
+<body class="desktop-bootstrap">
+  <main id="desktop-onboarding" class="desktop-onboarding">
+    <section class="desktop-intro">
+      <p class="eyebrow">WELCOME TO FANBOX ARCHIVER</p>
+      <h1>選擇你的本機封存</h1>
+      <p>桌面版只會讀寫你選擇的本機資料，不會上傳 Cookie、投稿或設定。</p>
+    </section>
+    <section class="desktop-options" aria-label="首次啟動選項">
+      <button type="button" data-command="choose_existing_config">
+        <span class="desktop-option-icon" aria-hidden="true">01</span>
+        <span><strong>使用既有 config.yaml</strong><small>沿用原本 CLI 的封存目錄、資料庫與下載設定。</small></span>
+      </button>
+      <button type="button" data-command="choose_archive_folder">
+        <span class="desktop-option-icon" aria-hidden="true">02</span>
+        <span><strong>匯入既有 FANBOX 資料夾</strong><small>沒有設定檔時，直接連接資料夾內的 backup.db 與投稿檔案。</small></span>
+      </button>
+      <button type="button" data-command="use_default_config">
+        <span class="desktop-option-icon" aria-hidden="true">03</span>
+        <span><strong>建立全新本機封存</strong><small>在桌面程式的資料目錄建立安全的預設設定。</small></span>
+      </button>
+    </section>
+    <p id="desktop-status" class="desktop-status" role="status" aria-live="polite">選擇一種方式開始；之後可從桌面程式的「封存 → 變更封存位置」重新選擇。</p>
+    <footer>CLI 會完整保留，桌面版與 CLI 使用相同的封存格式。</footer>
+  </main>
+  <script src="core.js" defer></script>
+</body>
+</html>

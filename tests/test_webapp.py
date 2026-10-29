@@ -23,9 +23,15 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         assert 'data-view="posts">投稿' in home.text
         assert 'data-view="fancards"' not in home.text
         assert "/assets/core.js" in home.text
-        assert home.text.index("/assets/core.js") < home.text.index("/assets/app-v2.js")
-        assert "/assets/app-v2.js" in home.text
+        assert "/assets/app-v2.js" not in home.text
         assert not (config.storage.output_dir / "_site").exists()
+
+        desktop = await client.get("/assets/desktop.html")
+        assert desktop.status_code == 200
+        assert "選擇你的本機封存" in desktop.text
+        assert 'data-command="choose_existing_config"' in desktop.text
+        assert 'data-command="choose_archive_folder"' in desktop.text
+        assert 'data-command="use_default_config"' in desktop.text
 
         listing = await client.get("/api/posts")
         assert listing.status_code == 200

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FANBOX Archiver">
+  <defs>
+    <linearGradient id="background" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202731"/>
+      <stop offset="1" stop-color="#101419"/>
+    </linearGradient>
+    <linearGradient id="archive" x1="128" y1="144" x2="384" y2="416" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFAD55"/>
+      <stop offset="1" stop-color="#F07828"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#background)"/>
+  <path d="M124 152c0-18 14-32 32-32h200c18 0 32 14 32 32v40H124v-40Z" fill="#FFBB72"/>
+  <path d="M104 188c0-13 11-24 24-24h256c13 0 24 11 24 24v40H104v-40Z" fill="#FFD1A0"/>
+  <rect x="112" y="204" width="288" height="212" rx="40" fill="url(#archive)"/>
+  <rect x="148" y="240" width="216" height="132" rx="24" fill="#F8FAFC"/>
+  <path d="M256 250v70m0 0-34-34m34 34 34-34" fill="none" stroke="#22B8CF" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="344" width="80" height="12" rx="6" fill="#22B8CF"/>
+</svg>
