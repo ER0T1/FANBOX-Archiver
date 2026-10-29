@@ -72,6 +72,9 @@ class BackupUseCase:
                 user_agent=user_agent,
                 request_interval=self.config.download.request_interval_seconds,
             ) as client:
+                client.parse_warning_callback = lambda post_id, message: self._emit(
+                    "warning", post_id=post_id, message=message,
+                )
                 syncing = SyncService(client, archive, mutate=not request.dry_run)
                 requested_creators = request.creators or ((request.creator,) if request.creator else ())
                 selected_posts: dict[str, Any] = {}
@@ -232,6 +235,10 @@ class BackupUseCase:
             self._emit("profile_started", creator_id=creator.creator_id)
             try:
                 profile = fetch(creator.creator_id)
+                for message in profile.parse_warnings:
+                    self._emit(
+                        "profile_warning", creator_id=creator.creator_id, message=message,
+                    )
                 status = archive.profile_status(profile)
                 path = None
                 if not dry_run:

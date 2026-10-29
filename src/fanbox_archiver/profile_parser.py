@@ -17,6 +17,15 @@ class CreatorProfileParser:
             raise ValueError("creator.get 回應缺少 creatorId")
         user = body.get("user") if isinstance(body.get("user"), dict) else {}
         items = body.get("profileItems")
+        parse_warnings: list[str] = []
+        if not user.get("name") and not body.get("creatorName"):
+            parse_warnings.append("Creator Profile 缺少創作者名稱，已使用 Creator ID。")
+        if items is not None and not isinstance(items, list):
+            parse_warnings.append("Creator Profile 的 profileItems 不是陣列，已略過。")
+        elif isinstance(items, list):
+            invalid = sum(not isinstance(item, dict) for item in items)
+            if invalid:
+                parse_warnings.append(f"Creator Profile 有 {invalid} 個無效 profile item，已略過。")
         profile = CreatorProfile(
             creator_id=actual_id,
             name=self._text(user.get("name") or body.get("creatorName") or actual_id),
@@ -33,6 +42,7 @@ class CreatorProfileParser:
                 body.get("isStopped", body.get("creatorAccountStopped", False))
             ),
             fanbox_url=f"https://www.fanbox.cc/@{actual_id}",
+            parse_warnings=parse_warnings,
             raw=body,
         )
         profile.content_fingerprint = profile.calculate_fingerprint()

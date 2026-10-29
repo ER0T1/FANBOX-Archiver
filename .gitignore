@@ -11,6 +11,8 @@ build/
 src-tauri/target/
 src-tauri/binaries/*.exe
 FANBOX/
+!tests/fixtures/fanbox/
+!tests/fixtures/fanbox/**
 config.yaml
 *.log
 規劃與想法/*

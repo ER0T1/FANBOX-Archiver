@@ -1,0 +1,25 @@
+{
+  "body": {
+    "creatorId": "fixture-creator",
+    "description": "合成的創作者介紹",
+    "hasAdultContent": false,
+    "isAcceptingRequest": true,
+    "user": {
+      "name": "Fixture Creator",
+      "iconUrl": "https://pixiv.pximg.net/fanbox/public/images/user/fixture-icon.png"
+    },
+    "profileItems": [
+      {
+        "id": "site-1",
+        "type": "website",
+        "label": "作品網站",
+        "url": "https://example.test/portfolio"
+      },
+      {
+        "id": "image-1",
+        "type": "image",
+        "imageUrl": "https://pixiv.pximg.net/fanbox/public/images/profile/fixture-image.png"
+      }
+    ]
+  }
+}

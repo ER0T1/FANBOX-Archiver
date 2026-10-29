@@ -1,0 +1,20 @@
+{
+  "body": {
+    "id": "fixture-image-post",
+    "creatorId": "fixture-creator",
+    "title": "合成 image 投稿",
+    "type": "image",
+    "user": {"name": "Fixture Creator"},
+    "body": {
+      "text": "圖片說明",
+      "images": [
+        {
+          "id": "image-1",
+          "originalUrl": "https://downloads.fanbox.cc/images/post/fixture-image-post/original.png",
+          "width": 1600,
+          "height": 900
+        }
+      ]
+    }
+  }
+}

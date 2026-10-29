@@ -1,0 +1,20 @@
+{
+  "body": {
+    "id": "fixture-file-post",
+    "creatorId": "fixture-creator",
+    "title": "合成 file 投稿",
+    "type": "file",
+    "user": {"name": "Fixture Creator"},
+    "body": {
+      "text": "附件說明",
+      "files": [
+        {
+          "id": "file-1",
+          "name": "fixture-data",
+          "extension": "zip",
+          "url": "https://downloads.fanbox.cc/files/post/fixture-file-post/fixture-data.zip"
+        }
+      ]
+    }
+  }
+}

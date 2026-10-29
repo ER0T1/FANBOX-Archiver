@@ -271,15 +271,26 @@ class StructuredPostParser:
         if not isinstance(body, dict) or not body.get("id"):
             raise ValueError("投稿資料缺少 body.id")
         post_type = str(body.get("type") or "unknown")
-        content = body.get("body") or {}
         assets: list[Asset] = []
         blocks: list[ContentBlock] = []
+        parse_warnings: list[str] = []
+        raw_content = body.get("body")
+        content = raw_content if isinstance(raw_content, dict) else {}
+        if post_type in {"article", "image", "file"} and not isinstance(raw_content, dict):
+            parse_warnings.append(f"{post_type} 投稿的 body 不是物件，已略過無法解析的內容。")
 
         if post_type == "article":
-            image_map = content.get("imageMap") or {}
-            file_map = content.get("fileMap") or {}
-            url_embed_map = content.get("urlEmbedMap") or {}
-            for raw in content.get("blocks") or []:
+            image_map = content.get("imageMap") if isinstance(content.get("imageMap"), dict) else {}
+            file_map = content.get("fileMap") if isinstance(content.get("fileMap"), dict) else {}
+            url_embed_map = content.get("urlEmbedMap") if isinstance(content.get("urlEmbedMap"), dict) else {}
+            raw_blocks = content.get("blocks") if isinstance(content.get("blocks"), list) else []
+            if content.get("blocks") is not None and not isinstance(content.get("blocks"), list):
+                parse_warnings.append("article.body.blocks 不是陣列，已略過無法解析的內容。")
+            for index, raw in enumerate(raw_blocks, 1):
+                if not isinstance(raw, dict):
+                    parse_warnings.append(f"article 第 {index} 個區塊格式不正確，已保留為 raw 區塊。")
+                    blocks.append(ContentBlock(type="raw", raw={"value": raw}))
+                    continue
                 kind = raw.get("type")
                 if kind in {"p", "paragraph"}:
                     text = str(raw.get("text") or "")
@@ -292,19 +303,31 @@ class StructuredPostParser:
                         styles=self._text_styles(raw.get("styles"), text),
                     ))
                 elif kind == "image":
-                    item = image_map.get(str(raw.get("imageId"))) or {}
-                    asset = self._asset(item, "image", str(raw.get("imageId")))
-                    assets.append(asset)
-                    blocks.append(ContentBlock(type="image", asset_id=asset.asset_id, url=asset.url))
+                    reference = str(raw.get("imageId") or f"block-{index}")
+                    item = image_map.get(reference)
+                    asset = self._asset_or_warning(item, "image", reference, parse_warnings)
+                    if asset:
+                        assets.append(asset)
+                        blocks.append(ContentBlock(type="image", asset_id=asset.asset_id, url=asset.url))
+                    else:
+                        blocks.append(ContentBlock(type="raw", raw=raw))
                 elif kind == "file":
-                    item = file_map.get(str(raw.get("fileId"))) or {}
-                    asset = self._asset(item, "file", str(raw.get("fileId")))
-                    assets.append(asset)
-                    blocks.append(ContentBlock(type="file", asset_id=asset.asset_id, url=asset.url, name=asset.original_name))
+                    reference = str(raw.get("fileId") or f"block-{index}")
+                    item = file_map.get(reference)
+                    asset = self._asset_or_warning(item, "file", reference, parse_warnings)
+                    if asset:
+                        assets.append(asset)
+                        blocks.append(ContentBlock(type="file", asset_id=asset.asset_id, url=asset.url, name=asset.original_name))
+                    else:
+                        blocks.append(ContentBlock(type="raw", raw=raw))
                 elif kind == "url_embed":
                     embed_id = str(raw.get("urlEmbedId") or "")
                     embed = url_embed_map.get(embed_id) if isinstance(url_embed_map, dict) else None
                     embed = embed if isinstance(embed, dict) else {}
+                    if not embed:
+                        parse_warnings.append(
+                            f"embed {embed_id or f'block-{index}'} 缺少 urlEmbedMap 資料，已保留原始區塊。"
+                        )
                     url, title, excerpt = self._url_embed_details(embed)
                     asset_id = None
                     post_info = embed.get("postInfo") if isinstance(embed.get("postInfo"), dict) else {}
@@ -321,32 +344,42 @@ class StructuredPostParser:
                         asset_id=asset_id, raw={"urlEmbedId": embed_id, "embed": embed},
                     ))
                 else:
+                    parse_warnings.append(
+                        f"article 第 {index} 個區塊類型 {kind or 'unknown'} 尚未支援，已保留原始資料。"
+                    )
                     blocks.append(ContentBlock(type="raw", raw=raw))
         elif post_type == "image":
             if content.get("text"):
                 blocks.append(ContentBlock(type="paragraph", text=str(content["text"])))
             for index, item in enumerate(content.get("images") or [], 1):
-                asset = self._asset(item, "image", f"image-{index}")
-                assets.append(asset)
-                blocks.append(ContentBlock(type="image", asset_id=asset.asset_id, url=asset.url))
+                asset = self._asset_or_warning(item, "image", f"image-{index}", parse_warnings)
+                if asset:
+                    assets.append(asset)
+                    blocks.append(ContentBlock(type="image", asset_id=asset.asset_id, url=asset.url))
         elif post_type == "file":
             if content.get("text"):
                 blocks.append(ContentBlock(type="paragraph", text=str(content["text"])))
             for index, item in enumerate(content.get("files") or [], 1):
-                asset = self._asset(item, "file", f"file-{index}")
-                assets.append(asset)
-                blocks.append(ContentBlock(type="file", asset_id=asset.asset_id, url=asset.url, name=asset.original_name))
+                asset = self._asset_or_warning(item, "file", f"file-{index}", parse_warnings)
+                if asset:
+                    assets.append(asset)
+                    blocks.append(ContentBlock(type="file", asset_id=asset.asset_id, url=asset.url, name=asset.original_name))
         else:
-            text = content.get("text") if isinstance(content, dict) else content
+            text = content.get("text") if isinstance(raw_content, dict) else raw_content
             if text:
                 blocks.append(ContentBlock(type="paragraph", text=str(text)))
 
-        creator = body.get("creatorId") or (body.get("user") or {}).get("name") or "unknown"
+        user = body.get("user") if isinstance(body.get("user"), dict) else {}
+        creator = body.get("creatorId") or "unknown"
+        if creator == "unknown":
+            parse_warnings.append("投稿缺少 creatorId，已使用 unknown；請更新 fixture 或檢查 FANBOX 回應。")
+        if not body.get("title"):
+            parse_warnings.append("投稿缺少 title，已使用 untitled。")
         post = Post(
             post_id=str(body["id"]),
             creator_id=str(creator),
-            creator_name=str((body.get("user") or {}).get("name") or creator),
-            creator_icon_url=str((body.get("user") or {}).get("iconUrl") or "") or None,
+            creator_name=str(user.get("name") or creator),
+            creator_icon_url=str(user.get("iconUrl") or "") or None,
             title=str(body.get("title") or "untitled"),
             published_at=_parse_datetime(body.get("publishedDatetime")),
             updated_at=_parse_datetime(body.get("updatedDatetime")),
@@ -356,6 +389,7 @@ class StructuredPostParser:
             tags=list(body.get("tags") or []),
             blocks=blocks,
             assets=self._deduplicate(assets),
+            parse_warnings=parse_warnings,
             raw=body,
         )
         cover_url = body.get("coverImageUrl")
@@ -417,6 +451,21 @@ class StructuredPostParser:
             width=item.get("width"),
             height=item.get("height"),
         )
+
+    @classmethod
+    def _asset_or_warning(
+        cls, item: object, kind: str, fallback: str, parse_warnings: list[str],
+    ) -> Asset | None:
+        if not isinstance(item, dict):
+            parse_warnings.append(f"{kind} 資源 {fallback} 缺少對應資料，已略過。")
+            return None
+        try:
+            return cls._asset(item, kind, fallback)
+        except ValueError:
+            preview_only = any(item.get(key) for key in ("thumbnailUrl", "previewUrl"))
+            suffix = "；僅有縮圖／預覽網址，不會推測為原始檔。" if preview_only else "。"
+            parse_warnings.append(f"{kind} 資源 {fallback} 缺少原始下載 URL，已略過{suffix}")
+            return None
 
     @staticmethod
     def _deduplicate(assets: Iterable[Asset]) -> list[Asset]:

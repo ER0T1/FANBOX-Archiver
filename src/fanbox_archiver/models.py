@@ -78,6 +78,7 @@ class Post(BaseModel):
     blocks: list[ContentBlock] = Field(default_factory=list)
     assets: list[Asset] = Field(default_factory=list)
     cover: Asset | None = None
+    parse_warnings: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
     content_fingerprint: str | None = None
 
@@ -104,11 +105,14 @@ class CreatorProfile(BaseModel):
     is_accepting_request: bool = False
     is_stopped: bool = False
     fanbox_url: str
+    parse_warnings: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
     content_fingerprint: str = ""
 
     def calculate_fingerprint(self) -> str:
-        value = self.model_dump(mode="json", exclude={"raw", "content_fingerprint"})
+        value = self.model_dump(
+            mode="json", exclude={"raw", "parse_warnings", "content_fingerprint"}
+        )
         for item in value.get("profile_items", []):
             item.pop("image_path", None)
             item.pop("image_sha256", None)

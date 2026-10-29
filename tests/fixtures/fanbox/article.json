@@ -1,0 +1,46 @@
+{
+  "body": {
+    "id": "fixture-article",
+    "creatorId": "fixture-creator",
+    "title": "合成 article 投稿",
+    "type": "article",
+    "publishedDatetime": "2026-01-02T03:04:05+09:00",
+    "user": {"name": "Fixture Creator"},
+    "body": {
+      "blocks": [
+        {"type": "p", "text": "前文與粗體", "styles": [{"type": "bold", "offset": 3, "length": 2}]},
+        {"type": "image", "imageId": "article-image"},
+        {"type": "file", "fileId": "article-file"},
+        {"type": "url_embed", "urlEmbedId": "article-embed"}
+      ],
+      "imageMap": {
+        "article-image": {
+          "id": "article-image",
+          "originalUrl": "https://downloads.fanbox.cc/images/post/fixture-article/original.png",
+          "width": 1200,
+          "height": 800
+        }
+      },
+      "fileMap": {
+        "article-file": {
+          "id": "article-file",
+          "name": "fixture",
+          "extension": "zip",
+          "url": "https://downloads.fanbox.cc/files/post/fixture-article/fixture.zip"
+        }
+      },
+      "urlEmbedMap": {
+        "article-embed": {
+          "type": "fanbox.post",
+          "postInfo": {
+            "id": "linked-post",
+            "creatorId": "linked-creator",
+            "title": "合成連結投稿",
+            "excerpt": "合成摘要",
+            "feeRequired": 500
+          }
+        }
+      }
+    }
+  }
+}

@@ -109,6 +109,37 @@ def test_dry_run_profiles_are_planned_without_writes(monkeypatch, tmp_path: Path
     assert not (config.storage.output_dir / "alice" / "profile").exists()
 
 
+def test_profile_parse_warnings_are_forwarded_to_shared_events(monkeypatch, tmp_path: Path):
+    class WarningProfileClient(DryRunClient):
+        def creator_profile(self, creator_id):
+            item = CreatorProfile(
+                creator_id=creator_id, name=creator_id,
+                fanbox_url=f"https://www.fanbox.cc/@{creator_id}",
+                parse_warnings=["Creator Profile 缺少創作者名稱，已使用 Creator ID。"],
+            )
+            item.content_fingerprint = item.calculate_fingerprint()
+            return item
+
+    config = AppConfig(
+        auth=AuthConfig(profile_dir=tmp_path / "profile"),
+        storage=StorageConfig(
+            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
+        ),
+    )
+    sink = CollectingEventSink()
+    monkeypatch.setattr(backup_module, "FanboxClient", WarningProfileClient)
+    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
+
+    BackupUseCase(config, sink=sink).run(BackupRequest(dry_run=True))
+
+    warnings = [event for event in sink.events if event.kind == "profile_warning"]
+    assert len(warnings) == 1
+    assert warnings[0].data == {
+        "creator_id": "alice",
+        "message": "Creator Profile 缺少創作者名稱，已使用 Creator ID。",
+    }
+
+
 def test_profile_only_mode_skips_post_scan_and_saves_profile(monkeypatch, tmp_path: Path):
     class ProfileOnlyClient(DryRunClient):
         def creator_post_pages(self, creator_id):

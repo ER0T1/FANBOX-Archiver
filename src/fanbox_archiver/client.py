@@ -8,9 +8,10 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .logging_setup import get_logger
+from .models import CreatorProfile
 from .parser import StructuredPostParser
 from .profile_parser import CreatorProfileParser
-from .models import CreatorProfile
 from .security import validate_url
 
 
@@ -64,6 +65,7 @@ class FanboxClient:
         self.request_interval = max(0.0, request_interval)
         self._last_request = 0.0
         self.post_payload_fetcher: Callable[[str], dict[str, Any]] | None = None
+        self.parse_warning_callback: Callable[[str, str], None] | None = None
 
     def __enter__(self) -> "FanboxClient":
         return self
@@ -108,7 +110,12 @@ class FanboxClient:
         post_id = url_or_id if url_or_id.isdigit() else self.post_id_from_url(url_or_id)
         payload = (self.post_payload_fetcher(post_id) if self.post_payload_fetcher
                    else self._get("post.info", {"postId": post_id}))
-        return StructuredPostParser().parse(payload)
+        post = StructuredPostParser().parse(payload)
+        for message in post.parse_warnings:
+            get_logger().warning("post parse warning post_id=%s: %s", post.post_id, message)
+            if self.parse_warning_callback:
+                self.parse_warning_callback(post.post_id, message)
+        return post
 
     def supporting_creators(self) -> list[Creator]:
         payload = self._get("plan.listSupporting")

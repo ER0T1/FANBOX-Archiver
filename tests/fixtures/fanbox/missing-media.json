@@ -1,0 +1,23 @@
+{
+  "body": {
+    "id": "fixture-missing-media",
+    "creatorId": "fixture-creator",
+    "title": "缺少原始媒體",
+    "type": "article",
+    "body": {
+      "blocks": [
+        {"type": "image", "imageId": "preview-only"},
+        {"type": "file", "fileId": "missing-file"},
+        {"type": "url_embed", "urlEmbedId": "missing-embed"}
+      ],
+      "imageMap": {
+        "preview-only": {
+          "id": "preview-only",
+          "thumbnailUrl": "https://downloads.fanbox.cc/images/post/fixture-missing-media/preview.png"
+        }
+      },
+      "fileMap": {},
+      "urlEmbedMap": {}
+    }
+  }
+}

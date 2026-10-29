@@ -1,0 +1,10 @@
+{
+  "body": {
+    "id": "fixture-text-post",
+    "creatorId": "fixture-creator",
+    "title": "合成 text 投稿",
+    "type": "text",
+    "user": {"name": "Fixture Creator"},
+    "body": {"text": "純文字內容"}
+  }
+}
