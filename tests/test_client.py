@@ -1,36 +1,38 @@
 from fanbox_archiver.client import FanboxClient
 import httpx
+import pytest
 import fanbox_archiver.client as client_module
 
 
-def test_supporting_creators_accepts_current_plans_response(monkeypatch):
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        pytest.param(
+            {"plans": [
+                {"creatorId": "alice", "user": {"name": "Alice"}, "id": "plan-1"},
+                {"creatorId": "alice", "user": {"name": "Alice"}, "id": "plan-2"},
+                {"creatorId": "bob", "user": {"name": "Bob"}, "id": "plan-3"},
+                {"user": {"name": "missing id"}},
+                None,
+            ]},
+            [("alice", "Alice"), ("bob", "Bob")],
+            id="current-plans-deduplicates-and-skips-invalid",
+        ),
+        pytest.param(
+            {"items": [{"creator_id": "legacy", "creatorName": "Legacy"}]},
+            [("legacy", "Legacy")],
+            id="legacy-items-remains-compatible",
+        ),
+    ],
+)
+def test_supporting_creators_response_formats(monkeypatch, body, expected):
     client = FanboxClient(cookie="test")
-    monkeypatch.setattr(client, "_get", lambda path: {"body": {"plans": [
-        {"creatorId": "alice", "user": {"name": "Alice"}, "id": "plan-1"},
-        {"creatorId": "alice", "user": {"name": "Alice"}, "id": "plan-2"},
-        {"creatorId": "bob", "user": {"name": "Bob"}, "id": "plan-3"},
-        {"user": {"name": "missing id"}},
-        None,
-    ]}})
+    monkeypatch.setattr(client, "_get", lambda path: {"body": body})
     try:
         creators = client.supporting_creators()
     finally:
         client.close()
-    assert [(item.creator_id, item.name) for item in creators] == [
-        ("alice", "Alice"), ("bob", "Bob")
-    ]
-
-
-def test_supporting_creators_remains_compatible_with_items_response(monkeypatch):
-    client = FanboxClient(cookie="test")
-    monkeypatch.setattr(client, "_get", lambda path: {"body": {"items": [
-        {"creator_id": "legacy", "creatorName": "Legacy"},
-    ]}})
-    try:
-        creators = client.supporting_creators()
-    finally:
-        client.close()
-    assert [(item.creator_id, item.name) for item in creators] == [("legacy", "Legacy")]
+    assert [(item.creator_id, item.name) for item in creators] == expected
 
 
 def test_creator_pagination_accepts_current_page_urls_and_posts(monkeypatch):

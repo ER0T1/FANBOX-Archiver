@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import fanbox_archiver.application.backup as backup_module
+import pytest
 from fanbox_archiver.application import BackupRequest, BackupUseCase
 from fanbox_archiver.application.events import CollectingEventSink
 from fanbox_archiver.client import Creator, PostSummary
@@ -28,16 +29,22 @@ class DryRunClient:
         return [PostSummary("123", title="example")]
 
 
-def test_dry_run_use_case_emits_serializable_events_without_recording_run(monkeypatch, tmp_path: Path):
+@pytest.fixture
+def backup_config(monkeypatch, tmp_path: Path) -> AppConfig:
     config = AppConfig(
         auth=AuthConfig(profile_dir=tmp_path / "profile"),
         storage=StorageConfig(
             output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
         ),
     )
+    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
+    return config
+
+
+def test_dry_run_use_case_emits_serializable_events_without_recording_run(monkeypatch, backup_config):
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", DryRunClient)
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     outcome = BackupUseCase(config, sink=sink).run(BackupRequest(dry_run=True))
 
@@ -53,18 +60,12 @@ def test_dry_run_use_case_emits_serializable_events_without_recording_run(monkey
     assert backup_module.ArchiveService(config).db.latest_run() is None
 
 
-def test_cancelled_use_case_stops_before_network_client(monkeypatch, tmp_path: Path):
+def test_cancelled_use_case_stops_before_network_client(backup_config):
     from fanbox_archiver.application import BackupCancelled, CancellationToken
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     token = CancellationToken()
     token.cancel()
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     try:
         BackupUseCase(config, cancellation=token).run(BackupRequest(dry_run=True))
@@ -76,7 +77,7 @@ def test_cancelled_use_case_stops_before_network_client(monkeypatch, tmp_path: P
     assert backup_module.ArchiveService(config).db.latest_run() is None
 
 
-def test_dry_run_profiles_are_planned_without_writes(monkeypatch, tmp_path: Path):
+def test_dry_run_profiles_are_planned_without_writes(monkeypatch, backup_config):
     class ProfileClient(DryRunClient):
         def creator_profile(self, creator_id):
             item = CreatorProfile(
@@ -86,15 +87,9 @@ def test_dry_run_profiles_are_planned_without_writes(monkeypatch, tmp_path: Path
             item.content_fingerprint = item.calculate_fingerprint()
             return item
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", ProfileClient)
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     BackupUseCase(config, sink=sink).run(BackupRequest(dry_run=True))
 
@@ -109,7 +104,7 @@ def test_dry_run_profiles_are_planned_without_writes(monkeypatch, tmp_path: Path
     assert not (config.storage.output_dir / "alice" / "profile").exists()
 
 
-def test_profile_parse_warnings_are_forwarded_to_shared_events(monkeypatch, tmp_path: Path):
+def test_profile_parse_warnings_are_forwarded_to_shared_events(monkeypatch, backup_config):
     class WarningProfileClient(DryRunClient):
         def creator_profile(self, creator_id):
             item = CreatorProfile(
@@ -120,15 +115,9 @@ def test_profile_parse_warnings_are_forwarded_to_shared_events(monkeypatch, tmp_
             item.content_fingerprint = item.calculate_fingerprint()
             return item
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", WarningProfileClient)
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     BackupUseCase(config, sink=sink).run(BackupRequest(dry_run=True))
 
@@ -140,7 +129,7 @@ def test_profile_parse_warnings_are_forwarded_to_shared_events(monkeypatch, tmp_
     }
 
 
-def test_profile_only_mode_skips_post_scan_and_saves_profile(monkeypatch, tmp_path: Path):
+def test_profile_only_mode_skips_post_scan_and_saves_profile(monkeypatch, backup_config):
     class ProfileOnlyClient(DryRunClient):
         def creator_post_pages(self, creator_id):
             raise AssertionError("profile-only mode must not scan posts")
@@ -153,15 +142,9 @@ def test_profile_only_mode_skips_post_scan_and_saves_profile(monkeypatch, tmp_pa
             item.content_fingerprint = item.calculate_fingerprint()
             return item
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", ProfileOnlyClient)
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     outcome = BackupUseCase(config, sink=sink).run(BackupRequest(mode="profile"))
 
@@ -172,7 +155,7 @@ def test_profile_only_mode_skips_post_scan_and_saves_profile(monkeypatch, tmp_pa
     assert backup_module.ArchiveService(config).db.latest_profile_version("alice") is not None
 
 
-def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, tmp_path: Path):
+def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, backup_config):
     class FancardOnlyClient(DryRunClient):
         def creator_post_pages(self, creator_id):
             raise AssertionError("fancard-only mode must not scan posts")
@@ -194,12 +177,7 @@ def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, tmp_path: Pat
                 "supporterCardImageUrl": "",
             }}
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", FancardOnlyClient)
     monkeypatch.setattr(backup_module, "BrowserPostSession", FancardSession)
@@ -215,7 +193,7 @@ def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, tmp_path: Pat
     assert row is not None
 
 
-def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch, tmp_path: Path):
+def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch, backup_config):
     class PostClient(DryRunClient):
         def supporting_creators(self):
             raise AssertionError("targeted posts must not scan supporting creators")
@@ -228,15 +206,9 @@ def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch,
                 content_fingerprint=f"target-{post_id}",
             )
 
-    config = AppConfig(
-        auth=AuthConfig(profile_dir=tmp_path / "profile"),
-        storage=StorageConfig(
-            output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"
-        ),
-    )
+    config = backup_config
     sink = CollectingEventSink()
     monkeypatch.setattr(backup_module, "FanboxClient", PostClient)
-    monkeypatch.setattr(backup_module, "cookie_header", lambda *args, **kwargs: "cookie=value")
 
     preview = BackupUseCase(config, sink=sink).run(BackupRequest(
         posts=("123", "456"), dry_run=True,

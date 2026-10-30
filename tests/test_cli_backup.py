@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import timedelta, timezone
 
 from typer.testing import CliRunner
+import pytest
 
 import fanbox_archiver.cli as cli
 from fanbox_archiver.config import AppConfig, StorageConfig
@@ -12,17 +13,22 @@ from fanbox_archiver.service import ArchiveService
 runner = CliRunner()
 
 
+@pytest.fixture
+def configured_cli(monkeypatch, tmp_path: Path) -> AppConfig:
+    config = AppConfig(storage=StorageConfig(
+        output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
+    ))
+    monkeypatch.setattr(cli, "load_config", lambda path: config)
+    return config
+
+
 def test_format_local_time_converts_utc_without_changing_storage():
     taipei = timezone(timedelta(hours=8))
     assert cli.format_local_time("2026-10-26T07:43:33+00:00", taipei) == "2026-10-26T15:43:33+08:00"
 
 
-def test_backup_normalizes_multiple_creators_and_forwards_options(monkeypatch, tmp_path: Path):
+def test_backup_normalizes_multiple_creators_and_forwards_options(monkeypatch, configured_cli):
     captured = {}
-    config = AppConfig(storage=StorageConfig(
-        output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
-    ))
-    monkeypatch.setattr(cli, "load_config", lambda path: config)
 
     def fake_run(settings, **kwargs):
         captured.update(kwargs)
@@ -43,12 +49,8 @@ def test_backup_normalizes_multiple_creators_and_forwards_options(monkeypatch, t
     assert captured["include_fancard"] is True
 
 
-def test_backup_normalizes_multiple_posts(monkeypatch, tmp_path: Path):
+def test_backup_normalizes_multiple_posts(monkeypatch, configured_cli):
     captured = {}
-    config = AppConfig(storage=StorageConfig(
-        output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
-    ))
-    monkeypatch.setattr(cli, "load_config", lambda path: config)
     monkeypatch.setattr(cli, "_run_backup", lambda settings, **kwargs: captured.update(kwargs))
     result = runner.invoke(cli.app, [
         "backup", "--post", "123",
@@ -61,11 +63,7 @@ def test_backup_normalizes_multiple_posts(monkeypatch, tmp_path: Path):
     assert captured["scope"] == "posts:123,456"
 
 
-def test_backup_rejects_mutually_exclusive_and_dependent_options(monkeypatch, tmp_path: Path):
-    config = AppConfig(storage=StorageConfig(
-        output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
-    ))
-    monkeypatch.setattr(cli, "load_config", lambda path: config)
+def test_backup_rejects_mutually_exclusive_and_dependent_options(configured_cli):
     mixed = runner.invoke(cli.app, ["backup", "--creator", "alice", "--post", "123"])
     assert mixed.exit_code == 2
     assert "不可同時使用" in mixed.output
@@ -102,11 +100,7 @@ def test_creator_listing_includes_local_count_and_sync_status(tmp_path: Path):
     assert row["last_sync"]
 
 
-def test_invalid_creator_input_returns_nonzero(monkeypatch, tmp_path: Path):
-    config = AppConfig(storage=StorageConfig(
-        output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
-    ))
-    monkeypatch.setattr(cli, "load_config", lambda path: config)
+def test_invalid_creator_input_returns_nonzero(configured_cli):
     result = runner.invoke(cli.app, ["backup", "--creator", "https://www.fanbox.cc/not-a-creator"])
     assert result.exit_code == 2
     assert "格式錯誤" in result.output
