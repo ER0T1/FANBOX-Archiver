@@ -60,4 +60,6 @@ test("TypeScript core formats archive values", () => {
   assert.equal(ui.feeLabel(0), "全體公開");
   assert.equal(ui.feeLabel(300), "¥300");
   assert.equal(ui.feeLabel(null), "檔位未記錄");
+  assert.equal(ui.stopReasonLabel("limit_reached"), "已達下載上限");
+  assert.equal(ui.stopReasonLabel("backfill_completed"), "歷史回補已完成");
 });

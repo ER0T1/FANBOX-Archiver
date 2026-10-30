@@ -19,7 +19,7 @@ namespace FanboxUI {
 
   export function renderSettingsPage(
     data: SettingsResponse, message: string, activeJob: WebJob | null,
-    onSave: (patch: SettingsPatch) => void,
+    onSave: (patch: SettingsPatch) => Promise<string | null>,
   ): HTMLElement {
     const value = data.editable;
     const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
@@ -36,10 +36,13 @@ namespace FanboxUI {
     const preserveDeleted = settingCheckbox("保留遠端已刪除投稿的本機備份", value.sync.preserve_deleted_posts);
     const rotate = settingCheckbox("輪替創作者處理順序", value.sync.rotate_creators);
     const maxPosts = settingNumber(
-      "備份表單預設投稿上限", value.sync.max_posts_per_run, 1, 100, 1,
-      "建立工作時可針對單次備份覆寫，不會反向修改此設定。",
+      "單次最多下載投稿數", value.sync.max_posts_per_run, 1, 100, 1,
+      "new、updated 與 retry 共用的下載配額；略過的投稿不占配額。新工作可單次覆寫。",
     );
-    const unchangedStop = settingNumber("連續未變時停止回補", value.sync.recent_unchanged_stop_count, 1, 500);
+    const unchangedStop = settingNumber(
+      "連續未變投稿停止掃描數", value.sync.recent_unchanged_stop_count, 1, 500, 1,
+      "連續遇到已完成且未更新投稿時停止掃描；這不是下載數量。",
+    );
     const defaultDryRun = settingCheckbox("完整備份只預覽，不下載", value.backup_defaults.dry_run);
     const defaultProfile = settingCheckbox("預設拉取個人資料", value.backup_defaults.include_profile);
     const defaultFancard = settingCheckbox("預設拉取粉絲卡", value.backup_defaults.include_fancard);
@@ -52,10 +55,12 @@ namespace FanboxUI {
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const blocked = Boolean(activeJob);
-    const form = h("form", {class: "settings-form", "aria-disabled": blocked, onsubmit: (event: Event) => {
+    const feedback = h("p", {class: "settings-error", role: "alert", hidden: true});
+    const form = h("form", {class: "settings-form", "aria-disabled": blocked, onsubmit: async (event: Event) => {
       event.preventDefault();
       if (blocked) return;
-      onSave({download: {
+      feedback.hidden = true;
+      const error = await onSave({download: {
         original_images: originalImages.input.checked, download_attachments: attachments.input.checked,
         download_cover: covers.input.checked, resume: resume.input.checked, verify_sha256: hashes.input.checked,
         retry_count: Number(retries.input.value), request_interval_seconds: Number(interval.input.value),
@@ -73,24 +78,36 @@ namespace FanboxUI {
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
         keep_days: Number(keepDays.input.value)}});
+      if (error) {
+        feedback.textContent = `儲存失敗：${error}`;
+        feedback.hidden = false;
+      }
     }},
     h("fieldset", {disabled: blocked},
-    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "DOWNLOAD"), h("h2", {}, "下載"),
-      h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node),
-      h("div", {class: "setting-toggles"}, originalImages.node, attachments.node, covers.node, resume.node, hashes.node)),
-    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "SYNC"), h("h2", {}, "同步"),
-      h("div", {class: "settings-grid"}, maxPosts.node, unchangedStop.node),
-      h("div", {class: "setting-toggles"}, skipCompleted.node, checkUpdates.node, preserveDeleted.node, rotate.node)),
-    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "BACKUP DEFAULTS"), h("h2", {}, "新備份表單預設值"),
-      h("p", {class: "setting-help"}, "每次進入新工作表單時套用；重試工作仍沿用原工作設定。"),
-      h("div", {class: "setting-toggles"}, defaultDryRun.node, defaultProfile.node, defaultFancard.node)),
-    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT"), h("h2", {}, "Markdown 與日誌"),
-      h("div", {class: "settings-grid"}, h("label", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
-      h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node, fileLogs.node)),
+    h("section", {class: "settings-card backup-settings"}, h("p", {class: "eyebrow"}, "BACKUP"), h("h2", {}, "備份"),
+      h("section", {class: "settings-section"}, h("h3", {}, "工作數量與掃描停止"),
+        h("p", {class: "settings-section-description"}, "下載配額與掃描停止門檻是兩個不同概念。"),
+        h("div", {class: "settings-grid two-columns"}, maxPosts.node, unchangedStop.node)),
+      h("section", {class: "settings-section"}, h("h3", {}, "新工作預設"),
+        h("p", {class: "settings-section-description"}, "每次進入新工作表單時套用；重試仍沿用原工作設定。"),
+        h("div", {class: "setting-toggles"}, defaultDryRun.node, defaultProfile.node, defaultFancard.node)),
+      h("section", {class: "settings-section"}, h("h3", {}, "內容與保存"),
+        h("div", {class: "setting-toggles"}, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)),
+      h("section", {class: "settings-section"}, h("h3", {}, "更新判定與處理順序"),
+        h("div", {class: "setting-toggles"}, skipCompleted.node, checkUpdates.node, rotate.node)),
+      h("section", {class: "settings-section"}, h("h3", {}, "網路與失敗處理"),
+        h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node))),
+    h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT & LOGGING"), h("h2", {}, "輸出與紀錄"),
+      h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
+        h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),
+      h("section", {class: "settings-section"}, h("h3", {}, "日誌"),
+        h("div", {class: "settings-grid two-columns"}, h("label", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
+        h("div", {class: "setting-toggles"}, fileLogs.node))),
     h("div", {class: "settings-actions"}, h("button", {type: "submit", class: "primary",
       disabled: !data.writable || blocked}, "儲存設定"),
       !data.writable ? h("span", {class: "notice"}, "目前伺服器未指定可寫入的設定檔。") : null,
-      blocked ? h("span", {class: "notice"}, "工作結束後即可儲存設定。") : null)));
+      blocked ? h("span", {class: "notice"}, "工作結束後即可儲存設定。") : null,
+      feedback)));
     return h("section", {class: "page settings-page"},
       h("header", {class: "heading"}, h("div", {}, h("p", {class: "eyebrow"}, "LOCAL SETTINGS"), h("h1", {}, "設定"),
         h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))),

@@ -57,6 +57,12 @@ namespace FanboxUI {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }
 
+  export function stopReasonLabel(reason: string): string {
+    return ({limit_reached: "已達下載上限", remote_exhausted: "遠端頁面已掃描完畢",
+      backfill_completed: "歷史回補已完成", unchanged_threshold: "已達連續未變停止門檻",
+      eligible_exhausted: "其餘投稿不需下載"} as Record<string, string>)[reason] || "掃描完成";
+  }
+
   export function isActiveJob(job: WebJob | null | undefined): boolean {
     return Boolean(job && activeStatuses.has(job.status));
   }
@@ -91,7 +97,7 @@ namespace FanboxUI {
   function eventLabel(event: WebJobEvent): string {
     const data = event.data;
     if (event.kind === "job_started") return `工作開始（${valueString(data, "scope")}）`;
-    if (event.kind === "plan_ready") return `計畫：新增 ${valueNumber(data, "new")}、更新 ${valueNumber(data, "updated")}、重試 ${valueNumber(data, "retried")}、略過 ${valueNumber(data, "skipped")}`;
+    if (event.kind === "plan_ready") return `計畫：上限 ${valueNumber(data, "requested_max_posts")}、發現 ${valueNumber(data, "discovered")}、符合 ${valueNumber(data, "eligible")}、選取 ${valueNumber(data, "selected")}、略過 ${valueNumber(data, "skipped")}（${stopReasonLabel(valueString(data, "stop_reason"))}）`;
     if (event.kind === "fancard_finished") return `粉絲卡 ${valueString(data, "creator_id")}：${valueString(data, "status")}`;
     if (event.kind === "profile_started") return `正在備份 @${valueString(data, "creator_id")} 的個人資料`;
     if (event.kind === "profile_finished") return `個人資料 ${valueString(data, "creator_id")}：${valueString(data, "status")}（v${String(valueNumber(data, "version")).padStart(4, "0")}）`;
@@ -135,9 +141,14 @@ namespace FanboxUI {
         h("td", {class: `profile-result ${profile || "none"}`}, profile || "—"));
     });
     const creatorCount = Array.isArray(data.creators) ? data.creators.length : valueNumber(data, "creators") || rows.length;
+    const requested = valueNumber(data, "requested_max_posts");
+    const selected = valueNumber(data, "selected");
+    const reason = stopReasonLabel(valueString(data, "stop_reason"));
     return h("section", {class: "plan-panel"},
       h("div", {class: "section-title"}, h("div", {}, h("p", {class: "eyebrow"}, "BACKUP PLAN"), h("h2", {}, "本次備份摘要")),
         h("span", {class: "plan-creators"}, `${creatorCount} 位創作者`)),
+      h("p", {class: "plan-capacity"}, `上限 ${requested}／發現 ${valueNumber(data, "discovered")}／符合 ${valueNumber(data, "eligible")}／選取 ${selected}／略過 ${valueNumber(data, "skipped")}`,
+        selected < requested ? h("strong", {}, reason) : null),
       h("div", {class: "metric-grid"}, metrics.map(([label, value, tone]) => h("div", {class: `metric ${tone}`}, h("strong", {}, value), h("span", {}, label)))),
       rows.length ? h("div", {class: "table-scroll"}, h("table", {class: "plan-table"},
         h("thead", {}, h("tr", {}, h("th", {}, "創作者"), h("th", {}, "新增"), h("th", {}, "更新"), h("th", {}, "重試"), h("th", {}, "略過"), h("th", {}, "發現"), h("th", {}, "Profile"))),

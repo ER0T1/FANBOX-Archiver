@@ -45,6 +45,14 @@ class PollingJobFixture:
                     "updated": 0,
                     "retried": 0,
                     "skipped": 53,
+                    "discovered": 55,
+                    "eligible": 2,
+                    "selected": 2,
+                    "deferred": 0,
+                    "requested_max_posts": 20,
+                    "pages_scanned": 2,
+                    "available_pages": 32,
+                    "stop_reason": "eligible_exhausted",
                     "creators": ["alice"],
                     "scans": [{
                         "creator_id": "alice", "new": 2, "updated": 0,
@@ -315,6 +323,8 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     page.get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="備份工作", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="本次備份摘要", exact=True)).to_be_visible()
+    expect(page.locator(".plan-capacity")).to_contain_text("上限 20／發現 55／符合 2／選取 2／略過 53")
+    expect(page.get_by_text("其餘投稿不需下載", exact=True)).to_be_visible()
     expect(page.get_by_text("cover.jpg", exact=True)).to_be_visible()
 
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -336,15 +346,33 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     jobs.hold_backup = False
     expect(save_button).to_be_enabled(timeout=5_000)
     expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
-    max_posts = page.get_by_role("spinbutton", name="備份表單預設投稿上限")
+    expect(page.get_by_role("heading", name="備份", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="輸出與紀錄", exact=True)).to_be_visible()
+    expect(page.get_by_text("DOWNLOAD", exact=True)).not_to_be_visible()
+    expect(page.get_by_text("SYNC", exact=True)).not_to_be_visible()
+    expect(page.get_by_text("BACKUP DEFAULTS", exact=True)).not_to_be_visible()
+    max_posts = page.get_by_role("spinbutton", name="單次最多下載投稿數")
     max_posts.fill("25")
+    unchanged_stop = page.get_by_role("spinbutton", name="連續未變投稿停止掃描數")
+    unchanged_stop.fill("50")
     page.get_by_role("checkbox", name="完整備份只預覽，不下載").check()
     page.get_by_role("checkbox", name="預設拉取個人資料").uncheck()
+    page.route("**/api/config", lambda route: route.fulfill(
+        status=422, content_type="application/json", body='{"detail":"模擬儲存失敗"}',
+    ), times=1)
+    save_button.click()
+    expect(page.get_by_text("儲存失敗：模擬儲存失敗", exact=True)).to_be_visible()
+    expect(max_posts).to_have_value("25")
     save_button.click()
     expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     assert AppConfig.load(config_path).sync.max_posts_per_run == 25
+    assert AppConfig.load(config_path).sync.recent_unchanged_stop_count == 50
     assert AppConfig.load(config_path).backup_defaults.dry_run is True
     assert AppConfig.load(config_path).backup_defaults.include_profile is False
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
 
     page.get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()

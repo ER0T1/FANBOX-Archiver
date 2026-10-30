@@ -56,8 +56,14 @@ def test_dry_run_use_case_emits_serializable_events_without_recording_run(monkey
     assert sink.events[1].model_dump()["data"]["selected"] == 1
     assert sink.events[1].model_dump()["data"]["creators"] == 1
     assert sink.events[1].model_dump()["data"]["creator_ids"] == ["alice"]
+    assert sink.events[1].data["requested_max_posts"] == 20
+    assert sink.events[1].data["eligible"] == 1
+    assert sink.events[1].data["pages_scanned"] == 1
+    assert sink.events[1].data["available_pages"] == 1
+    assert sink.events[1].data["stop_reason"] == "remote_exhausted"
     assert outcome.run_id == 0
     assert backup_module.ArchiveService(config).db.latest_run() is None
+    assert backup_module.ArchiveService(config).db.creator_state("alice") is None
 
 
 def test_cancelled_use_case_stops_before_network_client(backup_config):

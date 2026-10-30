@@ -99,6 +99,8 @@ class BackupUseCase:
                         syncing.plan(creators, request.max_posts or self.config.sync.max_posts_per_run)
                         if request.mode == "full" else self._metadata_plan(creators)
                     )
+                for warning in plan.warnings:
+                    self._emit("warning", message=warning)
                 include_profile = request.mode == "profile" or (
                     request.mode == "full"
                     and (request.include_profile if request.include_profile is not None else True)
@@ -123,7 +125,11 @@ class BackupUseCase:
                     return BackupOutcome(run_id, plan, None, True)
 
                 if not plan.selected and not include_fancard:
-                    self._finish(archive, run_id, plan, None)
+                    if request.mode == "full" and not request.posts:
+                        result = syncing.execute(
+                            plan, should_cancel=lambda: self.cancellation.cancelled,
+                        )
+                    self._finish(archive, run_id, plan, result)
                     finished = True
                     self._emit(
                         "job_finished", run_id=run_id, dry_run=False,
@@ -182,6 +188,10 @@ class BackupUseCase:
                             )
                         finally:
                             archive.progress_callback = None
+                    elif request.mode == "full" and not request.posts:
+                        result = syncing.execute(
+                            plan, should_cancel=lambda: self.cancellation.cancelled,
+                        )
 
             self._finish(archive, run_id, plan, result)
             finished = True
@@ -280,7 +290,7 @@ class BackupUseCase:
             creators=creator_ids,
             scans=[CreatorScan(creator_id=creator_id) for creator_id in creator_ids],
             selected=[], discovered=0, new=0, updated=0, retried=0,
-            skipped=0, deferred=0,
+            skipped=0, deferred=0, eligible=0,
         )
 
     def _auth_material(self, browser: str | None) -> tuple[bool, str, str | None]:
@@ -372,6 +382,12 @@ class BackupUseCase:
                     "updated": sum(item.action == "updated" for item in scan.items),
                     "retry": sum(item.action == "retry" for item in scan.items),
                     "profile": profile_results.get(scan.creator_id),
+                    "eligible": len(scan.items),
+                    "pages_scanned": scan.pages_scanned,
+                    "available_pages": scan.available_pages,
+                    "backfill_cursor_before": scan.backfill_cursor_before,
+                    "backfill_completed_before": scan.backfill_completed_before,
+                    "stop_reason": scan.stop_reason,
                 }
                 for scan in plan.scans
             ],
@@ -382,4 +398,15 @@ class BackupUseCase:
             "skipped": plan.skipped,
             "deferred": plan.deferred,
             "selected": len(plan.selected),
+            "requested_max_posts": plan.requested_max_posts,
+            "eligible": plan.eligible,
+            "pages_scanned": plan.pages_scanned,
+            "available_pages": plan.available_pages,
+            "backfill_cursor_before": {
+                scan.creator_id: scan.backfill_cursor_before for scan in plan.scans
+            },
+            "backfill_completed_before": {
+                scan.creator_id: scan.backfill_completed_before for scan in plan.scans
+            },
+            "stop_reason": plan.stop_reason,
         }

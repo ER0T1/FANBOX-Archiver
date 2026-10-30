@@ -410,19 +410,20 @@ namespace FanboxUI {
         const [data, jobData] = await Promise.all([getSettings(), getJobs()]);
         updateActiveJob(jobData.items);
         app.replaceChildren(renderSettingsPage(data, message, state.activeJob,
-          patch => void saveSettingsForm(patch)));
+          patch => saveSettingsForm(patch)));
         scheduleJobRefresh();
       } catch (error) {
         errorView(error);
       }
     }
 
-    async function saveSettingsForm(patch: SettingsPatch): Promise<void> {
+    async function saveSettingsForm(patch: SettingsPatch): Promise<string | null> {
       try {
         await saveSettings(patch, sessionToken);
         void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+        return null;
       } catch (error) {
-        errorView(error);
+        return error instanceof Error ? error.message : String(error);
       }
     }
 
