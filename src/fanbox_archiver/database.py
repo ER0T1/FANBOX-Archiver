@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS web_job_events (
   coalesce_key TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
+CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at DESC,post_id DESC);
 CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status);
 CREATE INDEX IF NOT EXISTS idx_post_versions_post ON post_versions(post_id,version_number);
 CREATE INDEX IF NOT EXISTS idx_fancard_versions_creator ON fancard_versions(creator_id,target_month,version_number);

@@ -55,13 +55,13 @@ class ArchiveReader:
             rows = list(db.execute(
                 f"""
                 SELECT p.*,c.name AS creator_name,
-                       COUNT(v.version_id) AS version_count,
-                       MAX(CASE WHEN v.status='completed' THEN v.version_number END) AS latest_version
+                       (SELECT COUNT(*) FROM post_versions v
+                        WHERE v.post_id=p.post_id) AS version_count,
+                       (SELECT MAX(v.version_number) FROM post_versions v
+                        WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
                 FROM posts p
                 JOIN creators c ON c.creator_id=p.creator_id
-                LEFT JOIN post_versions v ON v.post_id=p.post_id
                 {where}
-                GROUP BY p.post_id
                 ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
                 LIMIT ? OFFSET ?
                 """,

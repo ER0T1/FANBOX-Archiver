@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**正式版本：v1.3.13（2026-10-30）**
+**正式版本：v1.3.14（2026-10-30）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -20,6 +20,21 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.14 更新重點
+
+- 新增完全合成、去識別化的大型封存效能基準，預設建立 20 位創作者與 1,000 篇投稿，不會連線 FANBOX 或使用真實帳號資料。
+- 分段量測封存寫入、磁碟讀取、JSON 解析、純 SQLite、含 JSON 摘要補值的 Reader、動態 API、靜態索引首次／重用與瀏覽器首屏，並輸出機器可讀的 `benchmark.json`。
+- 基準同步輸出文章列表、創作者篩選與搜尋的 SQLite `EXPLAIN QUERY PLAN`，讓索引或快取調整以實測結果為依據。
+- 1,000 篇實測定位首頁列表排序為可改善路徑，因此加入發布時間索引並改用索引支援的版本統計子查詢；萬用字元搜尋維持原行為，不在缺乏大型資料證據時導入全文索引。
+
+開發者可在專案根目錄執行：
+
+```powershell
+python scripts/benchmark_archive.py --root .tmp/benchmark-archive --reset --browser chrome
+```
+
+輸出目錄已由 Git 忽略；若不需瀏覽器首屏量測，可改用 `--browser none`。既有非空目錄預設不會覆寫，只有明確加入 `--reset` 才會重建指定的基準目錄。
 
 ## v1.3.13 更新重點
 
