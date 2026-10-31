@@ -20,7 +20,7 @@ from .security import confined_path, safe_filename
 from .storage import BackupStorage
 
 
-TEMPLATE_VERSION = 10
+TEMPLATE_VERSION = 11
 TAIPEI = timezone(timedelta(hours=8))
 
 
@@ -642,13 +642,27 @@ class IndexBuilder:
         )
         number = int(row["version_number"])
         nav = self._version_nav(all_versions, number, output, "fancards", f"{row['creator_id']}/{row['target_month']}")
-        perks = normalize_fancard_perks(plan.get("perks"))
+        perks = normalize_fancard_perks(
+            plan.get("perks"), creator_id=str(plan.get("creatorId") or row["creator_id"])
+        )
         perk_cards = "".join(
             '<article class="perk-card">'
             f'<div class="perk-card-heading"><h3>{html.escape(str(perk["label"]))}</h3>'
             f'<span class="perk-status status-{html.escape(str(perk["status"]))}">'
             f'{html.escape(str(perk["status_label"]))}</span></div>'
-            f'<p>{html.escape(str(perk["description"]))}</p></article>'
+            f'<p>{html.escape(str(perk["description"]))}</p>'
+            + (
+                f'<p class="perk-guidance">{html.escape(str(perk["guidance"]))} '
+                f'<a href="{html.escape(str(perk["settings_url"]), quote=True)}" '
+                'target="_blank" rel="noreferrer noopener">帳號設定 ↗</a></p>'
+                if perk["guidance"] and perk["settings_url"] else ""
+            )
+            + (
+                f'<a class="perk-action" href="{html.escape(str(perk["action_url"]), quote=True)}" '
+                f'target="_blank" rel="noreferrer noopener">{html.escape(str(perk["action_label"]))} ↗</a>'
+                if perk["action_url"] and perk["action_label"] else ""
+            )
+            + '</article>'
             for perk in perks
         )
         perks_section = (

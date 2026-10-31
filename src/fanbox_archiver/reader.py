@@ -291,7 +291,7 @@ class ArchiveReader:
             "plan_title": str(plan.get("title") or ""),
             "fee": plan.get("fee"),
             "description": str(plan.get("description") or ""),
-            "perks": normalize_fancard_perks(plan.get("perks")),
+            "perks": normalize_fancard_perks(plan.get("perks"), creator_id=creator_id),
             "support_start": body.get("supportStartDatetime"),
             "support_months": months,
             "version": number,

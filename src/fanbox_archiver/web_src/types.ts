@@ -167,6 +167,11 @@ namespace FanboxUI {
     status: FanCardPerkStatus;
     status_label: string;
     description: string;
+    guidance: string;
+    settings_url: string | null;
+    settings_label: string | null;
+    action_url: string | null;
+    action_label: string | null;
     available: boolean | null;
     supporter_accessible: boolean | null;
   }

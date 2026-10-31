@@ -130,8 +130,12 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     assert "data-theme-toggle" in card_page
     assert "方案資訊" in card_page
     assert "方案權益" in card_page
-    assert "Discord 特典" in card_page
+    assert "加入 Discord 伺服器" in card_page
     assert "目前可使用" in card_page
+    assert "Discord 連結可在帳號設定中編輯" in card_page
+    assert 'href="https://www.fanbox.cc/user/settings"' in card_page
+    assert 'href="https://www.fanbox.cc/@alice/plans"' in card_page
+    assert "在 FANBOX 開啟 Discord" in card_page
     assert "supporterAccessible" not in card_page
     assert "方案說明／密碼" not in card_page
     profile_page = (root / "_site/creators/alice/profile/v0002.html").read_text(encoding="utf-8")

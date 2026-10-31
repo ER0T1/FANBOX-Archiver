@@ -165,9 +165,14 @@ def test_reader_lists_fancards_without_exposing_transactions(tmp_path: Path):
     assert card["description"] == "Password: private"
     assert card["support_months"] == ["2026-10"]
     assert card["perks"] == [{
-        "key": "discord", "label": "Discord 特典", "status": "accessible",
+        "key": "discord", "label": "加入 Discord 伺服器", "status": "accessible",
         "status_label": "目前可使用",
-        "description": "Discord 特典已包含在方案中；封存資料未包含可安全重播的外部加入連結。",
+        "description": "連結 Discord 後，即可加入創作者準備的 Discord 伺服器並參與社群交流。",
+        "guidance": "Discord 連結可在帳號設定中編輯。",
+        "settings_url": "https://www.fanbox.cc/user/settings",
+        "settings_label": "帳號設定",
+        "action_url": "https://www.fanbox.cc/@alice/plans",
+        "action_label": "在 FANBOX 開啟 Discord",
         "available": True, "supporter_accessible": True,
     }]
     assert "private-transaction" not in str(card)

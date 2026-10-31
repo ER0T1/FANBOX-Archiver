@@ -110,7 +110,10 @@ def test_fancard_contract_fixture_saves_without_private_transaction_fields(tmp_p
     markdown = (version / "fancard.md").read_text(encoding="utf-8")
     assert "合成的方案說明" in markdown
     assert "## 方案權益" in markdown
-    assert "Discord 特典" in markdown
+    assert "加入 Discord 伺服器" in markdown
+    assert "Discord 連結可在[帳號設定]" in markdown
+    assert "https://www.fanbox.cc/user/settings" in markdown
+    assert "https://www.fanbox.cc/@fixture-creator/plans" in markdown
     assert "supporterAccessible" not in markdown
     saved = json.loads((version / "fancard.json").read_text(encoding="utf-8"))
     transaction = saved["body"]["supportTransactions"][0]

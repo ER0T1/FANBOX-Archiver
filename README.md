@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**正式版本：v1.3.16（2026-10-31）**
+**正式版本：v1.3.17（2026-10-31）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -21,6 +21,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - SHA-256、檔案大小及圖片格式／尺寸驗證。
 - 嚴格 HTTPS 主機白名單、Windows 安全檔名及目錄穿越防護。
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
+
+## v1.3.17 更新重點
+
+- 修正 Discord 方案權益只顯示狀態、沒有呈現 FANBOX 嵌入內容的問題；現在包含「加入 Discord 伺服器」標題、用途說明與帳號連結提示。
+- 可使用的 Discord 權益提供「在 FANBOX 開啟 Discord」操作，安全導回該創作者的 FANBOX 方案頁，由 FANBOX 的即時登入狀態完成加入流程；不保存或猜測 Discord 邀請碼。
+- 動態閱讀器、完全離線靜態頁與 `fancard.md` 同步呈現帳號設定與方案頁連結；未知或不可存取權益仍維持保守且無外部操作。
+- 靜態模板版本提升至 11，既有封存重新建置後會套用完整嵌入內容。
 
 ## v1.3.16 更新重點
 

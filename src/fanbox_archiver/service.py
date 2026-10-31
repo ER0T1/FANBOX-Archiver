@@ -589,7 +589,9 @@ class ArchiveService:
             lines[8:8] = [f"![Fan Card]({image_name})", ""]
         else:
             lines[8:8] = ["> 此創作者未提供自訂 Fan Card 卡面。", ""]
-        perks = normalize_fancard_perks(plan.get("perks"))
+        perks = normalize_fancard_perks(
+            plan.get("perks"), creator_id=str(plan.get("creatorId") or "")
+        )
         if perks:
             lines.extend(["## 方案權益", ""])
             for perk in perks:
@@ -598,6 +600,16 @@ class ArchiveService:
                     f"- 狀態：{perk['status_label']}", "",
                     str(perk["description"]), "",
                 ])
+                if perk["guidance"]:
+                    guidance = str(perk["guidance"])
+                    if perk["settings_url"] and perk["settings_label"]:
+                        guidance = (
+                            f"Discord 連結可在[{perk['settings_label']}]"
+                            f"({perk['settings_url']})中編輯。"
+                        )
+                    lines.extend([guidance, ""])
+                if perk["action_url"]:
+                    lines.extend([f"[{perk['action_label']}]({perk['action_url']})", ""])
         lines.extend(["## 支援月份", ""])
         for item in body.get("supportTransactions") or []:
             if isinstance(item, dict):

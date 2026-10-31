@@ -121,7 +121,13 @@ namespace FanboxUI {
       h("div", {class: "perk-grid"}, card.perks.map(perk => h("article", {class: "perk-card"},
         h("div", {class: "perk-card-heading"}, h("h3", {}, perk.label),
           h("span", {class: perkStatusClass(perk.status)}, perk.status_label)),
-        h("p", {}, perk.description))))) : null;
+        h("p", {}, perk.description),
+        perk.guidance ? h("p", {class: "perk-guidance"}, perk.guidance, " ",
+          perk.settings_url ? h("a", {href: perk.settings_url, target: "_blank", rel: "noreferrer"},
+            `${perk.settings_label || "帳號設定"} ↗`) : null) : null,
+        perk.action_url && perk.action_label ? h("a", {
+          class: "perk-action", href: perk.action_url, target: "_blank", rel: "noreferrer",
+        }, `${perk.action_label} ↗`) : null)))) : null;
     return h("article", {class: "reader fancard-reader"},
       h("button", {type: "button", class: "back", onclick: actions.onBack}, "← 回到粉絲卡"),
       card.image_url

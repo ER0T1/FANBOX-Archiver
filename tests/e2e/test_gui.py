@@ -239,8 +239,12 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
     ).as_uri()
     page.goto(static_card_url)
     expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="Discord 特典", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="加入 Discord 伺服器", exact=True)).to_be_visible()
     expect(page.get_by_text("目前可使用", exact=True)).to_be_visible()
+    expect(page.get_by_text("Discord 連結可在帳號設定中編輯。", exact=False)).to_be_visible()
+    expect(page.get_by_role("link", name="在 FANBOX 開啟 Discord", exact=False)).to_have_attribute(
+        "href", "https://www.fanbox.cc/@alice/plans",
+    )
 
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(static_card_url)
@@ -440,8 +444,12 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("heading", name="方案資訊", exact=True)).to_be_visible()
     expect(page.get_by_text("Fan Card 密碼：example", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="Discord 特典", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="加入 Discord 伺服器", exact=True)).to_be_visible()
     expect(page.get_by_text("目前可使用", exact=True)).to_be_visible()
+    expect(page.get_by_text("Discord 連結可在帳號設定中編輯。", exact=False)).to_be_visible()
+    expect(page.get_by_role("link", name="在 FANBOX 開啟 Discord", exact=False)).to_have_attribute(
+        "href", "https://www.fanbox.cc/@alice/plans",
+    )
     expect(page.get_by_text("狀態未知", exact=True)).to_be_visible()
     expect(page.get_by_text("supporterAccessible", exact=False)).to_have_count(0)
     page.set_viewport_size({"width": 390, "height": 844})

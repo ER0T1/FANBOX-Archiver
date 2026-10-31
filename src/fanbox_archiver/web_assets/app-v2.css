@@ -175,6 +175,10 @@ pre { padding:1rem; overflow:auto; border-radius:12px; background:var(--surface-
 .perk-card-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; }
 .perk-card h3 { margin:0; font-size:1rem; }
 .perk-card p { margin:.7rem 0 0; color:var(--muted); font-size:.9rem; line-height:1.65; }
+.perk-card .perk-guidance { font-size:.82rem; }
+.perk-card .perk-guidance a { font-weight:750; }
+.perk-action { display:inline-flex; width:max-content; max-width:100%; min-height:38px; align-items:center; margin-top:.9rem; padding:.55rem .8rem; color:var(--text); background:color-mix(in srgb,var(--text) 8%,var(--surface)); border-radius:999px; font-size:.84rem; font-weight:800; text-decoration:none; }
+.perk-action:hover { color:var(--text); background:color-mix(in srgb,var(--text) 14%,var(--surface)); }
 .perk-status { flex:0 0 auto; padding:.2rem .48rem; border:1px solid var(--line); border-radius:999px; font-size:.72rem; font-weight:800; }
 .perk-status.status-accessible { color:var(--green); background:color-mix(in srgb,var(--green) 9%,var(--surface)); }
 .perk-status.status-inaccessible,.perk-status.status-unavailable { color:var(--red); background:color-mix(in srgb,var(--red) 8%,var(--surface)); }

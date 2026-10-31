@@ -69,7 +69,9 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         assert card.status_code == 200
         assert card.json()["description"] == "Password: private"
         assert card.json()["perks"][0]["status"] == "accessible"
-        assert card.json()["perks"][0]["label"] == "Discord 特典"
+        assert card.json()["perks"][0]["label"] == "加入 Discord 伺服器"
+        assert card.json()["perks"][0]["settings_url"] == "https://www.fanbox.cc/user/settings"
+        assert card.json()["perks"][0]["action_url"] == "https://www.fanbox.cc/@alice/plans"
         assert "supporterAccessible" not in str(card.json()["perks"])
 
         image = await client.get("/api/fancards/alice/2026-10/versions/1/image")
