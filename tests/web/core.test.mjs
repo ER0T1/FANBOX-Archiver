@@ -63,3 +63,9 @@ test("TypeScript core formats archive values", () => {
   assert.equal(ui.stopReasonLabel("limit_reached"), "已達下載上限");
   assert.equal(ui.stopReasonLabel("backfill_completed"), "歷史回補已完成");
 });
+
+test("fan card perk status classes reject unknown API values", () => {
+  assert.equal(ui.perkStatusClass("accessible"), "perk-status status-accessible");
+  assert.equal(ui.perkStatusClass("unavailable"), "perk-status status-unavailable");
+  assert.equal(ui.perkStatusClass("unexpected value"), "perk-status status-unknown");
+});

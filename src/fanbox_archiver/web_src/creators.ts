@@ -13,6 +13,12 @@ namespace FanboxUI {
     versionSelect: HTMLElement;
   }
 
+  export function perkStatusClass(status: string): string {
+    const safeStatus = ["accessible", "inaccessible", "unavailable", "available", "unknown"].includes(status)
+      ? status : "unknown";
+    return `perk-status status-${safeStatus}`;
+  }
+
   export function renderCreatorsPage(
     creators: CreatorSummary[], query: string, onOpen: (creatorId: string) => void,
   ): HTMLElement {
@@ -110,6 +116,12 @@ namespace FanboxUI {
   }
 
   export function renderFanCardReader(card: FanCardDetail, actions: FanCardReaderActions): HTMLElement {
+    const perks = card.perks.length ? h("section", {class: "perk-section"},
+      h("p", {class: "eyebrow"}, "PLAN BENEFITS"), h("h2", {}, "方案權益"),
+      h("div", {class: "perk-grid"}, card.perks.map(perk => h("article", {class: "perk-card"},
+        h("div", {class: "perk-card-heading"}, h("h3", {}, perk.label),
+          h("span", {class: perkStatusClass(perk.status)}, perk.status_label)),
+        h("p", {}, perk.description))))) : null;
     return h("article", {class: "reader fancard-reader"},
       h("button", {type: "button", class: "back", onclick: actions.onBack}, "← 回到粉絲卡"),
       card.image_url
@@ -123,6 +135,6 @@ namespace FanboxUI {
         h("p", {class: "body-text"}, card.description || "（無方案說明）"),
         card.support_start ? h("p", {}, `支援開始：${formatDate(card.support_start)}`) : null,
         card.support_months.length ? h("p", {}, `保存月份：${card.support_months.join("、")}`) : null,
-        card.perks.length ? h("pre", {}, JSON.stringify(card.perks, null, 2)) : null));
+        perks));
   }
 }

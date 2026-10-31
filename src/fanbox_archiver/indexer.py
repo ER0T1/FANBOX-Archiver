@@ -14,12 +14,13 @@ from urllib.parse import quote, unquote, urlparse
 from .config import AppConfig
 from .database import Database
 from .downloader import sha256_file
+from .fancard_perks import normalize_fancard_perks
 from .models import CreatorProfile, Post
 from .security import confined_path, safe_filename
 from .storage import BackupStorage
 
 
-TEMPLATE_VERSION = 9
+TEMPLATE_VERSION = 10
 TAIPEI = timezone(timedelta(hours=8))
 
 
@@ -641,6 +642,19 @@ class IndexBuilder:
         )
         number = int(row["version_number"])
         nav = self._version_nav(all_versions, number, output, "fancards", f"{row['creator_id']}/{row['target_month']}")
+        perks = normalize_fancard_perks(plan.get("perks"))
+        perk_cards = "".join(
+            '<article class="perk-card">'
+            f'<div class="perk-card-heading"><h3>{html.escape(str(perk["label"]))}</h3>'
+            f'<span class="perk-status status-{html.escape(str(perk["status"]))}">'
+            f'{html.escape(str(perk["status_label"]))}</span></div>'
+            f'<p>{html.escape(str(perk["description"]))}</p></article>'
+            for perk in perks
+        )
+        perks_section = (
+            f'<section class="perk-section"><h2>方案權益</h2><div class="perk-grid">{perk_cards}</div></section>'
+            if perk_cards else ""
+        )
         content = f"""
         <div class="fancard-layout">{image}<dl>
           <div><dt>創作者</dt><dd>{html.escape(str(user.get('name') or row['creator_id']))}</dd></div>
@@ -649,6 +663,7 @@ class IndexBuilder:
           <div><dt>支援開始</dt><dd>{html.escape(self._date(body.get('supportStartDatetime')))}</dd></div>
         </dl></div>
         <section><h2>方案資訊</h2><div class="secret-text">{description}</div></section>
+        {perks_section}
         <section><h2>支援月份</h2><ul>{months}</ul></section>
         """
         return self._reader_shell(

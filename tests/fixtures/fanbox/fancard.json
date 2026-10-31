@@ -7,7 +7,10 @@
       "description": "合成的方案說明",
       "creatorId": "fixture-creator",
       "hasAdultContent": false,
-      "perks": ["fixture-download"],
+      "perks": [
+        {"name": "discord", "available": true, "supporterAccessible": true},
+        {"name": "fixture-download", "available": true, "supporterAccessible": false}
+      ],
       "user": {"userId": "fixture-user", "name": "Fixture Creator"}
     },
     "supportStartDatetime": "2026-01-01T00:00:00+09:00",

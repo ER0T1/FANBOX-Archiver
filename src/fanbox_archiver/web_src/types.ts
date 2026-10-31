@@ -152,11 +152,23 @@ namespace FanboxUI {
 
   export interface FanCardDetail extends FanCardSummary {
     description: string;
-    perks: unknown[];
+    perks: FanCardPerk[];
     support_start: string | null;
     support_months: string[];
     version: number;
     versions: ArchiveVersion[];
+  }
+
+  export type FanCardPerkStatus = "accessible" | "inaccessible" | "unavailable" | "available" | "unknown";
+
+  export interface FanCardPerk {
+    key: string;
+    label: string;
+    status: FanCardPerkStatus;
+    status_label: string;
+    description: string;
+    available: boolean | null;
+    supporter_accessible: boolean | null;
   }
 
   export interface FanCardSelection {

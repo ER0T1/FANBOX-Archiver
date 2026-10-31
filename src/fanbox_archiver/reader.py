@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from .config import AppConfig
 from .database import Database
+from .fancard_perks import normalize_fancard_perks
 from .models import Asset, CreatorProfile, Post
 from .security import confined_path
 
@@ -290,7 +291,7 @@ class ArchiveReader:
             "plan_title": str(plan.get("title") or ""),
             "fee": plan.get("fee"),
             "description": str(plan.get("description") or ""),
-            "perks": plan.get("perks") if isinstance(plan.get("perks"), list) else [],
+            "perks": normalize_fancard_perks(plan.get("perks")),
             "support_start": body.get("supportStartDatetime"),
             "support_months": months,
             "version": number,

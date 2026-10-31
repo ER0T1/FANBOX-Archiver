@@ -16,6 +16,7 @@ from .downloader import (
     AssetDownloader, DownloadAuthorizationError, DownloadError,
     DownloadRateLimitedError, sha256_file,
 )
+from .fancard_perks import normalize_fancard_perks
 from .markdown import render_markdown
 from .models import Asset, AssetStatus, CreatorProfile, Post, PostStatus, VerificationIssue
 from .security import confined_path, safe_filename, validate_url
@@ -588,9 +589,15 @@ class ArchiveService:
             lines[8:8] = [f"![Fan Card]({image_name})", ""]
         else:
             lines[8:8] = ["> 此創作者未提供自訂 Fan Card 卡面。", ""]
-        perks = plan.get("perks") or []
+        perks = normalize_fancard_perks(plan.get("perks"))
         if perks:
-            lines.extend(["## Perks", "", "```json", json.dumps(perks, ensure_ascii=False, indent=2), "```", ""])
+            lines.extend(["## 方案權益", ""])
+            for perk in perks:
+                lines.extend([
+                    f"### {perk['label']}", "",
+                    f"- 狀態：{perk['status_label']}", "",
+                    str(perk["description"]), "",
+                ])
         lines.extend(["## 支援月份", ""])
         for item in body.get("supportTransactions") or []:
             if isinstance(item, dict):

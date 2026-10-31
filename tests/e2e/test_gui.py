@@ -207,7 +207,10 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
         "plan": {
             "id": "gold", "title": "Gold", "fee": 1000,
             "description": "Fan Card 密碼：example", "creatorId": "alice",
-            "user": {"name": "Alice"}, "perks": ["桌布"],
+            "user": {"name": "Alice"}, "perks": [
+                {"name": "discord", "available": True, "supporterAccessible": True},
+                {"name": "future-benefit"},
+            ],
         },
         "supportStartDatetime": "2026-10-01T00:00:00+09:00",
         "supportTransactions": [{"targetMonth": "2026-10"}],
@@ -231,9 +234,17 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
     expect(page.get_by_role("heading", name="Alice", exact=True)).to_be_visible()
     expect(page.get_by_text("離線保存的創作者介紹")).to_be_visible()
 
+    static_card_url = (
+        config.storage.output_dir / "_site/fancards/alice/2026-10/latest.html"
+    ).as_uri()
+    page.goto(static_card_url)
+    expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Discord 特典", exact=True)).to_be_visible()
+    expect(page.get_by_text("目前可使用", exact=True)).to_be_visible()
+
     page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(f"{index_url}#view=creators")
-    expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    page.goto(static_card_url)
+    expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert not any(url.startswith(("http://", "https://")) for url in requests)
 
@@ -428,6 +439,14 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     page.locator(".fancard-card").click()
     expect(page.get_by_role("heading", name="方案資訊", exact=True)).to_be_visible()
     expect(page.get_by_text("Fan Card 密碼：example", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Discord 特典", exact=True)).to_be_visible()
+    expect(page.get_by_text("目前可使用", exact=True)).to_be_visible()
+    expect(page.get_by_text("狀態未知", exact=True)).to_be_visible()
+    expect(page.get_by_text("supporterAccessible", exact=False)).to_have_count(0)
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
 
     page.get_by_role("button", name="維護", exact=True).click()
     expect(page.get_by_role("heading", name="封存驗證", exact=True)).to_be_visible()

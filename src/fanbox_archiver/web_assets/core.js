@@ -414,6 +414,12 @@ var FanboxUI;
 })(FanboxUI || (FanboxUI = {}));
 var FanboxUI;
 (function (FanboxUI) {
+    function perkStatusClass(status) {
+        const safeStatus = ["accessible", "inaccessible", "unavailable", "available", "unknown"].includes(status)
+            ? status : "unknown";
+        return `perk-status status-${safeStatus}`;
+    }
+    FanboxUI.perkStatusClass = perkStatusClass;
     function renderCreatorsPage(creators, query, onOpen) {
         const term = query.toLocaleLowerCase();
         const items = creators.filter(item => `${item.name} ${item.creator_id}`.toLocaleLowerCase().includes(term));
@@ -457,9 +463,10 @@ var FanboxUI;
     }
     FanboxUI.renderFanCardList = renderFanCardList;
     function renderFanCardReader(card, actions) {
+        const perks = card.perks.length ? FanboxUI.h("section", { class: "perk-section" }, FanboxUI.h("p", { class: "eyebrow" }, "PLAN BENEFITS"), FanboxUI.h("h2", {}, "方案權益"), FanboxUI.h("div", { class: "perk-grid" }, card.perks.map(perk => FanboxUI.h("article", { class: "perk-card" }, FanboxUI.h("div", { class: "perk-card-heading" }, FanboxUI.h("h3", {}, perk.label), FanboxUI.h("span", { class: perkStatusClass(perk.status) }, perk.status_label)), FanboxUI.h("p", {}, perk.description))))) : null;
         return FanboxUI.h("article", { class: "reader fancard-reader" }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, "← 回到粉絲卡"), card.image_url
             ? FanboxUI.h("a", { href: card.image_url, target: "_blank" }, FanboxUI.h("img", { class: "card-image", src: card.image_url, alt: `${card.creator_name} 粉絲卡` }))
-            : FanboxUI.h("div", { class: "card-placeholder large" }, "本月未提供自訂卡面"), FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${card.target_month} · ${card.creator_id}`), FanboxUI.h("h1", {}, card.creator_name), FanboxUI.h("p", {}, `${card.plan_title || "方案未命名"} · ${FanboxUI.feeLabel(card.fee)}/月`), actions.versionSelect), FanboxUI.h("section", { class: "content" }, FanboxUI.h("h2", {}, "方案資訊"), FanboxUI.h("p", { class: "body-text" }, card.description || "（無方案說明）"), card.support_start ? FanboxUI.h("p", {}, `支援開始：${FanboxUI.formatDate(card.support_start)}`) : null, card.support_months.length ? FanboxUI.h("p", {}, `保存月份：${card.support_months.join("、")}`) : null, card.perks.length ? FanboxUI.h("pre", {}, JSON.stringify(card.perks, null, 2)) : null));
+            : FanboxUI.h("div", { class: "card-placeholder large" }, "本月未提供自訂卡面"), FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${card.target_month} · ${card.creator_id}`), FanboxUI.h("h1", {}, card.creator_name), FanboxUI.h("p", {}, `${card.plan_title || "方案未命名"} · ${FanboxUI.feeLabel(card.fee)}/月`), actions.versionSelect), FanboxUI.h("section", { class: "content" }, FanboxUI.h("h2", {}, "方案資訊"), FanboxUI.h("p", { class: "body-text" }, card.description || "（無方案說明）"), card.support_start ? FanboxUI.h("p", {}, `支援開始：${FanboxUI.formatDate(card.support_start)}`) : null, card.support_months.length ? FanboxUI.h("p", {}, `保存月份：${card.support_months.join("、")}`) : null, perks));
     }
     FanboxUI.renderFanCardReader = renderFanCardReader;
 })(FanboxUI || (FanboxUI = {}));

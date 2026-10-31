@@ -107,7 +107,11 @@ def test_fancard_contract_fixture_saves_without_private_transaction_fields(tmp_p
     status, version = archive.save_fancard(load_fixture("fancard.json"), None, None)
 
     assert status == "new"
-    assert "合成的方案說明" in (version / "fancard.md").read_text(encoding="utf-8")
+    markdown = (version / "fancard.md").read_text(encoding="utf-8")
+    assert "合成的方案說明" in markdown
+    assert "## 方案權益" in markdown
+    assert "Discord 特典" in markdown
+    assert "supporterAccessible" not in markdown
     saved = json.loads((version / "fancard.json").read_text(encoding="utf-8"))
     transaction = saved["body"]["supportTransactions"][0]
     assert set(transaction) == {"paidAmount", "targetMonth"}

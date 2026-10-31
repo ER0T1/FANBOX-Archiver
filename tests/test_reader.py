@@ -34,7 +34,9 @@ def dynamic_archive(tmp_path: Path) -> tuple[AppConfig, ArchiveReader]:
     archive.save_fancard({"body": {
         "plan": {
             "creatorId": "alice", "title": "Gold", "fee": 1000,
-            "description": "Password: private", "perks": ["原圖"],
+            "description": "Password: private", "perks": [
+                {"name": "discord", "available": True, "supporterAccessible": True},
+            ],
             "user": {"name": "Alice"},
         },
         "supportStartDatetime": "2026-09-01T00:00:00+09:00",
@@ -162,6 +164,12 @@ def test_reader_lists_fancards_without_exposing_transactions(tmp_path: Path):
     card = reader.fancard("alice", "2026-10")
     assert card["description"] == "Password: private"
     assert card["support_months"] == ["2026-10"]
+    assert card["perks"] == [{
+        "key": "discord", "label": "Discord 特典", "status": "accessible",
+        "status_label": "目前可使用",
+        "description": "Discord 特典已包含在方案中；封存資料未包含可安全重播的外部加入連結。",
+        "available": True, "supporter_accessible": True,
+    }]
     assert "private-transaction" not in str(card)
     assert reader.fancard_image("alice", "2026-10", 1).path.read_bytes() == b"jpeg-data"
 

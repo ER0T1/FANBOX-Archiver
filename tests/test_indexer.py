@@ -82,7 +82,9 @@ def archive_fixture(tmp_path: Path) -> tuple[AppConfig, ArchiveService]:
     archive.save_fancard({"body": {
         "plan": {"id": "plan", "title": "Gold", "fee": 1000,
                  "description": "Password: private-value", "creatorId": "alice",
-                 "user": {"userId": "u1", "name": "Alice"}, "paymentMethod": "card"},
+                 "user": {"userId": "u1", "name": "Alice"}, "paymentMethod": "card",
+                 "perks": [{"name": "discord", "available": True,
+                            "supporterAccessible": True}]},
         "supportStartDatetime": "2026-10-01T00:00:00+09:00",
         "supportTransactions": [{"id": "private-tx", "targetMonth": "2026-10",
                                    "paidAmount": 1000, "supporter": {"userId": "private-user"}}],
@@ -127,6 +129,10 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     assert 'src="../../../assets/theme.js"' in card_page
     assert "data-theme-toggle" in card_page
     assert "方案資訊" in card_page
+    assert "方案權益" in card_page
+    assert "Discord 特典" in card_page
+    assert "目前可使用" in card_page
+    assert "supporterAccessible" not in card_page
     assert "方案說明／密碼" not in card_page
     profile_page = (root / "_site/creators/alice/profile/v0002.html").read_text(encoding="utf-8")
     assert "第二版介紹<br>仍然離線可讀" in profile_page
