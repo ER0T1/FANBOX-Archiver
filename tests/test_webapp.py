@@ -44,12 +44,20 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         assert listing.json()["items"][0]["title"] == "第二版"
         assert listing.json()["items"][0]["fee_required"] == 500
 
+        tagged = await client.get("/api/posts?creator=alice&tag=測試")
+        assert tagged.status_code == 200
+        assert tagged.json()["total"] == 1
+        assert tagged.json()["creator_total"] == 1
+        assert tagged.json()["tag_facets"] == [{"name": "測試", "count": 1}]
+
         post = await client.get("/api/posts/123")
         assert post.status_code == 200
         assert post.json()["version"] == 2
         assert post.json()["navigation"] == {
             "previous": None, "next": None, "position": 1, "total": 1,
         }
+        tagged_post = await client.get("/api/posts/123?creator=alice&tag=測試")
+        assert tagged_post.json()["navigation"]["position"] == 1
         assert post.headers["cache-control"] == "no-store"
 
         creators = await client.get("/api/creators")

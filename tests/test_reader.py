@@ -98,6 +98,42 @@ def test_reader_pins_creator_posts_and_builds_contextual_navigation(tmp_path: Pa
     assert global_navigation["next"]["post_id"] == "122"
 
 
+def test_reader_filters_creator_posts_by_saved_tags_across_pages(tmp_path: Path):
+    config, reader = dynamic_archive(tmp_path)
+    archive = ArchiveService(config)
+    for post_id, title, tags in (
+        ("124", "共同標籤投稿", ["測試", "共同"]),
+        ("125", "另一篇共同投稿", ["共同", "限定"]),
+    ):
+        post = Post(
+            post_id=post_id, creator_id="alice", creator_name="Alice", title=title,
+            published_at=datetime(2026, 10, int(post_id) - 120),
+            updated_at=datetime(2026, 10, int(post_id) - 120),
+            url=f"https://www.fanbox.cc/@alice/posts/{post_id}", tags=tags,
+            blocks=[ContentBlock(type="paragraph", text=title)],
+            content_fingerprint=f"reader-tag-{post_id}",
+        )
+        assert archive.save(post, download_assets=False).value == "completed"
+
+    first_page = reader.list_posts(creator="alice", page=1, page_size=1)
+    assert first_page["creator_total"] == 3
+    assert first_page["tag_facets"] == [
+        {"name": "共同", "count": 2},
+        {"name": "測試", "count": 2},
+        {"name": "限定", "count": 1},
+    ]
+    filtered = reader.list_posts(creator="alice", tag="共同", page=99, page_size=1)
+    assert filtered["total"] == 2
+    assert filtered["pages"] == 2
+    assert filtered["page"] == 2
+    assert filtered["items"][0]["post_id"] == "124"
+    assert reader.list_posts(creator="alice", query="另一篇", tag="共同")["total"] == 1
+    navigation = reader.post_navigation("125", creator="alice", tag="共同")
+    assert navigation["position"] == 1
+    assert navigation["total"] == 2
+    assert navigation["next"]["post_id"] == "124"
+
+
 def test_reader_resolves_fanbox_embed_to_local_only_when_readable(tmp_path: Path):
     config, reader = dynamic_archive(tmp_path)
     archive = ArchiveService(config)

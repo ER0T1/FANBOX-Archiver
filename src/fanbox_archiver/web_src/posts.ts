@@ -2,6 +2,8 @@ namespace FanboxUI {
   export interface PostListActions {
     onOpen(postId: string): void;
     onPage(page: number): void;
+    onTag?(tag: string): void;
+    activeTag?: string;
   }
 
   export interface PostReaderActions {
@@ -23,7 +25,9 @@ namespace FanboxUI {
         item.is_pinned ? h("span", {class: "pin-badge"}, "置頂") : null,
         h("span", {class: "fee-badge"}, feeLabel(item.fee_required))),
       h("strong", {}, item.title),
-      h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`)),
+      h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`),
+      item.tags.length ? h("span", {class: "post-tags", "aria-label": `標籤：${item.tags.join("、")}`},
+        item.tags.map(tag => h("span", {class: "post-tag"}, tag))) : null),
     h("span", {class: `badge status-${item.status}`}, item.status));
   }
 
@@ -31,7 +35,8 @@ namespace FanboxUI {
     data: Pick<Page<unknown>, "page" | "pages">,
     onPage: (page: number) => void,
     label = "投稿分頁",
-  ): HTMLElement {
+  ): HTMLElement | null {
+    if (data.pages <= 1) return null;
     const previous = h("button", {
       type: "button", disabled: data.page <= 1,
       onclick: () => onPage(data.page - 1),
@@ -65,9 +70,23 @@ namespace FanboxUI {
       renderPagination(data, actions.onPage));
   }
 
-  export function renderCreatorPostList(data: Page<PostSummary>, actions: PostListActions): HTMLElement {
+  export function renderCreatorPostList(data: PostPage, actions: PostListActions): HTMLElement {
     const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
+    const filter = actions.onTag ? h("section", {class: "tag-filter", "aria-label": "依標籤篩選投稿"},
+      h("div", {class: "tag-filter-heading"},
+        h("strong", {}, "標籤篩選"),
+        h("span", {}, actions.activeTag ? `目前：${actions.activeTag}` : "顯示全部投稿")),
+      h("div", {class: "tag-filter-options"},
+        h("button", {type: "button", class: actions.activeTag ? "" : "active",
+          "aria-pressed": actions.activeTag ? "false" : "true", onclick: () => actions.onTag?.("")},
+        `全部 ${data.creator_total}`),
+        data.tag_facets.length ? data.tag_facets.map(facet => h("button", {
+          type: "button", class: actions.activeTag === facet.name ? "active" : "",
+          "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
+          onclick: () => actions.onTag?.(facet.name),
+        }, `${facet.name} ${facet.count}`)) : h("span", {class: "tag-filter-empty"}, "尚無已保存的投稿標籤"))) : null;
     return h("div", {class: "creator-posts"},
+      filter,
       h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, "沒有符合條件的投稿。")),
       renderPagination(data, actions.onPage, "創作者投稿分頁"));
   }

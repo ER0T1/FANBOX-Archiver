@@ -51,11 +51,21 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .post-main { display:grid; gap:.38rem; flex:1; min-width:0; }
 .post-main strong { font-size:1.08rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .post-main small { color:var(--muted); }
+.post-tags { display:flex; min-width:0; flex-wrap:wrap; gap:.35rem; margin-top:.1rem; }
+.post-tag { display:inline-flex; max-width:100%; align-items:center; overflow:hidden; padding:.18rem .48rem; border:1px solid var(--line); border-radius:999px; background:var(--surface-2); color:var(--muted); font-size:.72rem; line-height:1.35; text-overflow:ellipsis; white-space:nowrap; }
 .post-meta { display:flex; align-items:center; flex-wrap:wrap; gap:.55rem; color:var(--muted); font-size:.8rem; }
 .badge,.fee-badge,.job-status { display:inline-flex; width:max-content; align-items:center; padding:.28rem .58rem; border-radius:999px; font-size:.74rem; white-space:nowrap; }
 .badge { color:var(--muted); background:var(--surface-2); border:1px solid var(--line); }
 .fee-badge { color:#9a5d00; background:#f7edd8; font-weight:750; }
 .pin-badge { display:inline-flex; width:max-content; align-items:center; padding:.22rem .5rem; color:var(--accent); background:var(--accent-soft); border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line)); border-radius:999px; font-size:.74rem; font-weight:800; white-space:nowrap; }
+.tag-filter { display:grid; gap:.65rem; margin-bottom:1rem; padding:1rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
+.tag-filter-heading { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; }
+.tag-filter-heading span { color:var(--muted); font-size:.8rem; }
+.tag-filter-options { display:flex; overflow-x:auto; gap:.45rem; padding:.15rem .1rem .35rem; scrollbar-width:thin; }
+.tag-filter-options button { flex:0 0 auto; min-height:34px; padding:.38rem .72rem; border:1px solid var(--line); border-radius:999px; background:var(--surface-2); color:var(--muted); cursor:pointer; }
+.tag-filter-options button:hover { border-color:var(--accent); color:var(--text); }
+.tag-filter-options button.active { border-color:color-mix(in srgb,var(--accent) 65%,var(--line)); background:var(--accent-soft); color:var(--accent); font-weight:800; }
+.tag-filter-empty { align-self:center; color:var(--muted); font-size:.8rem; }
 .status-completed { color:var(--green); background:color-mix(in srgb,var(--green) 12%,var(--surface)); border-color:color-mix(in srgb,var(--green) 25%,var(--line)); }
 .pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin-top:1.6rem; }
 .pagination .page-jump { position:relative; min-width:5.8rem; font-weight:750; }

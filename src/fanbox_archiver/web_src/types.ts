@@ -11,6 +11,16 @@ namespace FanboxUI {
     pages: number;
   }
 
+  export interface TagFacet {
+    name: string;
+    count: number;
+  }
+
+  export interface PostPage extends Page<PostSummary> {
+    tag_facets: TagFacet[];
+    creator_total: number;
+  }
+
   export interface PostSummary {
     post_id: string;
     creator_id: string;

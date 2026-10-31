@@ -2,7 +2,7 @@
   "use strict";
   const data = window.__FANBOX_ARCHIVE_DATA__ || {stats:{}, creators:[], posts:[], fancards:[], warnings:[]};
   const root = document.getElementById("app");
-  const state = {view:"overview", q:"", creator:"", status:"", year:"", versioned:"", sort:"published-desc", page:1};
+  const state = {view:"overview", q:"", creator:"", tag:"", status:"", year:"", versioned:"", sort:"published-desc", page:1};
 
   function node(tag, attrs = {}, ...children) {
     const element = document.createElement(tag);
@@ -37,28 +37,31 @@
     state.view = params.get("view") || "overview";
     state.q = params.get("q") || "";
     state.creator = params.get("creator") || "";
+    state.tag = params.get("tag") || "";
     state.status = params.get("status") || "";
     state.year = params.get("year") || "";
     state.versioned = params.get("versioned") || "";
     state.sort = params.get("sort") || "published-desc";
     state.page = Math.max(1, Number.parseInt(params.get("page") || "1", 10) || 1);
   }
-  function writeHash() {
+  function writeHash(push = false) {
     const params = new URLSearchParams();
     if (state.view !== "overview") params.set("view", state.view);
     if (state.q) params.set("q", state.q);
     if (state.creator) params.set("creator", state.creator);
+    if (state.tag) params.set("tag", state.tag);
     if (state.status) params.set("status", state.status);
     if (state.year) params.set("year", state.year);
     if (state.versioned) params.set("versioned", state.versioned);
     if (state.sort !== "published-desc") params.set("sort", state.sort);
     if (state.page > 1) params.set("page", state.page);
-    history.replaceState(null, "", params.size ? `${location.pathname}${location.search}#${params}` : `${location.pathname}${location.search}`);
+    const url = params.size ? `${location.pathname}${location.search}#${params}` : `${location.pathname}${location.search}`;
+    history[push ? "pushState" : "replaceState"](null, "", url);
   }
   function navButton(label, view, count) {
     return node("button", {
       class:`nav-item ${state.view === view ? "active" : ""}`,
-      type:"button", onclick:() => { state.view = view; state.page = 1; writeHash(); render(); },
+      type:"button", onclick:() => { state.view = view; state.page = 1; state.tag = ""; writeHash(); render(); },
       "aria-current":state.view === view ? "page" : null,
     }, node("span", {}, label), node("span", {class:"nav-count"}, count));
   }
@@ -75,7 +78,7 @@
         navButton("創作者", "creators", data.stats.creators || 0), navButton("Fan Card", "fancards", data.stats.fancards || 0),
         navButton("異常項目", "issues", data.stats.issues || 0)),
       node("div", {class:"sidebar-creators"}, node("h2", {}, "創作者"), ...data.creators.map(creator =>
-        node("button", {type:"button", onclick:() => {state.creator=creator.creator_id; state.view="posts"; writeHash(); render();}},
+        node("button", {type:"button", onclick:() => {state.creator=creator.creator_id; state.tag=""; state.view="posts"; writeHash(); render();}},
           creator.avatar ? node("img", {class:"creator-avatar small", src:creator.avatar, alt:""}) : node("span", {class:"avatar-fallback small"}, creator.name.slice(0,1)),
           node("span", {}, creator.name), node("small", {}, creator.post_count))))
     );
@@ -94,6 +97,7 @@
 
   function matchesPost(post) {
     if (state.creator && post.creator_id !== state.creator) return false;
+    if (state.tag && !(post.tags || []).includes(state.tag)) return false;
     if (state.status && post.status !== state.status) return false;
     if (state.year && taipeiYear(post.published_at) !== state.year) return false;
     if (state.versioned === "yes" && post.version_count < 2) return false;
@@ -103,7 +107,7 @@
 
   function controls() {
     const resetPage = () => { state.page = 1; writeHash(); renderMain(); };
-    const creatorSelect = node("select", {"aria-label":"依創作者篩選", onchange:event => {state.creator=event.target.value; resetPage();}},
+    const creatorSelect = node("select", {"aria-label":"依創作者篩選", onchange:event => {state.creator=event.target.value; state.tag=""; resetPage();}},
       node("option", {value:""}, "全部創作者"), ...data.creators.map(item => node("option", {value:item.creator_id}, item.name)));
     creatorSelect.value = state.creator;
     const statusSelect = node("select", {"aria-label":"依狀態篩選", onchange:event => {state.status=event.target.value; resetPage();}},
@@ -120,7 +124,7 @@
       node("option", {value:"published-desc"}, "發布時間（新到舊）"), node("option", {value:"updated-desc"}, "更新時間（新到舊）"),
       node("option", {value:"title-asc"}, "標題（A–Z）"), node("option", {value:"versions-desc"}, "版本數（多到少）"));
     sortSelect.value = state.sort;
-    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published-desc"; state.page=1; writeHash(); render();}}, "清除篩選");
+    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.tag=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published-desc"; state.page=1; writeHash(); render();}}, "清除篩選");
     return node("div", {class:"controls"}, creatorSelect, statusSelect, yearSelect, versionSelect, sortSelect, clear);
   }
 
@@ -169,7 +173,16 @@
     const items = sortedPosts(data.posts.filter(matchesPost));
     const pageSize = 50;
     const pageItems = items.slice((state.page - 1) * pageSize, state.page * pageSize);
-    return node("div", {}, heading("文章", `${items.length} 筆符合目前條件`), controls(), node("div", {class:"post-list"}, ...(pageItems.length ? pageItems.map(postCard) : [node("p", {class:"empty"}, "沒有符合條件的文章。")])), pagination(items.length, pageSize));
+    const creatorPosts = state.creator ? data.posts.filter(post => post.creator_id === state.creator) : [];
+    const counts = new Map();
+    for (const post of creatorPosts) for (const tag of new Set(post.tags || [])) counts.set(tag, (counts.get(tag) || 0) + 1);
+    const facets = [...counts.entries()].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"));
+    const tagFilter = state.creator ? node("section", {class:"tag-filter", "aria-label":"依標籤篩選投稿"},
+      node("div", {class:"tag-filter-title"}, node("strong", {}, "標籤篩選"), node("span", {class:"muted"}, state.tag ? `目前：${state.tag}` : "顯示全部文章")),
+      node("div", {class:"tag-filter-options"},
+        node("button", {type:"button", class:state.tag ? "" : "active", "aria-pressed":state.tag ? "false" : "true", onclick:() => {state.tag=""; state.page=1; writeHash(true); renderMain();}}, `全部 ${creatorPosts.length}`),
+        ...(facets.length ? facets.map(([tag,count]) => node("button", {type:"button", class:state.tag === tag ? "active" : "", "aria-pressed":state.tag === tag ? "true" : "false", onclick:() => {state.tag=tag; state.page=1; writeHash(true); renderMain();}}, `${tag} ${count}`)) : [node("span", {class:"muted"}, "尚無已保存的投稿標籤")]))) : null;
+    return node("div", {}, heading("文章", `${items.length} 筆符合目前條件`), controls(), tagFilter, node("div", {class:"post-list"}, ...(pageItems.length ? pageItems.map(postCard) : [node("p", {class:"empty"}, "沒有符合條件的文章。")])), pagination(items.length, pageSize));
   }
 
   function creatorsView() {
@@ -189,6 +202,7 @@
           item.profile_latest_path ? node("a", {class:"secondary", href:item.profile_latest_path}, "Creator Profile") : null,
           node("button", {class:"text-button", onclick:() => {
             state.creator = item.creator_id;
+            state.tag = "";
             state.view = "posts";
             writeHash();
             render();
@@ -228,6 +242,7 @@
   }
   function render() { root.replaceChildren(shell(currentView())); document.body.classList.remove("menu-open"); window.FanboxTheme.bindAll(); }
   window.addEventListener("hashchange", () => { readHash(); render(); });
+  window.addEventListener("popstate", () => { readHash(); render(); });
   window.addEventListener("keydown", event => { if (event.key === "Escape") document.body.classList.remove("menu-open"); });
   readHash(); render();
 })();

@@ -20,7 +20,7 @@ from .security import confined_path, safe_filename
 from .storage import BackupStorage
 
 
-TEMPLATE_VERSION = 11
+TEMPLATE_VERSION = 12
 TAIPEI = timezone(timedelta(hours=8))
 
 

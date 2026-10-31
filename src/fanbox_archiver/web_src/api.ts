@@ -18,8 +18,8 @@ namespace FanboxUI {
     return response.json() as Promise<T>;
   }
 
-  export function getPosts(params: URLSearchParams): Promise<Page<PostSummary>> {
-    return requestJson<Page<PostSummary>>(`/api/posts?${params.toString()}`);
+  export function getPosts(params: URLSearchParams): Promise<PostPage> {
+    return requestJson<PostPage>(`/api/posts?${params.toString()}`);
   }
 
   export function getPost(postId: string, params: URLSearchParams): Promise<PostDetail> {

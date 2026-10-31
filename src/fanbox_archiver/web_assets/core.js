@@ -6,6 +6,7 @@ var FanboxUI;
             view: "posts",
             page: 1,
             q: "",
+            tag: "",
             current: null,
             postNavigation: null,
             creatorId: null,
@@ -299,10 +300,12 @@ var FanboxUI;
             onclick: () => onOpen(item.post_id),
         }, item.cover_url
             ? FanboxUI.h("img", { class: "post-cover", src: item.cover_url, alt: "", loading: "lazy" })
-            : FanboxUI.h("span", { class: "post-cover placeholder", "aria-hidden": "true" }, "POST"), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "post-meta" }, FanboxUI.formatDate(item.published_at), item.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, "置頂") : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(item.fee_required))), FanboxUI.h("strong", {}, item.title), FanboxUI.h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`)), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status));
+            : FanboxUI.h("span", { class: "post-cover placeholder", "aria-hidden": "true" }, "POST"), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "post-meta" }, FanboxUI.formatDate(item.published_at), item.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, "置頂") : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(item.fee_required))), FanboxUI.h("strong", {}, item.title), FanboxUI.h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`), item.tags.length ? FanboxUI.h("span", { class: "post-tags", "aria-label": `標籤：${item.tags.join("、")}` }, item.tags.map(tag => FanboxUI.h("span", { class: "post-tag" }, tag))) : null), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status));
     }
     FanboxUI.renderPostCard = renderPostCard;
     function renderPagination(data, onPage, label = "投稿分頁") {
+        if (data.pages <= 1)
+            return null;
         const previous = FanboxUI.h("button", {
             type: "button", disabled: data.page <= 1,
             onclick: () => onPage(data.page - 1),
@@ -331,7 +334,13 @@ var FanboxUI;
     FanboxUI.renderPostListPage = renderPostListPage;
     function renderCreatorPostList(data, actions) {
         const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
-        return FanboxUI.h("div", { class: "creator-posts" }, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage, "創作者投稿分頁"));
+        const filter = actions.onTag ? FanboxUI.h("section", { class: "tag-filter", "aria-label": "依標籤篩選投稿" }, FanboxUI.h("div", { class: "tag-filter-heading" }, FanboxUI.h("strong", {}, "標籤篩選"), FanboxUI.h("span", {}, actions.activeTag ? `目前：${actions.activeTag}` : "顯示全部投稿")), FanboxUI.h("div", { class: "tag-filter-options" }, FanboxUI.h("button", { type: "button", class: actions.activeTag ? "" : "active",
+            "aria-pressed": actions.activeTag ? "false" : "true", onclick: () => actions.onTag?.("") }, `全部 ${data.creator_total}`), data.tag_facets.length ? data.tag_facets.map(facet => FanboxUI.h("button", {
+            type: "button", class: actions.activeTag === facet.name ? "active" : "",
+            "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
+            onclick: () => actions.onTag?.(facet.name),
+        }, `${facet.name} ${facet.count}`)) : FanboxUI.h("span", { class: "tag-filter-empty" }, "尚無已保存的投稿標籤"))) : null;
+        return FanboxUI.h("div", { class: "creator-posts" }, filter, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage, "創作者投稿分頁"));
     }
     FanboxUI.renderCreatorPostList = renderCreatorPostList;
     function richText(block) {
@@ -918,6 +927,7 @@ var FanboxUI;
             state.view = view;
             state.current = null;
             state.page = 1;
+            state.tag = "";
             if (view === "backup") {
                 state.backupScreen = "form";
                 state.backupJobId = null;
@@ -986,6 +996,8 @@ var FanboxUI;
                     params.set("creator", creatorId);
                 if (state.q)
                     params.set("q", state.q);
+                if (creatorContent && state.tag)
+                    params.set("tag", state.tag);
                 const post = await FanboxUI.getPost(postId, params);
                 state.current = postId;
                 state.postNavigation = post.navigation;
@@ -1021,6 +1033,7 @@ var FanboxUI;
             state.current = null;
             state.page = 1;
             state.q = "";
+            state.tag = "";
             state.creator = null;
             state.creatorProfile = null;
             search.value = "";
@@ -1033,6 +1046,7 @@ var FanboxUI;
             state.current = null;
             state.page = 1;
             state.q = "";
+            state.tag = "";
             search.value = "";
             setSearch("creator");
             void loadCreator(creatorId, tab);
@@ -1079,10 +1093,20 @@ var FanboxUI;
                     const params = new URLSearchParams({ creator: creatorId, page: String(state.page), page_size: "50" });
                     if (state.q)
                         params.set("q", state.q);
+                    if (state.tag)
+                        params.set("tag", state.tag);
                     const data = await FanboxUI.getPosts(params);
+                    state.page = data.page;
                     content = FanboxUI.renderCreatorPostList(data, {
                         onOpen: postId => void loadPost(postId),
                         onPage: page => { state.page = page; void loadCreator(creatorId, "posts"); },
+                        activeTag: state.tag,
+                        onTag: tag => {
+                            state.tag = tag;
+                            state.page = 1;
+                            history.pushState({ fanboxCreatorId: creatorId, fanboxCreatorTag: tag }, "", location.href);
+                            void loadCreator(creatorId, "posts");
+                        },
                     });
                 }
                 else if (tab === "fancards") {
@@ -1339,6 +1363,16 @@ var FanboxUI;
             state.q = "";
             search.value = "";
             setView(view);
+        });
+        window.addEventListener("popstate", event => {
+            if (state.view !== "creator" || state.creatorTab !== "posts" || !state.creatorId)
+                return;
+            const historyState = event.state;
+            if (historyState?.fanboxCreatorId && historyState.fanboxCreatorId !== state.creatorId)
+                return;
+            state.tag = historyState?.fanboxCreatorTag ?? "";
+            state.page = 1;
+            void loadCreator(state.creatorId, "posts");
         });
         window.addEventListener("keydown", event => {
             if (["ArrowLeft", "ArrowRight"].includes(event.key)

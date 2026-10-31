@@ -6,6 +6,7 @@ namespace FanboxUI {
     view: View;
     page: number;
     q: string;
+    tag: string;
     current: string | FanCardSelection | null;
     postNavigation: PostNavigation | null;
     creatorId: string | null;
@@ -23,6 +24,7 @@ namespace FanboxUI {
       view: "posts",
       page: 1,
       q: "",
+      tag: "",
       current: null,
       postNavigation: null,
       creatorId: null,

@@ -340,22 +340,23 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     async def posts(
         page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100),
         q: str = Query("", max_length=200), creator: str = Query("", max_length=200),
-        status: str = Query("", max_length=40),
+        status: str = Query("", max_length=40), tag: str = Query("", max_length=200),
     ):
         return reader.list_posts(
             page=page, page_size=page_size, query=q.strip(),
-            creator=creator.strip(), status=status.strip(),
+            creator=creator.strip(), status=status.strip(), tag=tag.strip(),
         )
 
     @app.get("/api/posts/{post_id}")
     async def post(
         post_id: str, version: int | None = Query(None, ge=1),
         creator: str = Query("", max_length=200), q: str = Query("", max_length=200),
+        tag: str = Query("", max_length=200),
     ):
         try:
             item = reader.post(post_id, version=version)
             item["navigation"] = reader.post_navigation(
-                post_id, creator=creator.strip(), query=q.strip(),
+                post_id, creator=creator.strip(), query=q.strip(), tag=tag.strip(),
             )
             return item
         except ReaderNotFound as exc:

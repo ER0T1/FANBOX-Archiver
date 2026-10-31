@@ -43,7 +43,7 @@ class ArchiveReader:
 
     def list_posts(
         self, *, page: int = 1, page_size: int = 50, query: str = "",
-        creator: str = "", status: str = "",
+        creator: str = "", status: str = "", tag: str = "",
     ) -> dict[str, Any]:
         page = max(1, page)
         page_size = min(max(1, page_size), 100)
@@ -53,6 +53,8 @@ class ArchiveReader:
             total = int(db.execute(
                 f"SELECT COUNT(*) FROM posts p JOIN creators c ON c.creator_id=p.creator_id {where}", values
             ).fetchone()[0])
+            pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, pages)
             rows = list(db.execute(
                 f"""
                 SELECT p.*,c.name AS creator_name,
@@ -69,16 +71,80 @@ class ArchiveReader:
                 [*values, page_size, (page - 1) * page_size],
             ))
         items = [self._post_summary(row) for row in rows]
+        tag_facets: list[dict[str, Any]] = []
+        creator_total = total
+        if creator:
+            facet_where, facet_values = self._post_filter(creator=creator)
+            with self.db.connect() as db:
+                facet_rows = list(db.execute(
+                    f"""
+                    SELECT p.*,c.name AS creator_name,
+                           (SELECT COUNT(*) FROM post_versions v
+                            WHERE v.post_id=p.post_id) AS version_count,
+                           (SELECT MAX(v.version_number) FROM post_versions v
+                            WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                    FROM posts p
+                    JOIN creators c ON c.creator_id=p.creator_id
+                    {facet_where}
+                    ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
+                    """,
+                    facet_values,
+                ))
+            facet_items = [self._post_summary(row) for row in facet_rows]
+            facet_by_id = {item["post_id"]: item for item in facet_items}
+            items = [facet_by_id[str(row["post_id"])] for row in rows]
+            creator_total = len(facet_items)
+            counts: dict[str, int] = {}
+            for item in facet_items:
+                for item_tag in filter(None, dict.fromkeys(item["tags"])):
+                    counts[item_tag] = counts.get(item_tag, 0) + 1
+            tag_facets = [
+                {"name": name, "count": count}
+                for name, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0].casefold()))
+            ]
+            if tag:
+                items = [item for item in items if tag in item["tags"]]
+                # The SQL page was selected before tag filtering. Rebuild the complete
+                # filtered result so counts and page boundaries remain deterministic.
+                filtered_where, filtered_values = self._post_filter(
+                    query=query, creator=creator, status=status,
+                )
+                with self.db.connect() as db:
+                    filtered_rows = list(db.execute(
+                        f"""
+                        SELECT p.*,c.name AS creator_name,
+                               (SELECT COUNT(*) FROM post_versions v
+                                WHERE v.post_id=p.post_id) AS version_count,
+                               (SELECT MAX(v.version_number) FROM post_versions v
+                                WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                        FROM posts p
+                        JOIN creators c ON c.creator_id=p.creator_id
+                        {filtered_where}
+                        ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
+                        """,
+                        filtered_values,
+                    ))
+                filtered_items = [
+                    facet_by_id[str(row["post_id"])] for row in filtered_rows
+                    if tag in facet_by_id[str(row["post_id"])]["tags"]
+                ]
+                total = len(filtered_items)
+                pages = max(1, (total + page_size - 1) // page_size)
+                page = min(page, pages)
+                start = (page - 1) * page_size
+                items = filtered_items[start:start + page_size]
         return {
             "items": items,
             "page": page,
             "page_size": page_size,
             "total": total,
             "pages": max(1, (total + page_size - 1) // page_size),
+            "tag_facets": tag_facets,
+            "creator_total": creator_total,
         }
 
     def post_navigation(
-        self, post_id: str, *, creator: str = "", query: str = "",
+        self, post_id: str, *, creator: str = "", query: str = "", tag: str = "",
     ) -> dict[str, Any]:
         where, values = self._post_filter(query=query, creator=creator)
         pin_order = "p.is_pinned DESC," if creator else ""
@@ -86,7 +152,9 @@ class ArchiveReader:
             rows = list(db.execute(
                 f"""
                 SELECT p.post_id,p.creator_id,c.name AS creator_name,p.title,
-                       p.published_at,p.is_pinned
+                       p.published_at,p.is_pinned,
+                       (SELECT MAX(v.version_number) FROM post_versions v
+                        WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
                 FROM posts p
                 JOIN creators c ON c.creator_id=p.creator_id
                 {where}
@@ -94,6 +162,16 @@ class ArchiveReader:
                 """,
                 values,
             ))
+        if tag:
+            def has_tag(row: Any) -> bool:
+                version = row["latest_version"]
+                if version is None:
+                    return False
+                try:
+                    return tag in self._load_post(str(row["post_id"]), int(version))[1].tags
+                except ReaderNotFound:
+                    return False
+            rows = [row for row in rows if has_tag(row)]
         index = next(
             (position for position, row in enumerate(rows) if str(row["post_id"]) == post_id),
             None,

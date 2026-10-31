@@ -189,6 +189,11 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
             updated_at=start + timedelta(days=number),
             url=f"https://www.fanbox.cc/@alice/posts/{1000 + number}",
             fee_required=300 if number % 2 else 0,
+            tags=[
+                "共同",
+                *(["奇數"] if number % 2 else []),
+                *(["精選"] if number % 10 == 0 else []),
+            ],
             blocks=[ContentBlock(type="paragraph", text=f"第 {number:02d} 篇正文")],
             raw={"isPinned": number == 0},
             content_fingerprint=f"e2e-{number}",
@@ -229,6 +234,15 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
     page.set_viewport_size({"width": 1280, "height": 800})
     page.goto(f"{index_url}#view=creators")
     expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    page.locator(".creator-card").filter(has_text="Alice").get_by_role("button", name="查看文章 →").click()
+    expect(page.get_by_role("button", name="全部 55", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="奇數 27", exact=True)).to_be_visible()
+    page.get_by_role("button", name="奇數 27", exact=True).click()
+    expect(page.locator(".page-heading")).to_contain_text("27 筆符合目前條件")
+    expect(page.locator(".post-card").first).to_contain_text("奇數")
+    page.go_back()
+    expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
+    page.goto(f"{index_url}#view=creators")
     expect(page.get_by_role("link", name="Creator Profile")).to_be_visible()
     page.get_by_role("link", name="Creator Profile").click()
     expect(page.get_by_role("heading", name="Alice", exact=True)).to_be_visible()
@@ -316,6 +330,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
 
     expect(page.get_by_role("heading", name="投稿", exact=True)).to_be_visible()
     expect(page.get_by_text("55 篇備份", exact=True)).to_be_visible()
+    expect(page.locator(".post-card").first).to_contain_text("共同")
     expect(page.locator('summary[aria-label="目前第 1 頁，共 2 頁"]')).to_be_visible()
 
     page.get_by_role("button", name="下一頁 →").click()
@@ -437,6 +452,23 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     first_creator_post = page.locator(".creator-posts .post-card").first
     expect(first_creator_post).to_contain_text("投稿 00")
     expect(first_creator_post).to_contain_text("置頂")
+    expect(first_creator_post).to_contain_text("共同")
+    expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
+    expect(page.get_by_role("button", name="奇數 27", exact=True)).to_be_visible()
+    page.get_by_role("button", name="奇數 27", exact=True).click()
+    expect(page.locator(".creator-posts .post-card")).to_have_count(27)
+    expect(page.locator(".creator-posts .pagination")).to_have_count(0)
+    expect(page.locator(".creator-posts .post-card").first).to_contain_text("奇數")
+    search = page.get_by_role("searchbox", name="搜尋文章")
+    search.fill("稀有關鍵字")
+    expect(page.locator(".creator-posts .post-card")).to_have_count(1)
+    search.fill("")
+    expect(page.locator(".creator-posts .post-card")).to_have_count(27)
+    page.go_back()
+    expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
 
     page.locator('[data-creator-tab="fancards"]').click()
     expect(page.get_by_text("Gold", exact=True)).to_be_visible()

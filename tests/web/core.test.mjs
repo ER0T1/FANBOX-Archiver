@@ -16,6 +16,7 @@ test("TypeScript core creates independent initial state", () => {
   const second = ui.createInitialState();
   first.page = 8;
   assert.equal(second.page, 1);
+  assert.equal(second.tag, "");
   assert.equal(second.view, "posts");
   assert.equal(second.postNavigation, null);
   assert.equal(second.activeJob, null);

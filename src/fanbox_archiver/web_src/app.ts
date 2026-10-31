@@ -36,6 +36,7 @@ namespace FanboxUI {
       state.view = view;
       state.current = null;
       state.page = 1;
+      state.tag = "";
       if (view === "backup") {
         state.backupScreen = "form";
         state.backupJobId = null;
@@ -97,6 +98,7 @@ namespace FanboxUI {
         if (version !== null) params.set("version", String(version));
         if (creatorContent && creatorId) params.set("creator", creatorId);
         if (state.q) params.set("q", state.q);
+        if (creatorContent && state.tag) params.set("tag", state.tag);
         const post = await getPost(postId, params);
         state.current = postId;
         state.postNavigation = post.navigation;
@@ -132,6 +134,7 @@ namespace FanboxUI {
       state.current = null;
       state.page = 1;
       state.q = "";
+      state.tag = "";
       state.creator = null;
       state.creatorProfile = null;
       search.value = "";
@@ -145,6 +148,7 @@ namespace FanboxUI {
       state.current = null;
       state.page = 1;
       state.q = "";
+      state.tag = "";
       search.value = "";
       setSearch("creator");
       void loadCreator(creatorId, tab);
@@ -194,10 +198,19 @@ namespace FanboxUI {
         if (tab === "posts") {
           const params = new URLSearchParams({creator: creatorId, page: String(state.page), page_size: "50"});
           if (state.q) params.set("q", state.q);
+          if (state.tag) params.set("tag", state.tag);
           const data = await getPosts(params);
+          state.page = data.page;
           content = renderCreatorPostList(data, {
             onOpen: postId => void loadPost(postId),
             onPage: page => { state.page = page; void loadCreator(creatorId, "posts"); },
+            activeTag: state.tag,
+            onTag: tag => {
+              state.tag = tag;
+              state.page = 1;
+              history.pushState({fanboxCreatorId: creatorId, fanboxCreatorTag: tag}, "", location.href);
+              void loadCreator(creatorId, "posts");
+            },
           });
         } else if (tab === "fancards") {
           const params = new URLSearchParams({creator: creatorId});
@@ -443,6 +456,14 @@ namespace FanboxUI {
       state.q = "";
       search.value = "";
       setView(view as View);
+    });
+    window.addEventListener("popstate", event => {
+      if (state.view !== "creator" || state.creatorTab !== "posts" || !state.creatorId) return;
+      const historyState = event.state as {fanboxCreatorId?: string; fanboxCreatorTag?: string} | null;
+      if (historyState?.fanboxCreatorId && historyState.fanboxCreatorId !== state.creatorId) return;
+      state.tag = historyState?.fanboxCreatorTag ?? "";
+      state.page = 1;
+      void loadCreator(state.creatorId, "posts");
     });
     window.addEventListener("keydown", event => {
       if (["ArrowLeft", "ArrowRight"].includes(event.key)
