@@ -29,8 +29,8 @@ if ($UniqueVersions.Count -ne 1) {
 
 $Version = $UniqueVersions[0]
 if ($ExpectedVersion) {
-    if ($ExpectedVersion -notmatch '^v?\d+\.\d+\.\d+$') {
-        throw "Release version must use the stable semantic format vMAJOR.MINOR.PATCH."
+    if ($ExpectedVersion -notmatch '^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+        throw "Release version must use vMAJOR.MINOR.PATCH or a semantic prerelease such as vMAJOR.MINOR.PATCH-alpha."
     }
     $NormalizedExpected = $ExpectedVersion.TrimStart([char]'v')
     if ($Version -ne $NormalizedExpected) {
