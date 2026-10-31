@@ -1,20 +1,25 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$VirtualEnvironmentPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$Python = if (Test-Path -LiteralPath $VirtualEnvironmentPython -PathType Leaf) {
+    $VirtualEnvironmentPython
+} else {
+    $PythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $PythonCommand) {
+        throw "Python was not found. Create .venv or add Python to PATH."
+    }
+    $PythonCommand.Source
+}
 $OutputDirectory = Join-Path $ProjectRoot "build\sidecar-dist"
 $WorkDirectory = Join-Path $ProjectRoot "build\sidecar-work"
 $SpecDirectory = Join-Path $ProjectRoot "build\sidecar-spec"
 $BinaryDirectory = Join-Path $ProjectRoot "src-tauri\binaries"
 $Target = Join-Path $BinaryDirectory "fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe"
 
-if (-not (Test-Path -LiteralPath $Python)) {
-    throw "找不到虛擬環境 Python：$Python"
-}
-
 & $Python -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    throw "尚未安裝桌面建置依賴，請先執行 .venv\Scripts\python.exe -m pip install -e '.[desktop]'"
+    throw "PyInstaller is not installed for $Python. Install the desktop dependencies first."
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $WorkDirectory, $SpecDirectory, $BinaryDirectory | Out-Null
@@ -31,12 +36,12 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory, $WorkDirectory, $Spe
     --specpath $SpecDirectory `
     (Join-Path $ProjectRoot "scripts\sidecar_entry.py")
 if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller sidecar 建置失敗"
+    throw "PyInstaller sidecar build failed."
 }
 
 $Built = Join-Path $OutputDirectory "fanbox-archiver-sidecar.exe"
 if (-not (Test-Path -LiteralPath $Built)) {
-    throw "找不到 PyInstaller 輸出：$Built"
+    throw "PyInstaller output was not found: $Built"
 }
 $Copied = $false
 foreach ($Attempt in 1..10) {
@@ -50,6 +55,6 @@ foreach ($Attempt in 1..10) {
     }
 }
 if (-not $Copied) {
-    throw "無法更新 sidecar：$Target"
+    throw "Could not update the sidecar: $Target"
 }
 Write-Host "Sidecar ready: $Target"

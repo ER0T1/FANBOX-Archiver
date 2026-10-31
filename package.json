@@ -5,7 +5,7 @@
     "build:web": "tsc -p tsconfig.web.json",
     "check:web": "tsc -p tsconfig.web.json --noEmit",
     "test:web": "npm run build:web && node --test tests/web/*.test.mjs",
-    "test:e2e": ".venv\\Scripts\\python.exe -m pytest tests/e2e -m e2e",
+    "test:e2e": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-e2e.ps1",
     "desktop:check": "%USERPROFILE%\\.cargo\\bin\\cargo.exe check --manifest-path src-tauri/Cargo.toml",
     "desktop:dev": "set PATH=%USERPROFILE%\\.cargo\\bin;%PATH%&& tauri dev",
     "desktop:build": "npm run desktop:sidecar && set PATH=%USERPROFILE%\\.cargo\\bin;%PATH%&& tauri build",

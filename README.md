@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.19-alpha（2026-10-31）**
+**內部測試版本：v1.3.20-alpha（2026-10-31）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.20-alpha 更新重點
+
+- 修正 Windows CI 安裝套件到全域 Python、但 E2E 與 sidecar 建置固定尋找 `.venv`，造成乾淨 runner 無法執行的問題。
+- `test:e2e` 與 sidecar 建置都優先使用專案 `.venv`，不存在時安全退回 PATH 中的 Python，兼容一般本機開發與 GitHub 的乾淨 runner。
+- sidecar 建置腳本的啟動階段錯誤訊息改為 ASCII，避免 Windows PowerShell 5.1 在英文 runner 將無 BOM UTF-8 中文誤解碼成 ParserError；正式 release workflow 亦沿用相同修正。
 
 ## v1.3.19-alpha 更新重點
 
