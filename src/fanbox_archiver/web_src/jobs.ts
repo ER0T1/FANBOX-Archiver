@@ -106,7 +106,9 @@ namespace FanboxUI {
       const total = valueNumber(data, "total");
       return `${valueString(data, "name")}：${humanBytes(valueNumber(data, "downloaded"))}${total ? ` / ${humanBytes(total)}` : ""}`;
     }
+    if (event.kind === "item_started") return `投稿 ${valueNumber(data, "index")} / ${valueNumber(data, "total")}：Post ${valueString(data, "post_id")}`;
     if (event.kind === "item_finished") return `Post ${valueString(data, "post_id")}：${data.unchanged ? "內容未變" : valueString(data, "error") || valueString(data, "status")}`;
+    if (event.kind === "verify_progress") return `${verificationPhaseLabel(valueString(data, "phase"))}：${valueString(data, "item")}`;
     if (event.kind === "warning") return `警告：${data.creator_id ? `${valueString(data, "creator_id")}：` : ""}${valueString(data, "message")}`;
     if (event.kind === "job_finished") return data.dry_run ? "預覽完成" : `完成：成功 ${valueNumber(data, "success")}、未完成 ${valueNumber(data, "failure")}`;
     if (event.kind === "job_failed") return `錯誤：${valueString(data, "error")}`;
@@ -156,10 +158,14 @@ namespace FanboxUI {
   }
 
   function currentActivity(job: WebJob): HTMLElement {
-    const event = [...(job.events ?? [])].reverse().find(item => ["asset_progress", "item_finished", "fancard_finished",
+    const events = job.events ?? [];
+    const event = [...events].reverse().find(item => ["asset_progress", "item_started", "item_finished", "fancard_finished",
       "profile_started", "profile_finished", "profile_warning", "warning", "job_failed", "job_finished",
       "job_cancelled", "job_interrupted", "job_started"].includes(item.kind));
     if (!event) return h("section", {class: "current-activity"}, h("p", {class: "eyebrow"}, "CURRENT"), h("h2", {}, "正在準備備份…"));
+    const postEvent = [...events].reverse().find(item =>
+      ["item_started", "item_finished", "asset_progress"].includes(item.kind)
+      && valueNumber(item.data, "index") > 0 && valueNumber(item.data, "total") > 0);
     const isAsset = event.kind === "asset_progress";
     const total = valueNumber(event.data, "total");
     const downloaded = valueNumber(event.data, "downloaded");
@@ -167,10 +173,45 @@ namespace FanboxUI {
     return h("section", {class: `current-activity tone-${eventTone(event.kind)}`},
       h("div", {class: "activity-top"}, h("div", {}, h("p", {class: "eyebrow"}, isAsset ? "CURRENT DOWNLOAD" : "CURRENT STATUS"),
         h("h2", {}, isAsset ? valueString(event.data, "name") || "下載資源" : eventLabel(event))), h("time", {}, formatDate(event.timestamp))),
+      postEvent ? h("div", {class: "progress-area post-progress", role: "status", "aria-live": "polite", "aria-atomic": "true"},
+        h("div", {class: "progress-label"},
+          h("span", {}, `投稿 ${valueNumber(postEvent.data, "index")} / ${valueNumber(postEvent.data, "total")}`),
+          h("strong", {}, `Post ${valueString(postEvent.data, "post_id")}`)),
+        h("progress", {max: valueNumber(postEvent.data, "total"),
+          value: Math.min(valueNumber(postEvent.data, "index"), valueNumber(postEvent.data, "total")),
+          "aria-label": "本次投稿備份進度"})) : null,
       isAsset ? h("div", {class: "progress-area"},
         h("div", {class: "progress-label"}, h("span", {}, `${humanBytes(downloaded)}${total ? ` / ${humanBytes(total)}` : ""}`),
           h("strong", {}, percent === null ? "下載中" : `${percent.toFixed(1)}%`)),
         h("progress", {max: total || 1, value: downloaded, "aria-label": "目前資源下載進度"})) : null);
+  }
+
+  export function verificationPhaseLabel(phase: string): string {
+    const labels: Record<string, string> = {
+      scan: "掃描驗證項目", posts: "驗證投稿", versions: "驗證歷史版本",
+      fancards: "驗證粉絲卡", profiles: "驗證個人資料", consistency: "檢查資料庫一致性",
+    };
+    return labels[phase] || "驗證封存";
+  }
+
+  function verificationProgress(job: WebJob | null): HTMLElement | null {
+    const event = [...(job?.events ?? [])].reverse().find(item => item.kind === "verify_progress");
+    if (!event || job?.result) return null;
+    const totalValue = event.data.total;
+    const total = totalValue === null || totalValue === undefined ? null : valueNumber(event.data, "total");
+    const current = valueNumber(event.data, "current");
+    const percent = total === null ? null : Math.min(100, Math.max(0, valueNumber(event.data, "percent")));
+    return h("section", {class: "verification-progress", role: "status", "aria-live": "polite", "aria-atomic": "true"},
+      h("div", {class: "verification-progress-heading"}, h("div", {},
+        h("p", {class: "eyebrow"}, "VERIFY PROGRESS"),
+        h("h2", {}, verificationPhaseLabel(valueString(event.data, "phase")))),
+        h("strong", {}, percent === null ? "掃描中" : `${percent.toFixed(1)}%`)),
+      h("p", {class: "verification-item"}, valueString(event.data, "item")),
+      h("div", {class: "progress-label"},
+        h("span", {}, total === null ? "正在建立固定驗證清單" : `${current} / ${total}`),
+        h("span", {}, `目前發現 ${valueNumber(event.data, "issue_count")} 個問題`)),
+      h("progress", {max: total ?? undefined, value: total === null ? undefined : current,
+        "aria-label": total === null ? "正在掃描封存驗證項目" : "封存驗證進度"}));
   }
 
   function eventLog(events: WebJobEvent[]): HTMLDetailsElement {
@@ -431,6 +472,7 @@ namespace FanboxUI {
       h("button", {type: "button", class: "primary", disabled: active, onclick: actions.onStart},
         activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")),
     job?.error ? h("p", {class: "job-error"}, h("strong", {}, "錯誤："), job.error) : null,
+    verificationProgress(job),
     result ? h("section", {class: `verification-result ${result.passed ? "passed" : "issues"}`},
       h("div", {class: "verification-summary"}, h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`),
         h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")),

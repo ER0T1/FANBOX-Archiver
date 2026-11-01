@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import fanbox_archiver.application.jobs as jobs_module
 from fanbox_archiver.application import BackupCancelled, BackupEvent, BackupJobManager, BackupRequest
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.database import Database
@@ -226,8 +227,61 @@ def test_verify_job_uses_same_persistent_queue(tmp_path: Path):
             "passed": True, "issue_count": 0, "issues": [], "truncated": False,
         }
         assert [event["kind"] for event in completed["events"]] == [
-            "verify_started", "verify_finished",
+            "verify_started", "verify_progress", "verify_finished",
         ]
+        progress = completed["events"][1]["data"]
+        assert progress == {
+            "phase": "scan", "current": 0, "total": 0, "percent": 100.0,
+            "item": "封存中沒有需要驗證的項目", "issue_count": 0,
+        }
         assert manager.list()[0]["kind"] == "verify"
     finally:
         manager.close()
+
+    restored_manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        restored = restored_manager.get(submitted["job_id"])
+        assert restored is not None
+        assert [event["kind"] for event in restored["events"]] == [
+            "verify_started", "verify_progress", "verify_finished",
+        ]
+        assert restored["events"][1]["data"]["total"] == 0
+    finally:
+        restored_manager.close()
+
+
+def test_failed_verify_restores_exact_last_progress(monkeypatch, tmp_path: Path):
+    class FailingArchive:
+        def __init__(self, config):
+            pass
+
+        def verify(self, progress):
+            progress({
+                "phase": "posts", "current": 1, "total": 3, "percent": 33.3,
+                "item": "Post 123 資源", "issue_count": 0,
+            })
+            progress({
+                "phase": "posts", "current": 2, "total": 3, "percent": 66.7,
+                "item": "Post 456 資源", "issue_count": 1,
+            })
+            raise RuntimeError("verification stopped")
+
+    app_config = config(tmp_path)
+    monkeypatch.setattr(jobs_module, "ArchiveService", FailingArchive)
+    manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    submitted = manager.submit_verify()
+    failed = manager.wait(submitted["job_id"])
+    manager.close()
+    assert failed["status"] == "failed"
+    assert failed["events"][-1]["data"]["current"] == 2
+
+    restored_manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        restored = restored_manager.get(submitted["job_id"])
+        assert restored is not None
+        progress = [event for event in restored["events"] if event["kind"] == "verify_progress"]
+        assert len(progress) == 1
+        assert progress[0]["data"]["current"] == 2
+        assert progress[0]["data"]["item"] == "Post 456 資源"
+    finally:
+        restored_manager.close()

@@ -175,12 +175,15 @@ class SyncService:
         ), posts
 
     def execute_posts(
-        self, plan: SyncPlan, posts: dict[str, Post], *, on_item=None, should_cancel=None,
+        self, plan: SyncPlan, posts: dict[str, Post], *, on_item_start=None,
+        on_item=None, should_cancel=None,
     ) -> SyncResult:
         result = SyncResult(plan=plan)
         for item in plan.selected:
             if should_cancel and should_cancel():
                 raise SyncCancelled(result)
+            if on_item_start:
+                on_item_start(item)
             try:
                 status = self.archive.save(posts[item.summary.post_id], download_assets=True)
                 if status == PostStatus.COMPLETED:
@@ -250,7 +253,9 @@ class SyncService:
             warnings=[warning for scan in scans for warning in scan.warnings],
         )
 
-    def execute(self, plan: SyncPlan, *, on_item=None, should_cancel=None) -> SyncResult:
+    def execute(
+        self, plan: SyncPlan, *, on_item_start=None, on_item=None, should_cancel=None,
+    ) -> SyncResult:
         result = SyncResult(plan=plan)
         completed_ids: set[tuple[str, str]] = set()
         downloads = 0
@@ -260,6 +265,8 @@ class SyncService:
                 raise SyncCancelled(result)
             if downloads >= limit:
                 break
+            if on_item_start:
+                on_item_start(item)
             try:
                 post = self.client.post(item.summary.post_id)
                 previous = self.db.post_row(post.post_id)

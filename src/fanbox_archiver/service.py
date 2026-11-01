@@ -716,17 +716,99 @@ class ArchiveService:
                 return False
         return True
 
-    def verify(self) -> list[VerificationIssue]:
+    def verify(
+        self, progress_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> list[VerificationIssue]:
         issues: list[VerificationIssue] = []
         root = self.config.storage.output_dir
+        current = 0
+
+        def publish(phase: str, total: int | None, item: str) -> None:
+            if progress_callback is None:
+                return
+            if total is None:
+                percent = None
+            elif total == 0:
+                percent = 100.0
+            else:
+                percent = min(100.0, current / total * 100)
+            progress_callback({
+                "phase": phase,
+                "current": current,
+                "total": total,
+                "percent": percent,
+                "item": item,
+                "issue_count": len(issues),
+            })
+
+        def advance(phase: str, total: int, item: str) -> None:
+            nonlocal current
+            current += 1
+            publish(phase, total, item)
+
+        publish("scan", None, "掃描封存驗證項目")
         if not root.exists():
-            return [VerificationIssue(path=str(root), reason="備份目錄不存在")]
-        for metadata in root.glob("*/*/post.json"):
+            issues.append(VerificationIssue(path=str(root), reason="備份目錄不存在"))
+            advance("consistency", 1, "備份目錄")
+            return issues
+
+        post_snapshots: list[tuple[Path, Post | None, Exception | None]] = []
+        for metadata in sorted(root.glob("*/*/post.json")):
             try:
                 post = Post.model_validate_json(metadata.read_text(encoding="utf-8"))
             except Exception as exc:
-                issues.append(VerificationIssue(path=str(metadata), reason=f"post.json 無法解析：{exc}"))
+                post_snapshots.append((metadata, None, exc))
                 continue
+            post_snapshots.append((metadata, post, None))
+
+        manifest_snapshots: list[
+            tuple[Path, str, str, str, Exception | None, list[tuple[str, object]]]
+        ] = []
+
+        def scan_manifests(pattern: str, phase: str, prefix: str) -> None:
+            for manifest_path in sorted(root.glob(pattern)):
+                parts = manifest_path.relative_to(root).parts
+                if phase == "versions":
+                    label = f"Post {parts[1]}"
+                elif phase == "fancards":
+                    label = f"@{parts[0]} / Fan Card {parts[2]}"
+                else:
+                    label = f"@{parts[0]} / Creator Profile"
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    files = manifest.get("files") or {}
+                    if not isinstance(files, dict):
+                        raise ValueError("files 欄位格式錯誤")
+                    manifest_snapshots.append((
+                        manifest_path, phase, prefix, label, None, list(files.items()),
+                    ))
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    manifest_snapshots.append((
+                        manifest_path, phase, prefix, label, exc, [],
+                    ))
+
+        scan_manifests("*/*/versions/v*/manifest.json", "versions", "歷史版本")
+        scan_manifests("*/fancards/*/versions/v*/manifest.json", "fancards", "Fan Card")
+        scan_manifests("*/profile/versions/v*/manifest.json", "profiles", "Profile")
+        incomplete_versions = list(self.db.incomplete_versions())
+        missing_versions = list(self.db.completed_posts_without_versions())
+        total = (
+            sum(1 + (len(post.assets) + (1 if post.cover else 0) if post else 0)
+                for _, post, _ in post_snapshots)
+            + sum(1 + len(files) for *_, files in manifest_snapshots)
+            + len(incomplete_versions) + len(missing_versions)
+        )
+        publish("scan", total, f"已建立 {total} 個驗證項目")
+
+        for metadata, post, parse_error in post_snapshots:
+            fallback_id = metadata.parent.name
+            if parse_error is not None or post is None:
+                issues.append(VerificationIssue(
+                    path=str(metadata), reason=f"post.json 無法解析：{parse_error}",
+                ))
+                advance("posts", total, f"Post {fallback_id}")
+                continue
+            advance("posts", total, f"Post {post.post_id} 中繼資料")
             for asset in [*post.assets, *([post.cover] if post.cover else [])]:
                 if not asset.local_path or asset.status != AssetStatus.COMPLETED:
                     issues.append(VerificationIssue(
@@ -735,6 +817,7 @@ class ArchiveService:
                         post_id=post.post_id,
                         asset_id=asset.asset_id,
                     ))
+                    advance("posts", total, f"Post {post.post_id} 資源")
                     continue
                 try:
                     path = confined_path(metadata.parent, Path(asset.local_path))
@@ -746,6 +829,7 @@ class ArchiveService:
                     asset.status = AssetStatus.CORRUPT
                     self.db.set_asset(post.post_id, asset)
                     self.db.set_post_status(post.post_id, PostStatus.PARTIAL, "完整性驗證失敗")
+                    advance("posts", total, f"Post {post.post_id} 資源")
                     continue
                 if not path.exists():
                     asset.status = AssetStatus.MISSING
@@ -759,52 +843,44 @@ class ArchiveService:
                 if asset.status in {AssetStatus.MISSING, AssetStatus.CORRUPT}:
                     self.db.set_asset(post.post_id, asset)
                     self.db.set_post_status(post.post_id, PostStatus.PARTIAL, "完整性驗證失敗")
-        for manifest_path in root.glob("*/*/versions/v*/manifest.json"):
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                files = manifest.get("files") or {}
-                if not isinstance(files, dict):
-                    raise ValueError("files 欄位格式錯誤")
-                for relative, expected in files.items():
+                advance("posts", total, f"Post {post.post_id} 資源")
+
+        for manifest_path, phase, prefix, label, parse_error, files in manifest_snapshots:
+            if parse_error is not None:
+                reason_prefix = "manifest.json" if phase == "versions" else f"{prefix} manifest"
+                issues.append(VerificationIssue(
+                    path=str(manifest_path), reason=f"{reason_prefix} 無法驗證：{parse_error}",
+                ))
+                advance(phase, total, label)
+                continue
+            advance(phase, total, f"{label} manifest")
+            for relative, expected in files:
+                try:
                     path = confined_path(manifest_path.parent, Path(str(relative)))
                     if not path.exists():
-                        issues.append(VerificationIssue(path=str(path), reason="歷史版本檔案遺失"))
+                        issues.append(VerificationIssue(path=str(path), reason=f"{prefix} 檔案遺失"))
                     elif sha256_file(path) != str(expected):
-                        issues.append(VerificationIssue(path=str(path), reason="歷史版本 SHA-256 不符"))
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                issues.append(VerificationIssue(path=str(manifest_path), reason=f"manifest.json 無法驗證：{exc}"))
-        for manifest_path in root.glob("*/fancards/*/versions/v*/manifest.json"):
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                for relative, expected in (manifest.get("files") or {}).items():
-                    path = confined_path(manifest_path.parent, Path(str(relative)))
-                    if not path.exists():
-                        issues.append(VerificationIssue(path=str(path), reason="Fan Card 檔案遺失"))
-                    elif sha256_file(path) != str(expected):
-                        issues.append(VerificationIssue(path=str(path), reason="Fan Card SHA-256 不符"))
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                issues.append(VerificationIssue(path=str(manifest_path), reason=f"Fan Card manifest 無法驗證：{exc}"))
-        for manifest_path in root.glob("*/profile/versions/v*/manifest.json"):
-            try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                for relative, expected in (manifest.get("files") or {}).items():
-                    path = confined_path(manifest_path.parent, Path(str(relative)))
-                    if not path.exists():
-                        issues.append(VerificationIssue(path=str(path), reason="Profile 檔案遺失"))
-                    elif sha256_file(path) != str(expected):
-                        issues.append(VerificationIssue(path=str(path), reason="Profile SHA-256 不符"))
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                issues.append(VerificationIssue(path=str(manifest_path), reason=f"Profile manifest 無法驗證：{exc}"))
-        for row in self.db.incomplete_versions():
+                        issues.append(VerificationIssue(path=str(path), reason=f"{prefix} SHA-256 不符"))
+                except (OSError, ValueError) as exc:
+                    issues.append(VerificationIssue(
+                        path=str(manifest_path), reason=f"{prefix} manifest 無法驗證：{exc}",
+                    ))
+                advance(phase, total, label)
+
+        for row in incomplete_versions:
             issues.append(VerificationIssue(
                 path=str(row["local_path"]),
                 reason=f"版本尚未完成（{row['status']}）",
                 post_id=str(row["post_id"]),
             ))
-        for row in self.db.completed_posts_without_versions():
+            advance("consistency", total, f"Post {row['post_id']} 一致性")
+        for row in missing_versions:
             issues.append(VerificationIssue(
                 path=str(row["local_path"] or self.config.storage.database),
                 reason="資料庫標示為 completed，但缺少完成版本紀錄",
                 post_id=str(row["post_id"]),
             ))
+            advance("consistency", total, f"Post {row['post_id']} 一致性")
+        if total == 0:
+            publish("scan", 0, "封存中沒有需要驗證的項目")
         return issues

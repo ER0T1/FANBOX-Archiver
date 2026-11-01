@@ -53,3 +53,27 @@ def test_creator_avatar_is_saved_and_registered(tmp_path: Path):
     assert row["icon_url"] == post.creator_icon_url
     assert row["icon_sha256"] == "avatar-sha256"
     assert Path(row["icon_path"]).read_bytes() == b"avatar"
+
+
+def test_verify_reports_indeterminate_scan_then_monotonic_safe_progress(tmp_path: Path):
+    config = AppConfig(storage=StorageConfig(
+        output_dir=tmp_path / "backup",
+        database=tmp_path / "backup" / "backup.db",
+    ))
+    metadata = config.storage.output_dir / "creator" / "123" / "post.json"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("not-json", encoding="utf-8")
+    progress: list[dict[str, object]] = []
+
+    issues = ArchiveService(config).verify(progress.append)
+
+    assert len(issues) == 1
+    assert progress[0]["phase"] == "scan" and progress[0]["total"] is None
+    assert progress[-1] == {
+        "phase": "posts", "current": 1, "total": 1, "percent": 100.0,
+        "item": "Post 123", "issue_count": 1,
+    }
+    assert [int(item["current"]) for item in progress] == sorted(
+        int(item["current"]) for item in progress
+    )
+    assert all(str(tmp_path) not in str(item["item"]) for item in progress)

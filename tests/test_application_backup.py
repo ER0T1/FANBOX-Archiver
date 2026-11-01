@@ -225,6 +225,7 @@ def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch,
     assert preview_archive.db.post_row("123") is None
     assert preview_archive.db.post_row("456") is None
 
+    live_event_start = len(sink.events)
     outcome = BackupUseCase(config, sink=sink).run(BackupRequest(posts=("123", "456")))
 
     assert [item.summary.post_id for item in outcome.plan.selected] == ["123", "456"]
@@ -232,3 +233,10 @@ def test_targeted_posts_use_shared_backup_flow_without_creator_scan(monkeypatch,
     archive = backup_module.ArchiveService(config)
     assert archive.db.post_row("123") is not None
     assert archive.db.post_row("456") is not None
+    live_events = sink.events[live_event_start:]
+    item_events = [event for event in live_events if event.kind.startswith("item_")]
+    assert [(event.kind, event.data["index"], event.data["total"], event.data["post_id"])
+            for event in item_events] == [
+        ("item_started", 1, 2, "123"), ("item_finished", 1, 2, "123"),
+        ("item_started", 2, 2, "456"), ("item_finished", 2, 2, "456"),
+    ]

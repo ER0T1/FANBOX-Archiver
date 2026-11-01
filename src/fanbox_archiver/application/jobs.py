@@ -153,7 +153,11 @@ class BackupJobManager:
         try:
             if job.kind == "verify":
                 self._record_event(job_id, BackupEvent("verify_started"))
-                issues = ArchiveService(self.config).verify()
+                issues = ArchiveService(self.config).verify(
+                    lambda data: self._record_event(
+                        job_id, BackupEvent("verify_progress", data),
+                    )
+                )
                 issue_values = [issue.model_dump(mode="json") for issue in issues[:500]]
                 self._record_event(job_id, BackupEvent(
                     "verify_finished", {"issue_count": len(issues), "shown": len(issue_values)},
@@ -192,6 +196,20 @@ class BackupJobManager:
                 job.error = str(exc)
         finally:
             with self._lock:
+                if job.kind == "verify" and job.status != "completed":
+                    progress = next(
+                        (value for value in reversed(job.events)
+                         if value["kind"] == "verify_progress"),
+                        None,
+                    )
+                    if progress is not None:
+                        self.db.record_web_job_event(
+                            job_id, "verify_progress", progress["timestamp"],
+                            json.dumps(
+                                progress["data"], ensure_ascii=False, sort_keys=True,
+                            ),
+                            coalesce_key="verify-progress",
+                        )
                 job.finished_at = job.updated_at = _now()
                 self._persist_job(job)
 
@@ -201,11 +219,17 @@ class BackupJobManager:
             job = self._jobs.get(job_id)
             if job is None:
                 return
-            if (
+            previous_progress = None
+            replace_progress = (
                 event.kind == "asset_progress" and job.events
                 and job.events[-1]["kind"] == "asset_progress"
                 and job.events[-1]["data"].get("asset_id") == event.data.get("asset_id")
-            ):
+            ) or (
+                event.kind == "verify_progress" and job.events
+                and job.events[-1]["kind"] == "verify_progress"
+            )
+            if replace_progress:
+                previous_progress = job.events[-1]["data"]
                 job.events[-1] = value
             else:
                 job.events.append(value)
@@ -214,13 +238,23 @@ class BackupJobManager:
             job.updated_at = _now()
             coalesce_key = (
                 f"asset:{event.data.get('asset_id')}"
-                if event.kind == "asset_progress" else None
+                if event.kind == "asset_progress"
+                else "verify-progress" if event.kind == "verify_progress" else None
             )
-            if event.kind == "asset_progress":
+            if event.kind in {"asset_progress", "verify_progress"}:
                 current = time.monotonic()
-                total = event.data.get("total")
-                finished = total is not None and event.data.get("downloaded", 0) >= total
-                if not finished and current - self._progress_persisted_at.get(job_id, 0.0) < 0.5:
+                if event.kind == "asset_progress":
+                    total = event.data.get("total")
+                    force = total is not None and event.data.get("downloaded", 0) >= total
+                else:
+                    total = event.data.get("total")
+                    force = (
+                        previous_progress is None
+                        or previous_progress.get("phase") != event.data.get("phase")
+                        or previous_progress.get("total") != total
+                        or total is not None and event.data.get("current", 0) >= total
+                    )
+                if not force and current - self._progress_persisted_at.get(job_id, 0.0) < 0.5:
                     return
                 self._progress_persisted_at[job_id] = current
             self.db.record_web_job_event(

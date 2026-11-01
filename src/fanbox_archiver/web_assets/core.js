@@ -636,8 +636,12 @@ var FanboxUI;
             const total = valueNumber(data, "total");
             return `${valueString(data, "name")}：${FanboxUI.humanBytes(valueNumber(data, "downloaded"))}${total ? ` / ${FanboxUI.humanBytes(total)}` : ""}`;
         }
+        if (event.kind === "item_started")
+            return `投稿 ${valueNumber(data, "index")} / ${valueNumber(data, "total")}：Post ${valueString(data, "post_id")}`;
         if (event.kind === "item_finished")
             return `Post ${valueString(data, "post_id")}：${data.unchanged ? "內容未變" : valueString(data, "error") || valueString(data, "status")}`;
+        if (event.kind === "verify_progress")
+            return `${verificationPhaseLabel(valueString(data, "phase"))}：${valueString(data, "item")}`;
         if (event.kind === "warning")
             return `警告：${data.creator_id ? `${valueString(data, "creator_id")}：` : ""}${valueString(data, "message")}`;
         if (event.kind === "job_finished")
@@ -682,16 +686,40 @@ var FanboxUI;
         return FanboxUI.h("section", { class: "plan-panel" }, FanboxUI.h("div", { class: "section-title" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP PLAN"), FanboxUI.h("h2", {}, "本次備份摘要")), FanboxUI.h("span", { class: "plan-creators" }, `${creatorCount} 位創作者`)), FanboxUI.h("p", { class: "plan-capacity" }, `上限 ${requested}／發現 ${valueNumber(data, "discovered")}／符合 ${valueNumber(data, "eligible")}／選取 ${selected}／略過 ${valueNumber(data, "skipped")}`, selected < requested ? FanboxUI.h("strong", {}, reason) : null), FanboxUI.h("div", { class: "metric-grid" }, metrics.map(([label, value, tone]) => FanboxUI.h("div", { class: `metric ${tone}` }, FanboxUI.h("strong", {}, value), FanboxUI.h("span", {}, label)))), rows.length ? FanboxUI.h("div", { class: "table-scroll" }, FanboxUI.h("table", { class: "plan-table" }, FanboxUI.h("thead", {}, FanboxUI.h("tr", {}, FanboxUI.h("th", {}, "創作者"), FanboxUI.h("th", {}, "新增"), FanboxUI.h("th", {}, "更新"), FanboxUI.h("th", {}, "重試"), FanboxUI.h("th", {}, "略過"), FanboxUI.h("th", {}, "發現"), FanboxUI.h("th", {}, "Profile"))), FanboxUI.h("tbody", {}, rows))) : null);
     }
     function currentActivity(job) {
-        const event = [...(job.events ?? [])].reverse().find(item => ["asset_progress", "item_finished", "fancard_finished",
+        const events = job.events ?? [];
+        const event = [...events].reverse().find(item => ["asset_progress", "item_started", "item_finished", "fancard_finished",
             "profile_started", "profile_finished", "profile_warning", "warning", "job_failed", "job_finished",
             "job_cancelled", "job_interrupted", "job_started"].includes(item.kind));
         if (!event)
             return FanboxUI.h("section", { class: "current-activity" }, FanboxUI.h("p", { class: "eyebrow" }, "CURRENT"), FanboxUI.h("h2", {}, "正在準備備份…"));
+        const postEvent = [...events].reverse().find(item => ["item_started", "item_finished", "asset_progress"].includes(item.kind)
+            && valueNumber(item.data, "index") > 0 && valueNumber(item.data, "total") > 0);
         const isAsset = event.kind === "asset_progress";
         const total = valueNumber(event.data, "total");
         const downloaded = valueNumber(event.data, "downloaded");
         const percent = total > 0 ? Math.min(100, Math.max(0, downloaded / total * 100)) : null;
-        return FanboxUI.h("section", { class: `current-activity tone-${eventTone(event.kind)}` }, FanboxUI.h("div", { class: "activity-top" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, isAsset ? "CURRENT DOWNLOAD" : "CURRENT STATUS"), FanboxUI.h("h2", {}, isAsset ? valueString(event.data, "name") || "下載資源" : eventLabel(event))), FanboxUI.h("time", {}, FanboxUI.formatDate(event.timestamp))), isAsset ? FanboxUI.h("div", { class: "progress-area" }, FanboxUI.h("div", { class: "progress-label" }, FanboxUI.h("span", {}, `${FanboxUI.humanBytes(downloaded)}${total ? ` / ${FanboxUI.humanBytes(total)}` : ""}`), FanboxUI.h("strong", {}, percent === null ? "下載中" : `${percent.toFixed(1)}%`)), FanboxUI.h("progress", { max: total || 1, value: downloaded, "aria-label": "目前資源下載進度" })) : null);
+        return FanboxUI.h("section", { class: `current-activity tone-${eventTone(event.kind)}` }, FanboxUI.h("div", { class: "activity-top" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, isAsset ? "CURRENT DOWNLOAD" : "CURRENT STATUS"), FanboxUI.h("h2", {}, isAsset ? valueString(event.data, "name") || "下載資源" : eventLabel(event))), FanboxUI.h("time", {}, FanboxUI.formatDate(event.timestamp))), postEvent ? FanboxUI.h("div", { class: "progress-area post-progress", role: "status", "aria-live": "polite", "aria-atomic": "true" }, FanboxUI.h("div", { class: "progress-label" }, FanboxUI.h("span", {}, `投稿 ${valueNumber(postEvent.data, "index")} / ${valueNumber(postEvent.data, "total")}`), FanboxUI.h("strong", {}, `Post ${valueString(postEvent.data, "post_id")}`)), FanboxUI.h("progress", { max: valueNumber(postEvent.data, "total"),
+            value: Math.min(valueNumber(postEvent.data, "index"), valueNumber(postEvent.data, "total")),
+            "aria-label": "本次投稿備份進度" })) : null, isAsset ? FanboxUI.h("div", { class: "progress-area" }, FanboxUI.h("div", { class: "progress-label" }, FanboxUI.h("span", {}, `${FanboxUI.humanBytes(downloaded)}${total ? ` / ${FanboxUI.humanBytes(total)}` : ""}`), FanboxUI.h("strong", {}, percent === null ? "下載中" : `${percent.toFixed(1)}%`)), FanboxUI.h("progress", { max: total || 1, value: downloaded, "aria-label": "目前資源下載進度" })) : null);
+    }
+    function verificationPhaseLabel(phase) {
+        const labels = {
+            scan: "掃描驗證項目", posts: "驗證投稿", versions: "驗證歷史版本",
+            fancards: "驗證粉絲卡", profiles: "驗證個人資料", consistency: "檢查資料庫一致性",
+        };
+        return labels[phase] || "驗證封存";
+    }
+    FanboxUI.verificationPhaseLabel = verificationPhaseLabel;
+    function verificationProgress(job) {
+        const event = [...(job?.events ?? [])].reverse().find(item => item.kind === "verify_progress");
+        if (!event || job?.result)
+            return null;
+        const totalValue = event.data.total;
+        const total = totalValue === null || totalValue === undefined ? null : valueNumber(event.data, "total");
+        const current = valueNumber(event.data, "current");
+        const percent = total === null ? null : Math.min(100, Math.max(0, valueNumber(event.data, "percent")));
+        return FanboxUI.h("section", { class: "verification-progress", role: "status", "aria-live": "polite", "aria-atomic": "true" }, FanboxUI.h("div", { class: "verification-progress-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "VERIFY PROGRESS"), FanboxUI.h("h2", {}, verificationPhaseLabel(valueString(event.data, "phase")))), FanboxUI.h("strong", {}, percent === null ? "掃描中" : `${percent.toFixed(1)}%`)), FanboxUI.h("p", { class: "verification-item" }, valueString(event.data, "item")), FanboxUI.h("div", { class: "progress-label" }, FanboxUI.h("span", {}, total === null ? "正在建立固定驗證清單" : `${current} / ${total}`), FanboxUI.h("span", {}, `目前發現 ${valueNumber(event.data, "issue_count")} 個問題`)), FanboxUI.h("progress", { max: total ?? undefined, value: total === null ? undefined : current,
+            "aria-label": total === null ? "正在掃描封存驗證項目" : "封存驗證進度" }));
     }
     function eventLog(events) {
         const rows = events.map(item => FanboxUI.h("li", { class: `event-${eventTone(item.kind)}` }, FanboxUI.h("span", { class: "event-mark", "aria-hidden": "true" }), FanboxUI.h("time", {}, FanboxUI.formatDate(item.timestamp)), FanboxUI.h("span", { class: "event-kind" }, item.kind === "plan_ready" ? "計畫"
@@ -888,7 +916,7 @@ var FanboxUI;
         const result = job?.result;
         const issues = result?.issues ?? [];
         const issueRows = issues.map(item => FanboxUI.h("li", {}, FanboxUI.h("strong", {}, item.reason), FanboxUI.h("code", {}, item.path), item.post_id ? FanboxUI.h("small", {}, `Post ${item.post_id}`) : null));
-        return FanboxUI.h("section", { class: "page maintenance-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE MAINTENANCE"), FanboxUI.h("h1", {}, "封存驗證"), FanboxUI.h("p", {}, "檢查投稿、Profile、粉絲卡、歷史版本與資源的檔案大小及 SHA-256。")), job ? FanboxUI.h("span", { class: `job-status status-${job.status}` }, statusText(job.status)) : null), activeJobNotice(activeJob), FanboxUI.h("section", { class: "maintenance-action" }, FanboxUI.h("div", {}, FanboxUI.h("h2", {}, activeJob?.kind === "verify" ? "正在驗證封存…" : activeJob ? "其他工作執行中" : "完整性檢查"), FanboxUI.h("p", {}, "驗證可能需要一段時間；執行期間不能同時開始備份或修改設定。")), FanboxUI.h("button", { type: "button", class: "primary", disabled: active, onclick: actions.onStart }, activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")), job?.error ? FanboxUI.h("p", { class: "job-error" }, FanboxUI.h("strong", {}, "錯誤："), job.error) : null, result ? FanboxUI.h("section", { class: `verification-result ${result.passed ? "passed" : "issues"}` }, FanboxUI.h("div", { class: "verification-summary" }, FanboxUI.h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`), FanboxUI.h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")), issueRows.length ? FanboxUI.h("ul", { class: "verification-issues" }, issueRows) : null, result.truncated ? FanboxUI.h("p", { class: "notice" }, "問題數量過多，目前只顯示前 500 項。") : null) : null, verificationHistory(jobs, job?.job_id ?? null, actions.onShow));
+        return FanboxUI.h("section", { class: "page maintenance-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE MAINTENANCE"), FanboxUI.h("h1", {}, "封存驗證"), FanboxUI.h("p", {}, "檢查投稿、Profile、粉絲卡、歷史版本與資源的檔案大小及 SHA-256。")), job ? FanboxUI.h("span", { class: `job-status status-${job.status}` }, statusText(job.status)) : null), activeJobNotice(activeJob), FanboxUI.h("section", { class: "maintenance-action" }, FanboxUI.h("div", {}, FanboxUI.h("h2", {}, activeJob?.kind === "verify" ? "正在驗證封存…" : activeJob ? "其他工作執行中" : "完整性檢查"), FanboxUI.h("p", {}, "驗證可能需要一段時間；執行期間不能同時開始備份或修改設定。")), FanboxUI.h("button", { type: "button", class: "primary", disabled: active, onclick: actions.onStart }, activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")), job?.error ? FanboxUI.h("p", { class: "job-error" }, FanboxUI.h("strong", {}, "錯誤："), job.error) : null, verificationProgress(job), result ? FanboxUI.h("section", { class: `verification-result ${result.passed ? "passed" : "issues"}` }, FanboxUI.h("div", { class: "verification-summary" }, FanboxUI.h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`), FanboxUI.h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")), issueRows.length ? FanboxUI.h("ul", { class: "verification-issues" }, issueRows) : null, result.truncated ? FanboxUI.h("p", { class: "notice" }, "問題數量過多，目前只顯示前 500 項。") : null) : null, verificationHistory(jobs, job?.job_id ?? null, actions.onShow));
     }
     FanboxUI.renderMaintenancePage = renderMaintenancePage;
 })(FanboxUI || (FanboxUI = {}));

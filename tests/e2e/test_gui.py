@@ -62,9 +62,15 @@ class PollingJobFixture:
                 },
             },
             {
+                "kind": "item_started",
+                "timestamp": "2026-10-29T00:00:02+00:00",
+                "data": {"index": 1, "total": 2, "post_id": "1000", "creator_id": "alice"},
+            },
+            {
                 "kind": "asset_progress",
                 "timestamp": "2026-10-29T00:00:02+00:00",
-                "data": {"asset_id": "cover", "name": "cover.jpg", "downloaded": 512, "total": 1024},
+                "data": {"asset_id": "cover", "name": "cover.jpg", "downloaded": 512,
+                         "total": 1024},
             },
         ]
         if completed:
@@ -125,14 +131,14 @@ class PollingJobFixture:
         return value
 
     def has_active(self) -> bool:
-        return self.hold_backup or (self.verify_submitted and self.verify_get_calls < 1)
+        return self.hold_backup or (self.verify_submitted and self.verify_get_calls < 2)
 
     def submit_verify(self) -> dict:
         self.verify_submitted = True
         return self._verify_snapshot()
 
     def _verify_snapshot(self, *, include_events: bool = True) -> dict:
-        completed = self.verify_get_calls >= 1
+        completed = self.verify_get_calls >= 2
         value = {
             "job_id": "e2e-verify",
             "kind": "verify",
@@ -145,11 +151,18 @@ class PollingJobFixture:
             "request": {},
             "result": ({"passed": True, "issue_count": 0, "issues": [], "truncated": False}
                        if completed else None),
-            "event_count": 2 if completed else 1,
+            "event_count": 3 if completed else 2,
         }
         if include_events:
             value["events"] = [{
                 "kind": "verify_started", "timestamp": "2026-10-29T00:01:00+00:00", "data": {},
+            }, {
+                "kind": "verify_progress", "timestamp": "2026-10-29T00:01:00+00:00",
+                "data": ({"phase": "scan", "current": 0, "total": None, "percent": None,
+                          "item": "掃描封存驗證項目", "issue_count": 0}
+                         if self.verify_get_calls == 0 else
+                         {"phase": "posts", "current": 3, "total": 8, "percent": 37.5,
+                          "item": "Post 1000 資源 cover", "issue_count": 0}),
             }]
             if completed:
                 value["events"].append({
@@ -356,6 +369,10 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.locator(".plan-capacity")).to_contain_text("上限 20／發現 55／符合 2／選取 2／略過 53")
     expect(page.get_by_text("其餘投稿不需下載", exact=True)).to_be_visible()
     expect(page.get_by_text("cover.jpg", exact=True)).to_be_visible()
+    expect(page.get_by_text("投稿 1 / 2", exact=True)).to_be_visible()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
 
     page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     scroll_y = page.evaluate("window.scrollY")
@@ -491,5 +508,10 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     page.get_by_role("button", name="維護", exact=True).click()
     expect(page.get_by_role("heading", name="封存驗證", exact=True)).to_be_visible()
     page.get_by_role("button", name="開始驗證", exact=True).click()
+    expect(page.get_by_text("正在建立固定驗證清單", exact=True)).to_be_visible()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
+    expect(page.get_by_role("heading", name="驗證投稿", exact=True)).to_be_visible(timeout=5_000)
     expect(page.locator(".verification-summary strong")).to_have_text("驗證通過", timeout=5_000)
-    assert jobs.verify_get_calls >= 1
+    assert jobs.verify_get_calls >= 2

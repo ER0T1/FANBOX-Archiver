@@ -159,6 +159,21 @@ class BackupUseCase:
                             self._archive_fancards(creators, post_session, archive)
 
                     if plan.selected:
+                        selected_index = {
+                            (item.creator_id, item.summary.post_id): index
+                            for index, item in enumerate(plan.selected, start=1)
+                        }
+                        selected_total = len(plan.selected)
+
+                        def item_started(item: Any) -> None:
+                            index = selected_index.get((item.creator_id, item.summary.post_id))
+                            if index is None:
+                                return
+                            self._emit(
+                                "item_started", index=index, total=selected_total,
+                                creator_id=item.creator_id, post_id=item.summary.post_id,
+                            )
+
                         def resource_progress(asset: Any, downloaded: int, total: int | None) -> None:
                             self._emit(
                                 "asset_progress",
@@ -169,6 +184,11 @@ class BackupUseCase:
                             )
 
                         def item_finished(item: Any, status: Any, unchanged: bool) -> None:
+                            index = selected_index.get((item.creator_id, item.summary.post_id))
+                            progress = (
+                                {"index": index, "total": selected_total}
+                                if index is not None else {}
+                            )
                             self._emit(
                                 "item_finished",
                                 creator_id=item.creator_id,
@@ -176,6 +196,7 @@ class BackupUseCase:
                                 status=(type(status).__name__ if isinstance(status, Exception) else status.value),
                                 error=str(status) if isinstance(status, Exception) else None,
                                 unchanged=unchanged,
+                                **progress,
                             )
 
                         archive.progress_callback = resource_progress
@@ -183,7 +204,8 @@ class BackupUseCase:
                             execute = syncing.execute_posts if selected_posts else syncing.execute
                             execute_args = (plan, selected_posts) if selected_posts else (plan,)
                             result = execute(
-                                *execute_args, on_item=item_finished,
+                                *execute_args, on_item_start=item_started,
+                                on_item=item_finished,
                                 should_cancel=lambda: self.cancellation.cancelled,
                             )
                         finally:
