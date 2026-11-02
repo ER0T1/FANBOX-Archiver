@@ -16,6 +16,7 @@ namespace FanboxUI {
       mode: "full" | "profile" | "fancard", includeProfile: boolean, includeFancard: boolean,
     ): void;
     onHistory(): void;
+    onSignIn(): void;
   }
 
   export interface BackupFormDefaults {
@@ -331,7 +332,7 @@ namespace FanboxUI {
 
   export function renderBackupFormPage(
     creators: CreatorSummary[], defaults: BackupFormDefaults,
-    activeJob: WebJob | null, actions: BackupFormActions,
+    activeJob: WebJob | null, auth: AuthStatus, actions: BackupFormActions,
   ): HTMLElement {
     const blocked = Boolean(activeJob);
     const selected: string[] = [];
@@ -412,6 +413,10 @@ namespace FanboxUI {
       h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")),
       h("button", {type: "button", class: "primary", onclick: actions.onHistory}, "工作歷史")),
     activeJobNotice(activeJob),
+    auth.state !== "authenticated" ? h("section", {class: "backup-auth-notice", role: "status"},
+      h("div", {}, h("strong", {}, auth.state === "expired" ? "登入已失效" : "備份前請確認登入"),
+        h("p", {}, auth.message)),
+      h("button", {type: "button", onclick: actions.onSignIn}, "前往設定登入")) : null,
     h("form", {class: "backup-form", onsubmit: (event: Event) => { event.preventDefault(); if (!blocked) start("full", dryRun.checked); }},
       combobox,
       h("section", {class: "selected-creators", "aria-live": "polite"}, h("div", {class: "selected-creators-heading"},

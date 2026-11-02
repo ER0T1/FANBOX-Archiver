@@ -72,6 +72,32 @@ namespace FanboxUI {
     });
   }
 
+  export function getAuthStatus(sessionToken: string): Promise<AuthStatus> {
+    return requestJson<AuthStatus>("/api/auth/status", {
+      headers: {"X-Fanbox-Token": sessionToken},
+    });
+  }
+
+  export function startAuthLogin(sessionToken: string): Promise<AuthJob> {
+    return requestJson<AuthJob>("/api/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-Fanbox-Token": sessionToken},
+      body: JSON.stringify({timeout_seconds: 600}),
+    });
+  }
+
+  export function cancelAuthLogin(jobId: string, sessionToken: string): Promise<AuthJob> {
+    return requestJson<AuthJob>(`/api/auth/login/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST", headers: {"X-Fanbox-Token": sessionToken},
+    });
+  }
+
+  export function logoutAuth(sessionToken: string): Promise<AuthStatus> {
+    return requestJson<AuthStatus>("/api/auth/logout", {
+      method: "POST", headers: {"X-Fanbox-Token": sessionToken},
+    });
+  }
+
   export function getJobs(): Promise<{items: WebJob[]}> {
     return requestJson<{items: WebJob[]}>("/api/jobs");
   }

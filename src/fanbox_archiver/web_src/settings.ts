@@ -18,8 +18,12 @@ namespace FanboxUI {
   }
 
   export function renderSettingsPage(
-    data: SettingsResponse, message: string, activeJob: WebJob | null,
+    data: SettingsResponse, auth: AuthStatus, message: string, activeJob: WebJob | null,
     onSave: (patch: SettingsPatch) => Promise<string | null>,
+    onAuthRefresh: () => void,
+    onAuthLogin: () => Promise<string | null>,
+    onAuthCancel: (jobId: string) => Promise<string | null>,
+    onAuthLogout: () => Promise<string | null>,
   ): HTMLElement {
     const value = data.editable;
     const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
@@ -55,6 +59,17 @@ namespace FanboxUI {
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const blocked = Boolean(activeJob);
+    const authBusy = auth.state === "checking";
+    const authTone = auth.state === "authenticated" ? "success"
+      : auth.state === "expired" || auth.state === "error" ? "error" : "neutral";
+    const authLabel = ({checking: "檢查中", authenticated: "已登入", signed_out: "未登入",
+      expired: "已失效", error: "檢查失敗"} as Record<AuthState, string>)[auth.state];
+    const authFeedback = h("p", {class: "settings-error", role: "alert", hidden: true});
+    const runAuth = async (action: () => Promise<string | null>): Promise<void> => {
+      authFeedback.hidden = true;
+      const error = await action();
+      if (error) { authFeedback.textContent = error; authFeedback.hidden = false; }
+    };
     const feedback = h("p", {class: "settings-error", role: "alert", hidden: true});
     const form = h("form", {class: "settings-form", "aria-disabled": blocked, onsubmit: async (event: Event) => {
       event.preventDefault();
@@ -113,6 +128,27 @@ namespace FanboxUI {
         h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))),
       message ? h("p", {class: "settings-saved", role: "status"}, message) : null,
       activeJobNotice(activeJob),
+      h("section", {class: `settings-card account-card tone-${authTone}`},
+        h("div", {class: "account-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "ACCOUNT & SIGN-IN"),
+          h("h2", {}, "帳號／登入")), h("span", {class: `auth-badge ${authTone}`}, authLabel)),
+        h("p", {class: "account-message", role: "status", "aria-live": "polite"}, auth.message),
+        h("p", {class: "settings-section-description"}, auth.source === "profile"
+          ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
+          : auth.source === "environment" ? "認證來源：外部環境 FANBOX_COOKIE"
+          : "尚無認證來源"),
+        auth.externally_managed ? h("p", {class: "auth-external-notice"},
+          "此登入由啟動環境管理，應用程式無法撤銷；請更新或移除 FANBOX_COOKIE 後重新啟動。") : null,
+        h("div", {class: "account-actions"},
+          h("button", {type: "button", class: "primary", disabled: blocked || authBusy || !auth.can_login,
+            onclick: () => void runAuth(onAuthLogin)}, "登入 FANBOX"),
+          h("button", {type: "button", disabled: blocked || authBusy, onclick: onAuthRefresh}, "重新檢查"),
+          authBusy && auth.job ? h("button", {type: "button", class: "danger-outline",
+            onclick: () => void runAuth(() => onAuthCancel(auth.job!.job_id))}, "取消登入") : null,
+          h("button", {type: "button", class: "danger-outline",
+            disabled: blocked || authBusy || !auth.can_logout,
+            onclick: () => { if (window.confirm("確定要清除專用 FANBOX 工作階段嗎？封存與設定不會被刪除。")) {
+              void runAuth(onAuthLogout);
+            }}}, "登出"), authFeedback)),
       h("section", {class: "settings-paths"},
         h("div", {}, h("span", {}, "封存目錄"), h("code", {}, data.storage.output_dir)),
         h("div", {}, h("span", {}, "資料庫"), h("code", {}, data.storage.database)),

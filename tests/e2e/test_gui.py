@@ -15,6 +15,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect, sync_playwright
 
 from fanbox_archiver.config import AppConfig, StorageConfig
+from fanbox_archiver.application import AuthStatus
 from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.models import ContentBlock, CreatorProfile, CreatorProfileItem, Post
 from fanbox_archiver.service import ArchiveService
@@ -284,6 +285,11 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
 def live_gui(tmp_path: Path):
     config, config_path = _archive_fixture(tmp_path)
     app = create_app(config, config_path=config_path)
+    class SignedOutAuth:
+        def check(self):
+            return AuthStatus("signed_out", "none", "尚未建立 FANBOX 登入工作階段。", True, False)
+
+    app.state.auth_service = SignedOutAuth()
     app.state.jobs.close()
     jobs = PollingJobFixture()
     jobs.config = config
@@ -393,6 +399,10 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     jobs.hold_backup = False
     expect(save_button).to_be_enabled(timeout=5_000)
     expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
+    expect(page.get_by_role("heading", name="帳號／登入", exact=True)).to_be_visible()
+    expect(page.get_by_text("未登入", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="登入 FANBOX", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="登出", exact=True)).to_be_disabled()
     expect(page.get_by_role("heading", name="備份", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="輸出與紀錄", exact=True)).to_be_visible()
     expect(page.get_by_text("DOWNLOAD", exact=True)).not_to_be_visible()
@@ -423,6 +433,8 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
 
     page.get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()
+    expect(page.get_by_text("備份前請確認登入", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="前往設定登入", exact=True)).to_be_visible()
     expect(page.get_by_role("spinbutton", name="本次投稿上限")).to_have_value("25")
     expect(page.get_by_role("checkbox", name="完整備份只預覽，不下載")).to_be_checked()
     expect(page.get_by_role("checkbox", name="拉取個人資料", exact=True)).not_to_be_checked()

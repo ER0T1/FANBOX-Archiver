@@ -305,6 +305,25 @@ namespace FanboxUI {
     writable: boolean;
   }
 
+  export type AuthState = "checking" | "authenticated" | "signed_out" | "expired" | "error";
+
+  export interface AuthJob {
+    job_id: string;
+    status: "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+    error: string | null;
+    result: AuthStatus | null;
+  }
+
+  export interface AuthStatus {
+    state: AuthState;
+    source: "profile" | "environment" | "none";
+    message: string;
+    can_login: boolean;
+    can_logout: boolean;
+    externally_managed: boolean;
+    job: AuthJob | null;
+  }
+
   export interface SettingsPatch {
     download: Omit<DownloadSettings, "max_concurrent">;
     sync: Omit<SyncSettings, "supporting_only">;

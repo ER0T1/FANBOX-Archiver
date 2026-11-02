@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 from playwright.sync_api import BrowserContext, Error as PlaywrightError, sync_playwright
@@ -20,6 +21,10 @@ FANBOX_APP_URL = "https://www.fanbox.cc/"
 
 
 class BrowserLoginError(RuntimeError):
+    pass
+
+
+class BrowserLoginCancelled(BrowserLoginError):
     pass
 
 
@@ -185,6 +190,7 @@ def interactive_login(
     *,
     channel: str = "chrome",
     timeout_seconds: int = 600,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> None:
     """Open a dedicated browser profile and wait for the user to log in.
 
@@ -202,7 +208,7 @@ def interactive_login(
             try:
                 page = context.pages[0] if context.pages else context.new_page()
                 page.goto("https://www.fanbox.cc/", wait_until="domcontentloaded")
-                _wait_for_authentication(context, timeout_seconds)
+                _wait_for_authentication(context, timeout_seconds, should_cancel=should_cancel)
             finally:
                 context.close()
     except BrowserLoginError:
@@ -316,6 +322,32 @@ def profile_is_authenticated(profile_dir: Path, *, channel: str = "chrome") -> b
     return int(result.get("status") or 0) == 200 and '"body"' in str(result.get("text") or "")
 
 
+def clear_profile_authentication(profile_dir: Path, *, channel: str = "chrome") -> None:
+    """Remove FANBOX authentication data without deleting the dedicated profile."""
+    if not profile_dir.exists():
+        return
+    try:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir), channel=channel, headless=True
+            )
+            try:
+                context.clear_cookies(domain=re.compile(r"(^|\.)fanbox\.cc$"))
+                page = context.pages[0] if context.pages else context.new_page()
+                session = context.new_cdp_session(page)
+                for origin in FANBOX_ORIGINS:
+                    session.send(
+                        "Storage.clearDataForOrigin",
+                        {"origin": origin, "storageTypes": "local_storage"},
+                    )
+            finally:
+                context.close()
+    except PlaywrightError as exc:
+        raise BrowserLoginError(
+            "無法清除 FANBOX 工作階段；請先關閉登入視窗後重試"
+        ) from exc
+
+
 def cookies_to_header(cookies: list[dict[str, Any]]) -> str:
     values: list[str] = []
     for item in cookies:
@@ -327,10 +359,17 @@ def cookies_to_header(cookies: list[dict[str, Any]]) -> str:
     return "; ".join(values)
 
 
-def _wait_for_authentication(context: BrowserContext, timeout_seconds: int) -> None:
+def _wait_for_authentication(
+    context: BrowserContext,
+    timeout_seconds: int,
+    *,
+    should_cancel: Callable[[], bool] | None = None,
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     last_status: int | None = None
     while time.monotonic() < deadline:
+        if should_cancel is not None and should_cancel():
+            raise BrowserLoginCancelled("登入已取消")
         if not context.pages:
             raise BrowserLoginError("登入視窗已關閉，但尚未確認 FANBOX 登入成功")
         try:
@@ -356,6 +395,9 @@ def _wait_for_authentication(context: BrowserContext, timeout_seconds: int) -> N
                     return
         except (PlaywrightError, TypeError, ValueError):
             pass
-        time.sleep(2)
+        for _ in range(20):
+            if should_cancel is not None and should_cancel():
+                raise BrowserLoginCancelled("登入已取消")
+            time.sleep(.1)
     suffix = f"（最後 HTTP 狀態：{last_status}）" if last_status is not None else ""
     raise BrowserLoginError(f"等待 FANBOX 登入逾時{suffix}")

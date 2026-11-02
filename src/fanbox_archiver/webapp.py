@@ -9,11 +9,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import AppConfig
 from . import __version__
-from .application import BackupJobManager, BackupRequest
+from .application import (
+    AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
+)
 from .client import FanboxClient
 from .reader import ArchiveReader, ReaderNotFound
 
@@ -108,9 +111,15 @@ class ConfigPatch(BaseModel):
     logging: LoggingConfigPatch | None = None
 
 
+class LoginBody(BaseModel):
+    timeout_seconds: int = Field(default=600, ge=60, le=1800)
+
+
 def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI:
     reader = ArchiveReader(config)
     jobs = BackupJobManager(config)
+    auth_service = AuthenticationService(config)
+    auth_jobs = AuthenticationJobManager(auth_service)
     session_token = secrets.token_urlsafe(32)
     assets = Path(__file__).with_name("web_assets")
     home_html = (assets / "index.html").read_text(encoding="utf-8").replace(
@@ -119,6 +128,8 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     app = FastAPI(title="FANBOX Archiver", version=__version__)
     app.state.reader = reader
     app.state.jobs = jobs
+    app.state.auth_service = auth_service
+    app.state.auth_jobs = auth_jobs
     app.state.session_token = session_token
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
@@ -160,6 +171,67 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
             "writable": app.state.config_path is not None,
         }
 
+    @app.get("/api/auth/status", dependencies=[Depends(require_mutation_token)])
+    async def auth_status():
+        active = app.state.auth_jobs.active()
+        if active:
+            return {
+                "state": "checking", "source": "profile",
+                "message": "請在專用 Chrome 視窗完成登入。",
+                "can_login": False, "can_logout": False,
+                "externally_managed": False, "job": active,
+            }
+        if app.state.jobs.has_active():
+            return {
+                "state": "error", "source": "profile",
+                "message": "備份或驗證工作執行期間無法開啟登入設定檔。",
+                "can_login": False, "can_logout": False,
+                "externally_managed": False, "job": None,
+            }
+        status = await run_in_threadpool(app.state.auth_service.check)
+        return {**status.as_dict(), "job": None}
+
+    @app.post(
+        "/api/auth/login", status_code=202,
+        dependencies=[Depends(require_mutation_token)],
+    )
+    async def auth_login(body: LoginBody):
+        if app.state.jobs.has_active():
+            raise HTTPException(status_code=409, detail="工作執行期間無法開啟登入視窗")
+        try:
+            return app.state.auth_jobs.start(timeout_seconds=body.timeout_seconds)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get(
+        "/api/auth/login/{job_id}", dependencies=[Depends(require_mutation_token)]
+    )
+    async def auth_login_job(job_id: str):
+        job = app.state.auth_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到登入工作")
+        return job
+
+    @app.post(
+        "/api/auth/login/{job_id}/cancel",
+        dependencies=[Depends(require_mutation_token)],
+    )
+    async def auth_login_cancel(job_id: str):
+        job = app.state.auth_jobs.cancel(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="找不到登入工作")
+        return job
+
+    @app.post("/api/auth/logout", dependencies=[Depends(require_mutation_token)])
+    async def auth_logout():
+        if app.state.jobs.has_active() or app.state.auth_jobs.active():
+            raise HTTPException(status_code=409, detail="工作執行期間無法登出")
+        try:
+            status = await run_in_threadpool(app.state.auth_service.logout)
+            return status.as_dict()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.patch("/api/config", dependencies=[Depends(require_mutation_token)])
     async def patch_config(body: ConfigPatch):
         if app.state.config_path is None:
@@ -189,6 +261,8 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
 
     @app.post("/api/jobs/backup", status_code=202, dependencies=[Depends(require_mutation_token)])
     async def start_backup(body: BackupJobBody):
+        if app.state.auth_jobs.active():
+            raise HTTPException(status_code=409, detail="登入工作執行期間無法開始備份")
         try:
             raw_creators = [*body.creators]
             if body.creator:
@@ -218,6 +292,8 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
 
     @app.post("/api/jobs/verify", status_code=202, dependencies=[Depends(require_mutation_token)])
     async def start_verify():
+        if app.state.auth_jobs.active():
+            raise HTTPException(status_code=409, detail="登入工作執行期間無法開始驗證")
         try:
             return app.state.jobs.submit_verify()
         except RuntimeError as exc:

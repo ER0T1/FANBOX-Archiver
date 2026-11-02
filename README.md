@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.22-alpha（2026-11-02）**
+**內部測試版本：v1.3.23-alpha（2026-11-02）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.23-alpha 更新重點
+
+- 設定頁新增「帳號／登入」卡片，可辨識檢查中、已登入、未登入、已失效與檢查失敗，並標示專用 profile 或外部 `FANBOX_COOKIE` 來源。
+- GUI 可開啟專用 Chrome 讓使用者自行完成帳號、密碼、2FA 與 CAPTCHA；登入是可取消的背景工作，且與備份及驗證互斥，避免同一 profile 並行開啟。
+- 登出需二次確認，只清除專用 profile 的 FANBOX Cookie 與網頁儲存，不刪除封存、設定或整個瀏覽器資料夾；外部管理的 Cookie 會顯示應在啟動環境撤銷。
+- 認證狀態、登入、取消與登出 API 均受本機 mutation token 保護，回應不包含 Cookie、token 或完整 profile 路徑；CLI 與 GUI 共用同一認證 service。
 
 ## v1.3.22-alpha 更新重點
 

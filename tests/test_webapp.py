@@ -236,6 +236,67 @@ async def test_web_settings_are_validated_and_saved(tmp_path: Path):
 
 
 @pytest.mark.anyio
+async def test_auth_endpoints_are_token_protected_and_never_return_secrets(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config)
+
+    class AuthService:
+        def check(self):
+            from fanbox_archiver.application import AuthStatus
+            return AuthStatus("authenticated", "profile", "工作階段有效。", True, True)
+
+        def logout(self):
+            from fanbox_archiver.application import AuthStatus
+            return AuthStatus("signed_out", "profile", "已登出。", True, False)
+
+    class AuthJobs:
+        def __init__(self): self.job = None
+        def active(self): return self.job
+        def start(self, **_kwargs):
+            self.job = {"job_id": "auth-1", "status": "running", "error": None, "result": None}
+            return self.job
+        def get(self, job_id): return self.job if job_id == "auth-1" else None
+        def cancel(self, job_id):
+            if job_id != "auth-1": return None
+            self.job = {**self.job, "status": "cancelling"}
+            return self.job
+
+    app.state.auth_service = AuthService()
+    app.state.auth_jobs = AuthJobs()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        denied_status = await client.get("/api/auth/status")
+        assert denied_status.status_code == 403
+        status = await client.get(
+            "/api/auth/status", headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert status.json()["state"] == "authenticated"
+        assert "cookie" not in status.text.casefold()
+        assert "profile_dir" not in status.text
+
+        denied = await client.post("/api/auth/login", json={"timeout_seconds": 60})
+        assert denied.status_code == 403
+        started = await client.post(
+            "/api/auth/login", json={"timeout_seconds": 60},
+            headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert started.status_code == 202
+        assert started.json()["job_id"] == "auth-1"
+
+        cancelled = await client.post(
+            "/api/auth/login/auth-1/cancel",
+            headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert cancelled.json()["status"] == "cancelling"
+
+        app.state.auth_jobs.job = None
+        logged_out = await client.post(
+            "/api/auth/logout", headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert logged_out.json()["state"] == "signed_out"
+
+
+@pytest.mark.anyio
 async def test_verify_job_endpoint_requires_token(tmp_path: Path):
     config, _ = dynamic_archive(tmp_path)
     app = create_app(config)

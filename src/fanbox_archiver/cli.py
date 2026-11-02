@@ -24,13 +24,12 @@ from .client import (
     RateLimitedError,
     RemoteUnavailableError,
 )
-from .browser_session import interactive_login, profile_is_authenticated
 from .config import AppConfig
 from .credentials import cookie_header
 from .models import Post
 from .parser import HtmlPostParser
 from .service import ArchiveService
-from .application import BackupEvent, BackupRequest, BackupUseCase
+from .application import AuthenticationService, BackupEvent, BackupRequest, BackupUseCase
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
 from .security import confined_path, safe_filename
@@ -93,11 +92,12 @@ def get_cookie(settings: AppConfig, browser: str | None = None) -> str:
 
 
 def verify_login(settings: AppConfig, browser: str | None = None) -> None:
-    if browser is None and settings.auth.profile_dir.exists():
-        if profile_is_authenticated(settings.auth.profile_dir, channel=settings.auth.browser_channel):
+    if browser is None:
+        status = AuthenticationService(settings).check()
+        if status.state == "authenticated":
             console.print("[green]登入狀態有效。[/green]")
             return
-        console.print("[red]專用瀏覽器登入狀態無效，請重新執行 `fanbox-archiver auth login`。[/red]")
+        console.print(f"[red]{status.message}[/red]")
         raise typer.Exit(1)
     cookie = get_cookie(settings, browser)
     if not cookie:
@@ -154,9 +154,7 @@ def auth_login(
     console.print("[cyan]請在即將開啟的專用 Chrome 視窗中正常登入 FANBOX。[/cyan]")
     console.print("程式不會讀取帳號、密碼、2FA 或 CAPTCHA，只等待登入狀態生效。")
     try:
-        interactive_login(
-            settings.auth.profile_dir,
-            channel=settings.auth.browser_channel,
+        AuthenticationService(settings).login(
             timeout_seconds=timeout_minutes * 60,
         )
         verify_login(settings)

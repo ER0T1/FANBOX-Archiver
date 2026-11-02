@@ -63,7 +63,8 @@ namespace FanboxUI {
 
     function scheduleJobRefresh(): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
-      if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)) {
+      if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)
+        || state.view === "settings" && app.querySelector(".auth-badge")?.textContent === "檢查中") {
         jobTimer = window.setTimeout(() => void refreshView(false), 900);
       }
     }
@@ -288,17 +289,20 @@ namespace FanboxUI {
       scheduleJobRefresh();
     }
 
-    function renderBackupForm(creators: CreatorSummary[], settings: SettingsResponse): void {
+    function renderBackupForm(
+      creators: CreatorSummary[], settings: SettingsResponse, auth: AuthStatus,
+    ): void {
       const value = settings.editable;
       app.replaceChildren(renderBackupFormPage(creators, {
         dryRun: value.backup_defaults.dry_run,
         includeProfile: value.backup_defaults.include_profile,
         includeFancard: value.backup_defaults.include_fancard,
         maxPosts: value.sync.max_posts_per_run,
-      }, state.activeJob, {
+      }, state.activeJob, auth, {
         onStart: (creators, dryRun, maxPosts, mode, includeProfile, includeFancard) =>
           void startBackup(creators, dryRun, maxPosts, mode, includeProfile, includeFancard),
         onHistory: () => { state.backupScreen = "history"; void loadBackup(false); },
+        onSignIn: () => setView("settings"),
       }));
       scheduleJobRefresh();
     }
@@ -315,7 +319,9 @@ namespace FanboxUI {
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
       try {
-        const [creatorData, jobData, settings] = await Promise.all([getCreators(), getJobs(), getSettings()]);
+        const [creatorData, jobData, settings, auth] = await Promise.all([
+          getCreators(), getJobs(), getSettings(), getAuthStatus(sessionToken),
+        ]);
         updateActiveJob(jobData.items);
         const backupJobs = jobData.items.filter(item => item.kind === "backup");
         const active = backupJobs.find(isActiveJob);
@@ -326,9 +332,9 @@ namespace FanboxUI {
         } else if (state.backupScreen === "job" && state.backupJobId) {
           const selected = backupJobs.find(item => item.job_id === state.backupJobId);
           if (selected) renderJob(await getJob(selected.job_id), creatorData.items, backupJobs);
-          else { state.backupScreen = "form"; state.backupJobId = null; renderBackupForm(creatorData.items, settings); }
+          else { state.backupScreen = "form"; state.backupJobId = null; renderBackupForm(creatorData.items, settings, auth); }
         } else if (state.backupScreen === "history") renderBackupHistory(creatorData.items, backupJobs);
-        else renderBackupForm(creatorData.items, settings);
+        else renderBackupForm(creatorData.items, settings, auth);
       } catch (error) {
         errorView(error);
       }
@@ -420,13 +426,30 @@ namespace FanboxUI {
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
-        const [data, jobData] = await Promise.all([getSettings(), getJobs()]);
+        const [data, jobData, auth] = await Promise.all([getSettings(), getJobs(), getAuthStatus(sessionToken)]);
         updateActiveJob(jobData.items);
-        app.replaceChildren(renderSettingsPage(data, message, state.activeJob,
-          patch => saveSettingsForm(patch)));
+        app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
+          patch => saveSettingsForm(patch),
+          () => void loadSettings("", false),
+          () => authAction(async () => { await startAuthLogin(sessionToken); },
+            "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
+          jobId => authAction(async () => { await cancelAuthLogin(jobId, sessionToken); },
+            "正在取消登入…"),
+          () => authAction(async () => { await logoutAuth(sessionToken); },
+            "已安全登出；封存與設定均未變更。")));
         scheduleJobRefresh();
       } catch (error) {
         errorView(error);
+      }
+    }
+
+    async function authAction(action: () => Promise<void>, message: string): Promise<string | null> {
+      try {
+        await action();
+        void loadSettings(message, false);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
       }
     }
 
