@@ -13,6 +13,7 @@ download:
   request_interval_seconds: 3
   resume: true
   verify_sha256: true
+  timeout_seconds: 60
 markdown:
   enabled: true
   yaml_front_matter: true
@@ -26,6 +27,10 @@ sync:
   supporting_only: true
   rotate_creators: true
   recent_unchanged_stop_count: 20
+backup_defaults:
+  dry_run: false
+  include_profile: true
+  include_fancard: true
 logging:
   level: INFO
   write_to_file: true

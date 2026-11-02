@@ -40,3 +40,12 @@ if ($ExpectedVersion) {
 
 Write-Host "Version check passed: $Version"
 
+$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $Python)) {
+    $Python = (Get-Command python -ErrorAction Stop).Source
+}
+& $Python (Join-Path $ProjectRoot "scripts\check-config-examples.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Configuration example contract check failed."
+}
+

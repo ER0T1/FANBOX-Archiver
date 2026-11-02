@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.21-alpha（2026-11-01）**
+**內部測試版本：v1.3.22-alpha（2026-11-02）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.22-alpha 更新重點
+
+- 補齊 `config.example.yaml` 的下載逾時與備份預設值，使所有公開設定欄位及預設語意與 `AppConfig` 一致。
+- 新增可登錄 YAML、ENV 與後續格式的設定範例契約；以設定模型或明確欄位來源遞迴比對完整 dotted paths，並支援具理由的排除清單與安全秘密 placeholder。
+- 漂移錯誤只列出缺少、多餘、放錯層級、偏離預設值或秘密 placeholder 不安全的欄位名稱，不輸出 Cookie、token 或設定值。
+- `npm run release:check` 現在會同步檢查設定範例；測試涵蓋不存在、空物件、複製範例、欄位漂移與秘密值不回顯。
 
 ## v1.3.21-alpha 更新重點
 
@@ -234,6 +241,11 @@ Copy-Item config.example.yaml config.yaml
 ```
 
 如 PowerShell 禁止執行啟用腳本，也可直接使用 `.\.venv\Scripts\fanbox-archiver.exe`。
+
+`config.yaml` 不存在或只包含 `{}` 時，程式會使用安全預設值啟動；複製
+[`config.example.yaml`](config.example.yaml) 則可查看所有公開設定欄位與預設語意。範例檔不含 Cookie、token 或本機憑證，舊版缺少新欄位的設定仍會沿用模型預設值，不會被強制改寫。
+
+開發者修改設定模型或新增範例格式後，請執行 `npm run release:check`。檢查會以設定模型或已登錄欄位為來源，列出範例檔缺少、多餘、放錯層級或偏離預設值的欄位名稱，不輸出秘密值。
 
 ## 登入狀態
 
