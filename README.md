@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.26-alpha（2026-11-03）**
+**內部測試版本：v1.3.27-alpha（2026-11-03）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.27-alpha 更新重點
+
+- 所有使用者可見時間統一以 Asia/Taipei 顯示，且不再依賴 Windows、瀏覽器或執行主機的目前時區：CLI 一律輸出帶 `+08:00` 的 ISO 時間；GUI 與靜態網站共用 `YYYY年MM月DD日 HH:mm` 格式。
+- Post 與 Fan Card 的 Markdown front matter（`published_at`、`updated_at`、`captured_at`、支援開始）改以帶 `+08:00` 的 ISO 時間輸出，與 JSON／資料庫為同一時間點；已保存版本的檔案不受影響。
+- 缺少時區 offset 的舊時間值不再被猜測為 UTC 或主機時區，改以原始值加註「（時區未標示）」顯示，可由 `audit` 報告追蹤。
+- 新增台北跨午夜（UTC 15:59／16:00、`+09:00` 來源、跨年）與不同宿主時區的 Python 及前端回歸測試；靜態網站範本版本更新為 13，下次建置會重新產生頁面。
 
 ## v1.3.26-alpha 更新重點
 

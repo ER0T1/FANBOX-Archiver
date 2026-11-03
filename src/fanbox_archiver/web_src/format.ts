@@ -1,12 +1,19 @@
 namespace FanboxUI {
-  const dateFormatter = new Intl.DateTimeFormat("zh-TW", {
-    timeZone: "Asia/Taipei",
-    dateStyle: "medium",
-    timeStyle: "short",
+  const taipeiDateTime = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   });
+  const explicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
   export function formatDate(value: string | null | undefined): string {
-    return value ? dateFormatter.format(new Date(value)) : "—";
+    if (!value) return "—";
+    const text = String(value).trim();
+    // Never let Date guess the host timezone for offset-less legacy values.
+    if (!explicitOffset.test(text)) return `${text}（時區未標示）`;
+    const date = new Date(text);
+    if (Number.isNaN(date.valueOf())) return text;
+    const parts = Object.fromEntries(taipeiDateTime.formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;
   }
 
   export function humanBytes(value: unknown): string {

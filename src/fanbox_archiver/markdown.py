@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 
 from .models import Post
+from .timestamps import isoformat_taipei
 
 
 def _styled_text(value: str, styles) -> str:
@@ -29,8 +30,8 @@ def render_markdown(
         "creator_id": post.creator_id,
         "creator_name": post.creator_name,
         "title": post.title,
-        "published_at": post.published_at.isoformat() if post.published_at else None,
-        "updated_at": post.updated_at.isoformat() if post.updated_at else None,
+        "published_at": isoformat_taipei(post.published_at, None),
+        "updated_at": isoformat_taipei(post.updated_at, None),
         "fee_required": post.fee_required,
         "type": post.post_type,
         "url": post.url,
@@ -38,7 +39,7 @@ def render_markdown(
     if archive_version is not None:
         metadata.update({
             "archive_version": archive_version,
-            "captured_at": captured_at,
+            "captured_at": isoformat_taipei(captured_at, None),
             "previous_version": previous_version,
             "next_version": next_version,
             "content_fingerprint": post.content_fingerprint,

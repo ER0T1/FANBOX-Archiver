@@ -67,6 +67,14 @@ test("TypeScript core formats archive values", () => {
   assert.equal(ui.verificationPhaseLabel("unknown"), "驗證封存");
 });
 
+test("TypeScript core shows Asia/Taipei across midnight and refuses naive values", () => {
+  assert.equal(ui.formatDate("2026-11-02T15:59:59+00:00"), "2026年11月02日 23:59");
+  assert.equal(ui.formatDate("2026-11-02T16:00:00Z"), "2026年11月03日 00:00");
+  assert.equal(ui.formatDate("2026-11-03T01:00:00+09:00"), "2026年11月03日 00:00");
+  assert.equal(ui.formatDate("2026-11-02T16:00:00"), "2026-11-02T16:00:00（時區未標示）");
+  assert.equal(ui.formatDate("2026-11-02"), "2026-11-02（時區未標示）");
+});
+
 test("fan card perk status classes reject unknown API values", () => {
   assert.equal(ui.perkStatusClass("accessible"), "perk-status status-accessible");
   assert.equal(ui.perkStatusClass("unavailable"), "perk-status status-unavailable");

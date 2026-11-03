@@ -1,5 +1,4 @@
 from pathlib import Path
-from datetime import timedelta, timezone
 
 from typer.testing import CliRunner
 import pytest
@@ -23,8 +22,7 @@ def configured_cli(monkeypatch, tmp_path: Path) -> AppConfig:
 
 
 def test_format_local_time_converts_utc_without_changing_storage():
-    taipei = timezone(timedelta(hours=8))
-    assert cli.format_local_time("2026-10-26T07:43:33+00:00", taipei) == "2026-10-26T15:43:33+08:00"
+    assert cli.format_local_time("2026-10-26T07:43:33+00:00") == "2026-10-26T15:43:33+08:00"
 
 
 def test_backup_normalizes_multiple_creators_and_forwards_options(monkeypatch, configured_cli):

@@ -6,7 +6,6 @@ import sqlite3
 import subprocess
 import sys
 import webbrowser
-from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -35,6 +34,7 @@ from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
+from .timestamps import isoformat_taipei
 
 
 if os.name == "nt":
@@ -57,16 +57,8 @@ app.add_typer(auth_app, name="auth")
 console = Console()
 
 
-def format_local_time(value: object, timezone: tzinfo | None = None) -> str:
-    if not value:
-        return "-"
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone(timezone).isoformat(timespec="seconds")
-    except ValueError:
-        return str(value)
+def format_local_time(value: object) -> str:
+    return isoformat_taipei(value)
 
 
 def load_config(path: Path) -> AppConfig:

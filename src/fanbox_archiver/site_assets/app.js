@@ -23,9 +23,12 @@
     timeZone:"Asia/Taipei", year:"numeric", month:"2-digit", day:"2-digit",
     hour:"2-digit", minute:"2-digit", hourCycle:"h23",
   });
+  const explicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i;
   const formatDate = value => {
     if (!value) return "—";
-    const date = new Date(value);
+    const text = String(value).trim();
+    if (!explicitOffset.test(text)) return `${text}（時區未標示）`;
+    const date = new Date(text);
     if (Number.isNaN(date.valueOf())) return String(value);
     const parts = Object.fromEntries(taipeiDateTime.formatToParts(date).map(part => [part.type, part.value]));
     return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;

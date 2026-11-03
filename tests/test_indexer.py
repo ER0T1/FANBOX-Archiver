@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -27,7 +27,7 @@ def archive_fixture(tmp_path: Path) -> tuple[AppConfig, ArchiveService]:
     first = Post(
         post_id="123", creator_id="alice", creator_name="Alice <作者>",
         title="第一篇 <script>alert(1)</script>",
-        published_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 2),
+        published_at=datetime(2026, 10, 1, tzinfo=UTC), updated_at=datetime(2026, 10, 2, tzinfo=UTC),
         url="https://www.fanbox.cc/@alice/posts/123", tags=["測試", "CJK"],
         fee_required=500, blocks=[
             ContentBlock(
@@ -182,7 +182,7 @@ def test_fanbox_embed_links_to_local_backup_only_when_readable(tmp_path: Path):
 
     linked = Post(
         post_id="99", creator_id="alice", creator_name="Alice", title="已備份文章",
-        published_at=datetime(2026, 9, 1), updated_at=datetime(2026, 9, 1),
+        published_at=datetime(2026, 9, 1, tzinfo=UTC), updated_at=datetime(2026, 9, 1, tzinfo=UTC),
         url="https://www.fanbox.cc/@alice/posts/99", post_type="text",
         blocks=[ContentBlock(type="paragraph", text="本機內容")],
         raw={}, content_fingerprint="linked-fingerprint",

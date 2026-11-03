@@ -7,7 +7,7 @@ import re
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
@@ -18,10 +18,10 @@ from .fancard_perks import normalize_fancard_perks
 from .models import CreatorProfile, Post
 from .security import confined_path, safe_filename
 from .storage import BackupStorage
+from .timestamps import format_taipei
 
 
-TEMPLATE_VERSION = 12
-TAIPEI = timezone(timedelta(hours=8))
+TEMPLATE_VERSION = 13
 
 
 @dataclass(slots=True)
@@ -772,16 +772,7 @@ class IndexBuilder:
 
     @staticmethod
     def _date(value) -> str:
-        if not value:
-            return "-"
-        if isinstance(value, str):
-            try:
-                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                return value
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=UTC)
-        return value.astimezone(TAIPEI).strftime("%Y年%m月%d日 %H:%M")
+        return format_taipei(value)
 
     @staticmethod
     def _fee_label(value: int | None) -> str:
