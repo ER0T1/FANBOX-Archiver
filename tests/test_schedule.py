@@ -39,7 +39,7 @@ def test_weekly_and_every_n_weeks_anchor_on_the_start_week():
     (15, ["2027-01-15 03:00", "2027-02-15 03:00", "2027-03-15 03:00", "2027-04-15 03:00"]),
 ])
 def test_monthly_uses_last_day_for_short_months(month_day, expected):
-    schedule = ScheduleConfig(frequency="monthly", month_day=month_day, start_date=date(2027, 1, 1))
+    schedule = ScheduleConfig(frequency="monthly", month_day=month_day, time="03:00", start_date=date(2027, 1, 1))
     assert runs(schedule, taipei(2027, 1, 1), 4) == expected
 
 
@@ -65,7 +65,7 @@ def test_missed_occurrences_are_counted_for_the_single_catch_up():
 
 
 def test_description_and_time_validation():
-    assert describe(ScheduleConfig(frequency="daily")) == "每天 03:00（Asia/Taipei）"
+    assert describe(ScheduleConfig(frequency="daily")) == "每天 00:00（Asia/Taipei）"
     assert describe(ScheduleConfig(frequency="weekly", interval=2, weekday=2, time="21:05")) == "每 2 週的週三 21:05（Asia/Taipei）"
     assert describe(ScheduleConfig(frequency="monthly", month_day=31)).endswith("該月沒有這一天時於月底執行")
     for bad in ("24:00", "3:00", "03:60", "noon"):

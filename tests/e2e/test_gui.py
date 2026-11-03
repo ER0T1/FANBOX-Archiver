@@ -695,9 +695,13 @@ def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui)
     expect(preview).to_contain_text("每月 31 日 21:05")
     expect(preview).to_contain_text("月底執行")
 
+    expect(section.locator(".schedule-background dd")).to_contain_text("只在 Windows 桌面版提供")
+    section.get_by_role("combobox", name="電源與休眠").click()
+    section.get_by_role("option", name="不喚醒電腦，只在接上電源時執行").click()
     page.get_by_role("button", name="儲存設定", exact=True).click()
     expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     saved = AppConfig.load(config_path).schedule
+    assert saved.power == "no_wake_ac_only"
     assert (saved.enabled, saved.frequency, saved.month_day, saved.time) == (True, "monthly", 31, "21:05")
     assert saved.start_date is not None and saved.timezone == "Asia/Taipei"
     expect(section.locator("dd").first).to_contain_text("每月 31 日 21:05")
@@ -710,3 +714,29 @@ def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui)
     expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()
     assert jobs.submitted[-1].trigger == "schedule"
     assert jobs.submitted[-1].dry_run is False
+
+
+
+def test_background_scheduled_backup_locks_the_app_without_a_stop_button(page: Page, live_gui) -> None:
+    base_url, _, jobs = live_gui
+    jobs.hold_backup = False
+    jobs.history.append({
+        "job_id": "background-job", "kind": "backup", "status": "running", "external": True,
+        "created_at": "2026-11-03T00:00:00+00:00", "started_at": "2026-11-03T00:00:00+00:00",
+        "finished_at": None, "updated_at": "2026-11-03T00:00:00+00:00", "error": None,
+        "request": {"creators": [], "dry_run": False, "mode": "full", "trigger": "schedule"},
+        "result": None, "event_count": 0,
+    })
+    original_get = jobs.get
+    jobs.get = lambda job_id: ({**jobs.history[0], "events": []} if job_id == "background-job" else original_get(job_id))
+    page.goto(base_url, wait_until="networkidle")
+    page.get_by_role("button", name="備份", exact=True).click()
+    expect(page.get_by_role("heading", name="備份工作", exact=True)).to_be_visible()
+    expect(page.get_by_text("排程備份", exact=True).first).to_be_visible()
+    expect(page.get_by_text("此工作由背景排程在程式關閉期間開始", exact=False)).to_be_visible()
+    expect(page.get_by_role("button", name="安全停止", exact=True)).to_have_count(0)
+    page.get_by_role("button", name="設定", exact=True).click()
+    expect(page.get_by_text("目前工作：排程備份", exact=True)).to_be_visible()
+    expect(page.get_by_text("（背景執行中）", exact=False)).to_be_visible()
+    expect(page.get_by_role("button", name="儲存設定", exact=True)).to_be_disabled()
+    expect(page.get_by_role("checkbox", name="啟用自動備份")).to_be_disabled()

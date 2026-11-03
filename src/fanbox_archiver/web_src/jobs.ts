@@ -49,8 +49,10 @@ namespace FanboxUI {
   export function activeJobNotice(job: WebJob | null): HTMLElement | null {
     if (!job) return null;
     return h("p", {class: "global-job-notice", role: "status"},
-      h("strong", {}, `目前工作：${jobLabel(job)}`), `（${statusText(job.status)}）`,
-      h("span", {}, "同一時間只允許一項寫入或維護操作；完成、失敗或取消後會自動解鎖。"));
+      h("strong", {}, `目前工作：${jobLabel(job)}`), `（${job.external ? "背景執行中" : statusText(job.status)}）`,
+      h("span", {}, job.external
+        ? "程式關閉期間開始的背景排程備份仍在進行；完成後會自動解鎖，無法從此處停止。"
+        : "同一時間只允許一項寫入或維護操作；完成、失敗或取消後會自動解鎖。"));
   }
 
   function valueNumber(data: Record<string, unknown>, key: string): number {
@@ -317,7 +319,9 @@ namespace FanboxUI {
     const selectedCreators = requestCreators(job.request);
     const creatorNames = new Map(creators.map(item => [item.creator_id, item.name]));
     const controls = h("div", {class: "job-actions"},
-      active ? h("button", {type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id)},
+      active && job.external ? h("p", {class: "notice"},
+        "此工作由背景排程在程式關閉期間開始，完成後會自動解鎖，無法從此處停止。") : null,
+      active && !job.external ? h("button", {type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id)},
         job.status === "cancelling" ? "正在安全停止…" : "安全停止") : null,
       retryable ? h("button", {type: "button", class: "retry", disabled: blocked,
         onclick: () => actions.onRetry(job.job_id)}, "使用相同設定重試") : null,

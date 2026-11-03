@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
@@ -20,9 +21,11 @@ from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
     BackupScheduler,
 )
+from .archive_lock import ArchiveLock
 from .database import Database
 from .schedule import describe, upcoming
 from .timestamps import TAIPEI
+from .windows_task import DESKTOP_EXE_ENV, sync_background_schedule
 from .client import FanboxClient
 from .reader import ArchiveReader, ReaderNotFound
 
@@ -111,6 +114,7 @@ class ScheduleConfigPatch(BaseModel):
     time: str | None = Field(None, max_length=5)
     start_date: date | None = None
     creators: list[Annotated[str, Field(max_length=200)]] | None = Field(None, max_length=100)
+    power: Literal["no_wake_battery_ok", "no_wake_ac_only", "wake"] | None = None
 
 
 class LoggingConfigPatch(BaseModel):
@@ -138,7 +142,10 @@ def create_app(
     config: AppConfig, *, config_path: Path | None = None, run_scheduler: bool = False,
 ) -> FastAPI:
     reader = ArchiveReader(config)
-    jobs = BackupJobManager(config)
+    # A real server owns its archive so the background scheduled backup never writes alongside it.
+    jobs = BackupJobManager(
+        config, archive_lock=ArchiveLock(config.storage.output_dir) if run_scheduler else None,
+    )
     auth_service = AuthenticationService(config)
     auth_jobs = AuthenticationJobManager(auth_service)
     session_token = secrets.token_urlsafe(32)
@@ -151,6 +158,8 @@ def create_app(
         # Only a real server runs the background schedule; test clients never start it.
         if run_scheduler:
             app.state.scheduler.start()
+            # Re-sync on every start so an upgrade or moved install keeps the task correct.
+            await run_in_threadpool(sync_background)
         try:
             yield
         finally:
@@ -166,6 +175,14 @@ def create_app(
     app.state.session_token = session_token
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
+    app.state.background = {"state": "unavailable", "message": "背景排程只在 Windows 桌面版提供；目前只會在程式開著時執行。"}
+
+    def sync_background() -> None:
+        app.state.background = sync_background_schedule(
+            app.state.config, app.state.config_path, os.environ.get(DESKTOP_EXE_ENV),
+            now=datetime.now(UTC),
+        )
+
     app.state.scheduler = BackupScheduler(
         lambda: app.state.config, lambda: app.state.jobs, Database(config.storage.database),
         is_busy=lambda: app.state.auth_jobs.active() is not None,
@@ -298,6 +315,7 @@ def create_app(
         app.state.jobs.config = updated
         if schedule_changed:
             await run_in_threadpool(app.state.scheduler.reset)
+            await run_in_threadpool(sync_background)
         return {"editable": updated.editable_dict(), "saved": True}
 
     def normalize_schedule_patch(values: dict) -> dict:
@@ -309,7 +327,8 @@ def create_app(
 
     @app.get("/api/schedule")
     async def schedule_status():
-        return await run_in_threadpool(app.state.scheduler.status)
+        status = await run_in_threadpool(app.state.scheduler.status)
+        return {**status, "background": app.state.background}
 
     @app.post("/api/schedule/preview", dependencies=[Depends(require_mutation_token)])
     async def schedule_preview(body: ScheduleConfigPatch):

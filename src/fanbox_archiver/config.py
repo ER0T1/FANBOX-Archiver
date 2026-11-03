@@ -64,9 +64,12 @@ class ScheduleConfig(BaseModel):
     interval: int = Field(default=1, ge=1, le=30)
     weekday: int = Field(default=0, ge=0, le=6)
     month_day: int = Field(default=1, ge=1, le=31)
-    time: str = "03:00"
+    time: str = "00:00"
     start_date: date | None = None
     creators: list[str] = Field(default_factory=list, max_length=100)
+    # no_wake_battery_ok: never wake the PC, run on battery too; no_wake_ac_only: never
+    # wake, wait for mains power; wake: wake a sleeping PC (Windows Task Scheduler).
+    power: Literal["no_wake_battery_ok", "no_wake_ac_only", "wake"] = "no_wake_battery_ok"
     timezone: Literal["Asia/Taipei"] = "Asia/Taipei"
 
     @field_validator("time")

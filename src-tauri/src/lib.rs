@@ -21,6 +21,10 @@ const STATE_FILE: &str = "desktop-state.json";
 const DEFAULT_CONFIG_FILE: &str = "config.yaml";
 const IMPORTED_CONFIG_FILE: &str = "imported-config.yaml";
 const CHANGE_ARCHIVE_MENU_ID: &str = "change-archive";
+/// Windows Task Scheduler starts the app with this flag to run one background check.
+const SCHEDULED_BACKUP_FLAG: &str = "--scheduled-backup";
+/// Lets the sidecar register scheduled tasks that point back at this executable.
+const DESKTOP_EXE_ENV: &str = "FANBOX_ARCHIVER_DESKTOP_EXE";
 
 struct DesktopState {
     directory: PathBuf,
@@ -36,6 +40,54 @@ struct SavedDesktopState {
 #[derive(Debug, Serialize)]
 struct DesktopLaunch {
     config_path: String,
+}
+
+fn scheduled_backup_config<I: IntoIterator<Item = String>>(arguments: I) -> Option<PathBuf> {
+    let arguments: Vec<String> = arguments.into_iter().collect();
+    if !arguments.iter().any(|argument| argument == SCHEDULED_BACKUP_FLAG) {
+        return None;
+    }
+    let position = arguments.iter().position(|argument| argument == "--config")?;
+    arguments.get(position + 1).map(PathBuf::from)
+}
+
+fn desktop_executable() -> Option<String> {
+    env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Run `schedule-run` hidden and exit with its code; no window is ever shown.
+fn run_scheduled_backup(app: &AppHandle, config: &Path) -> Result<(), String> {
+    let mut command = app
+        .shell()
+        .sidecar("fanbox-archiver-sidecar")
+        .map_err(|error| error.to_string())?
+        .args([
+            "schedule-run".to_owned(),
+            "--config".to_owned(),
+            config.to_string_lossy().into_owned(),
+        ]);
+    if let Some(executable) = desktop_executable() {
+        command = command.env(DESKTOP_EXE_ENV, executable);
+    }
+    let (mut events, _child) = command.spawn().map_err(|error| error.to_string())?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut code = 1;
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Terminated(payload) => {
+                    code = payload.code.unwrap_or(1);
+                    break;
+                }
+                CommandEvent::Error(error) => log::error!("scheduled backup: {error}"),
+                _ => {}
+            }
+        }
+        handle.exit(code);
+    });
+    Ok(())
 }
 
 fn reserve_port() -> Result<u16, Box<dyn std::error::Error>> {
@@ -116,13 +168,15 @@ fn launch_sidecar(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Strin
         "--config".to_owned(),
         config.to_string_lossy().into_owned(),
     ];
-    let (mut events, child) = app
+    let mut command = app
         .shell()
         .sidecar("fanbox-archiver-sidecar")
         .map_err(|error| error.to_string())?
-        .args(arguments)
-        .spawn()
-        .map_err(|error| error.to_string())?;
+        .args(arguments);
+    if let Some(executable) = desktop_executable() {
+        command = command.env(DESKTOP_EXE_ENV, executable);
+    }
+    let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
@@ -279,6 +333,10 @@ pub fn run() {
             reset_desktop_selection
         ])
         .setup(|app| {
+            if let Some(config) = scheduled_backup_config(env::args()) {
+                run_scheduled_backup(app.handle(), &config)?;
+                return Ok(());
+            }
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -330,6 +388,20 @@ mod tests {
         fs::write(&config, "{}\n").unwrap();
         assert_eq!(find_saved_config(&directory), Some(config));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn scheduled_backup_flag_requires_a_config_path() {
+        let parse = |values: &[&str]| {
+            scheduled_backup_config(values.iter().map(|value| value.to_string()))
+        };
+        assert_eq!(
+            parse(&["app.exe", "--scheduled-backup", "--config", "C:/a b/config.yaml"]),
+            Some(PathBuf::from("C:/a b/config.yaml"))
+        );
+        assert_eq!(parse(&["app.exe", "--config", "config.yaml"]), None);
+        assert_eq!(parse(&["app.exe", "--scheduled-backup"]), None);
+        assert_eq!(parse(&["app.exe", "--scheduled-backup", "--config"]), None);
     }
 
     #[test]

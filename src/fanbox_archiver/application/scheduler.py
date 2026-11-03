@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from ..config import AppConfig
 from ..database import Database
+from .. import power
 from ..schedule import count_between, describe, latest_due, next_run
 from ..timestamps import format_taipei, parse_instant
 from .backup import BackupRequest
@@ -28,6 +29,7 @@ class BackupScheduler:
         self, get_config: Callable[[], AppConfig], get_jobs: Callable[[], BackupJobManager],
         db: Database, *, is_busy: Callable[[], bool] = lambda: False,
         clock: Callable[[], datetime] = _now, interval: float = 30.0,
+        on_battery: Callable[[], bool] | None = None,
     ) -> None:
         self.get_config = get_config
         self.get_jobs = get_jobs
@@ -35,6 +37,7 @@ class BackupScheduler:
         self.is_busy = is_busy
         self.clock = clock
         self.interval = interval
+        self.on_battery = on_battery or (lambda: power.on_battery())
         self._stop = Event()
         self._lock = Lock()
         self._thread: Thread | None = None
@@ -81,6 +84,13 @@ class BackupScheduler:
             if due is None or due <= handled:
                 return None
             due_iso = due.isoformat()
+            if schedule.power == "no_wake_ac_only" and self.on_battery():
+                if state["deferred_due"] != due_iso:
+                    self.db.set_schedule_state(
+                        deferred_due=due_iso,
+                        note=f"{format_taipei(due)} 的排程遇到使用電池中，將於接上電源後執行。",
+                    )
+                return "deferred"
             jobs = self.get_jobs()
             if self.is_busy() or jobs.has_active():
                 if state["deferred_due"] != due_iso:
@@ -97,7 +107,7 @@ class BackupScheduler:
             if missed > 1:
                 note = f"錯過 {missed} 次排程，已補跑最近一次（{format_taipei(due)}）。"
             elif state["deferred_due"] == due_iso:
-                note = f"{format_taipei(due)} 的排程因其他工作延後，已於該工作結束後執行。"
+                note = f"{format_taipei(due)} 的排程曾延後，已於可以執行時補跑。"
             elif (now - due).total_seconds() > max(120.0, self.interval * 4):
                 note = f"已補跑錯過的排程（{format_taipei(due)}）。"
             else:

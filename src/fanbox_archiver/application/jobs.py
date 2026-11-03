@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Callable
 
+from ..archive_lock import ArchiveLock
 from ..config import AppConfig
 from ..database import Database
 from ..service import ArchiveService
@@ -50,7 +51,13 @@ class BackupJobManager:
 
     History lives in SQLite and is paged from there; memory only holds jobs run by
     this process, so the active job's live state wins over its persisted row.
+
+    With an ``archive_lock`` the manager also respects jobs run by another process
+    (the background scheduled backup): while that process owns the archive this
+    manager reports itself busy and never marks the other process's job interrupted.
     """
+
+    EXTERNAL_BUSY = "背景排程備份執行中，完成後才能開始新的工作"
 
     _FINISHED_IN_MEMORY = 10
     _ACTIVE = frozenset({"queued", "running", "cancelling"})
@@ -58,6 +65,7 @@ class BackupJobManager:
     def __init__(
         self, config: AppConfig, *,
         use_case_factory: Callable[..., BackupUseCase] = BackupUseCase,
+        archive_lock: ArchiveLock | None = None,
     ) -> None:
         self.config = config
         self.use_case_factory = use_case_factory
@@ -67,7 +75,9 @@ class BackupJobManager:
         self._jobs: dict[str, BackupJob] = {}
         self._futures: dict[str, Future] = {}
         self._progress_persisted_at: dict[str, float] = {}
-        self.db.recover_interrupted_web_jobs(_now())
+        self.archive_lock = archive_lock
+        self._recovered = False
+        self._external_busy()
 
     def submit(self, request: BackupRequest) -> dict[str, Any]:
         return self._submit("backup", request)
@@ -82,6 +92,8 @@ class BackupJobManager:
     def _submit_locked(self, kind: str, request: Any) -> dict[str, Any]:
         if any(job.status in self._ACTIVE for job in self._jobs.values()):
             raise RuntimeError("已有備份工作正在執行")
+        if self._external_busy():
+            raise RuntimeError(self.EXTERNAL_BUSY)
         job_id = uuid.uuid4().hex
         job = BackupJob(job_id, request, CancellationToken(), kind=kind)
         self._jobs[job_id] = job
@@ -112,6 +124,10 @@ class BackupJobManager:
             ]
             active = next((job for job in self._jobs.values() if job.status in self._ACTIVE), None)
             active_value = self._snapshot(active, include_events=False) if active else None
+        if active_value is None and self._external_busy():
+            running = self.db.web_job_page(status="running", limit=1)
+            if running:
+                active_value = {**self._row_snapshot(running[0]), "external": True}
         return {
             "items": items, "page": page, "pages": pages, "page_size": page_size,
             "total": total, "active": active_value,
@@ -158,7 +174,19 @@ class BackupJobManager:
 
     def has_active(self) -> bool:
         with self._lock:
-            return any(job.status in self._ACTIVE for job in self._jobs.values())
+            if any(job.status in self._ACTIVE for job in self._jobs.values()):
+                return True
+        return self._external_busy()
+
+    def _external_busy(self) -> bool:
+        """True while another process owns the archive; take ownership as soon as it is free."""
+        if self.archive_lock is not None and not self.archive_lock.try_acquire():
+            return True
+        if not self._recovered:
+            # Rows still "running" now belong to nobody, so they were interrupted.
+            self._recovered = True
+            self.db.recover_interrupted_web_jobs(_now())
+        return False
 
     def wait(self, job_id: str, timeout: float = 10.0) -> dict[str, Any]:
         with self._lock:
@@ -172,6 +200,8 @@ class BackupJobManager:
 
     def close(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=False)
+        if self.archive_lock is not None:
+            self.archive_lock.release()
 
     def _run(self, job_id: str) -> None:
         with self._lock:

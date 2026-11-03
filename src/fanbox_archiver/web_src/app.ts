@@ -338,7 +338,7 @@ namespace FanboxUI {
         if (active) {
           state.backupScreen = "job";
           state.backupJobId = active.job_id;
-          renderJob(await getJob(active.job_id), creatorData.items);
+          renderJob({...await getJob(active.job_id), external: active.external}, creatorData.items);
         } else if (state.backupScreen === "job" && state.backupJobId) {
           const selected = await getJob(state.backupJobId).catch(() => null);
           if (selected) renderJob(selected, creatorData.items);

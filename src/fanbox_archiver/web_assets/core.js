@@ -591,6 +591,7 @@ var FanboxUI;
     function renderScheduleSection(value, status, creators, blocked, actions) {
         const enabled = FanboxUI.h("input", { type: "checkbox", checked: value.enabled });
         let frequencyValue = value.frequency;
+        let powerValue = value.power;
         let monthDay = value.month_day;
         const interval = FanboxUI.h("input", { type: "number", value: value.interval, min: 1, max: 30, step: 1 });
         const time = FanboxUI.h("input", { type: "time", value: value.time, step: 60, required: true });
@@ -601,6 +602,11 @@ var FanboxUI;
             options: [{ value: "daily", label: "每天／每 N 天" }, { value: "weekly", label: "每週／每 N 週" },
                 { value: "monthly", label: "每月指定日期" }],
             onChange: next => { frequencyValue = next; sync(); } });
+        const power = FanboxUI.customSelect({ id: "schedule-power", label: "電源與休眠", value: powerValue, disabled: blocked,
+            options: [{ value: "no_wake_battery_ok", label: "不喚醒電腦，使用電池時也執行" },
+                { value: "no_wake_ac_only", label: "不喚醒電腦，只在接上電源時執行" },
+                { value: "wake", label: "喚醒休眠中的電腦執行" }],
+            onChange: next => { powerValue = next; sync(); } });
         const weekday = FanboxUI.customSelect({ id: "schedule-weekday", label: "星期", value: value.weekday, disabled: blocked,
             options: WEEKDAYS.map((label, index) => ({ value: index, label })), onChange: () => sync() });
         const dayButtons = Array.from({ length: 31 }, (_, index) => FanboxUI.h("button", { type: "button",
@@ -619,7 +625,7 @@ var FanboxUI;
         const read = () => ({
             enabled: enabled.checked, frequency: frequencyValue,
             interval: Math.min(30, Math.max(1, Math.round(Number(interval.value) || 1))),
-            weekday: Number(weekday.value), month_day: monthDay, time: time.value,
+            weekday: Number(weekday.value), month_day: monthDay, time: time.value, power: powerValue,
             creators: [...creatorBoxes.filter(item => item.input.checked).map(item => item.input.value), ...unknownCreators],
         });
         let previewTimer;
@@ -657,7 +663,7 @@ var FanboxUI;
                     runFeedback.hidden = false;
                 }
             } }, "立即執行一次");
-        const node = FanboxUI.h("section", { class: "settings-section schedule-settings" }, FanboxUI.h("h3", {}, "自動備份"), FanboxUI.h("p", { class: "settings-section-description" }, "程式開著時依排程自動開始完整備份；關閉期間錯過的排程，下次開啟時只會補跑一次。時間一律以 Asia/Taipei 計算。"), FanboxUI.h("dl", { class: "schedule-status" }, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "目前排程"), FanboxUI.h("dd", {}, status.enabled ? status.summary : "未啟用")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "下一次執行"), FanboxUI.h("dd", {}, status.next_run_at ? FanboxUI.formatDate(status.next_run_at) : "—")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "上次結果"), FanboxUI.h("dd", {}, lastResultText(status)))), status.note ? FanboxUI.h("p", { class: "notice schedule-note" }, status.note) : null, FanboxUI.h("label", { class: "setting-toggle" }, enabled, FanboxUI.h("span", {}, "啟用自動備份")), FanboxUI.h("div", { class: "settings-grid" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "週期"), frequency), intervalField, weekdayField, FanboxUI.h("label", { class: "setting-field" }, FanboxUI.h("span", {}, "時間（Asia/Taipei）"), time)), monthField, FanboxUI.h("details", { class: "schedule-creators" }, FanboxUI.h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"), creatorBoxes.length ? FanboxUI.h("div", { class: "setting-toggles" }, creatorBoxes.map(item => item.node))
+        const node = FanboxUI.h("section", { class: "settings-section schedule-settings" }, FanboxUI.h("h3", {}, "自動備份"), FanboxUI.h("p", { class: "settings-section-description" }, "依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次，時間一律以 Asia/Taipei 計算。"), FanboxUI.h("dl", { class: "schedule-status" }, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "目前排程"), FanboxUI.h("dd", {}, status.enabled ? status.summary : "未啟用")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "下一次執行"), FanboxUI.h("dd", {}, status.next_run_at ? FanboxUI.formatDate(status.next_run_at) : "—")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "上次結果"), FanboxUI.h("dd", {}, lastResultText(status))), FanboxUI.h("div", { class: `schedule-background state-${status.background.state}` }, FanboxUI.h("dt", {}, "程式關閉時"), FanboxUI.h("dd", {}, status.background.message))), status.note ? FanboxUI.h("p", { class: "notice schedule-note" }, status.note) : null, FanboxUI.h("label", { class: "setting-toggle" }, enabled, FanboxUI.h("span", {}, "啟用自動備份")), FanboxUI.h("div", { class: "settings-grid" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "週期"), frequency), intervalField, weekdayField, FanboxUI.h("label", { class: "setting-field" }, FanboxUI.h("span", {}, "時間（Asia/Taipei）"), time)), monthField, FanboxUI.h("div", { class: "setting-field schedule-power" }, FanboxUI.h("span", {}, "電源與休眠"), power, FanboxUI.h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。")), FanboxUI.h("details", { class: "schedule-creators" }, FanboxUI.h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"), creatorBoxes.length ? FanboxUI.h("div", { class: "setting-toggles" }, creatorBoxes.map(item => item.node))
             : FanboxUI.h("p", { class: "settings-section-description" }, "目前沒有已知的創作者；將備份全部支援中的創作者。")), preview, FanboxUI.h("div", { class: "schedule-actions" }, runNow, FanboxUI.h("span", { class: "settings-section-description" }, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。")), runFeedback);
         sync();
         return { node, read };
@@ -781,7 +787,9 @@ var FanboxUI;
     function activeJobNotice(job) {
         if (!job)
             return null;
-        return FanboxUI.h("p", { class: "global-job-notice", role: "status" }, FanboxUI.h("strong", {}, `目前工作：${jobLabel(job)}`), `（${statusText(job.status)}）`, FanboxUI.h("span", {}, "同一時間只允許一項寫入或維護操作；完成、失敗或取消後會自動解鎖。"));
+        return FanboxUI.h("p", { class: "global-job-notice", role: "status" }, FanboxUI.h("strong", {}, `目前工作：${jobLabel(job)}`), `（${job.external ? "背景執行中" : statusText(job.status)}）`, FanboxUI.h("span", {}, job.external
+            ? "程式關閉期間開始的背景排程備份仍在進行；完成後會自動解鎖，無法從此處停止。"
+            : "同一時間只允許一項寫入或維護操作；完成、失敗或取消後會自動解鎖。"));
     }
     FanboxUI.activeJobNotice = activeJobNotice;
     function valueNumber(data, key) {
@@ -1012,7 +1020,7 @@ var FanboxUI;
         const retryable = ["failed", "cancelled", "interrupted"].includes(job.status);
         const selectedCreators = requestCreators(job.request);
         const creatorNames = new Map(creators.map(item => [item.creator_id, item.name]));
-        const controls = FanboxUI.h("div", { class: "job-actions" }, active ? FanboxUI.h("button", { type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id) }, job.status === "cancelling" ? "正在安全停止…" : "安全停止") : null, retryable ? FanboxUI.h("button", { type: "button", class: "retry", disabled: blocked,
+        const controls = FanboxUI.h("div", { class: "job-actions" }, active && job.external ? FanboxUI.h("p", { class: "notice" }, "此工作由背景排程在程式關閉期間開始，完成後會自動解鎖，無法從此處停止。") : null, active && !job.external ? FanboxUI.h("button", { type: "button", class: "danger", onclick: () => actions.onCancel(job.job_id) }, job.status === "cancelling" ? "正在安全停止…" : "安全停止") : null, retryable ? FanboxUI.h("button", { type: "button", class: "retry", disabled: blocked,
             onclick: () => actions.onRetry(job.job_id) }, "使用相同設定重試") : null, !active ? FanboxUI.h("button", { type: "button", disabled: blocked, onclick: actions.onNew }, "建立新工作") : null, FanboxUI.h("button", { type: "button", class: "secondary", disabled: active, onclick: actions.onHistory }, "工作歷史"));
         return FanboxUI.h("section", { class: "page backup-page", "data-job-id": job.job_id }, jobPart(FanboxUI.h("header", { class: "heading job-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP JOB"), FanboxUI.h("h1", {}, "備份工作"), FanboxUI.h("p", {}, jobModeLabel(job))), FanboxUI.h("span", { class: `job-status status-${job.status}` }, statusText(job.status))), "header"), jobPart(activeJobNotice(blocked ? activeJob : null) || FanboxUI.h("div", { hidden: true }), "global-active"), jobPart(FanboxUI.h("section", { class: "job-scope" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP SCOPE"), FanboxUI.h("h2", {}, jobCreatorLabel(job, creators)), selectedCreators.length
             ? FanboxUI.h("ul", {}, selectedCreators.map(id => FanboxUI.h("li", {}, FanboxUI.h("strong", {}, creatorNames.get(id) || id), FanboxUI.h("span", {}, `@${id}`))))
@@ -1480,7 +1488,7 @@ var FanboxUI;
                 if (active) {
                     state.backupScreen = "job";
                     state.backupJobId = active.job_id;
-                    renderJob(await FanboxUI.getJob(active.job_id), creatorData.items);
+                    renderJob({ ...await FanboxUI.getJob(active.job_id), external: active.external }, creatorData.items);
                 }
                 else if (state.backupScreen === "job" && state.backupJobId) {
                     const selected = await FanboxUI.getJob(state.backupJobId).catch(() => null);

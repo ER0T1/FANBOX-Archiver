@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 import json
 import sqlite3
 import subprocess
@@ -29,7 +30,12 @@ from .credentials import cookie_header
 from .models import Post
 from .parser import HtmlPostParser
 from .service import ArchiveService
-from .application import AuthenticationService, BackupEvent, BackupRequest, BackupUseCase
+from .application import (
+    AuthenticationService, BackupEvent, BackupJobManager, BackupRequest, BackupScheduler, BackupUseCase,
+)
+from .archive_lock import ArchiveLock
+from .database import Database
+from .windows_task import DESKTOP_EXE_ENV, refresh_wake_task
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
 from .audit import ArchiveAuditor, ArchiveRepairer
@@ -395,6 +401,43 @@ def audit(
             )
     if report.blocking_count:
         raise typer.Exit(1)
+
+
+@app.command("schedule-run")
+def schedule_run(
+    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+) -> None:
+    """背景排程檢查：到期時執行一次排程備份並等待完成（供 Windows 工作排程器呼叫）。"""
+    settings = load_config(config)
+    log = get_logger()
+    if not settings.schedule.enabled:
+        log.info("自動備份未啟用，略過背景排程檢查。")
+        return
+    lock = ArchiveLock(settings.storage.output_dir)
+    if not lock.try_acquire():
+        # The desktop app (or another background run) owns this archive and schedules itself.
+        log.info("封存正由 FANBOX Archiver 使用中，略過本次背景排程檢查。")
+        return
+    manager = BackupJobManager(settings, archive_lock=lock)
+    try:
+        scheduler = BackupScheduler(
+            lambda: settings, lambda: manager, Database(settings.storage.database),
+        )
+        outcome = scheduler.tick()
+        try:
+            refresh_wake_task(settings, config, os.environ.get(DESKTOP_EXE_ENV), now=datetime.now(UTC))
+        except (OSError, RuntimeError) as exc:
+            log.warning("無法更新喚醒排程：%s", exc)
+        if outcome != "submitted":
+            log.info("沒有到期的排程備份。")
+            return
+        job_id = scheduler.status()["last_job"]["job_id"]
+        job = manager.wait(job_id, timeout=12 * 60 * 60)
+        log.info("背景排程備份結束：%s", job["status"])
+        if job["status"] != "completed":
+            raise typer.Exit(1)
+    finally:
+        manager.close()
 
 
 @app.command("repair-copy")

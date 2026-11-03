@@ -96,7 +96,7 @@ def test_busy_occurrence_is_deferred_until_the_running_job_ends(tmp_path: Path):
         manager.wait(manual["job_id"])
         clock.value = taipei(2026, 11, 2, 3, 20)
         assert scheduler.tick() == "submitted"
-        assert "因其他工作延後，已於該工作結束後執行" in scheduler.status()["note"]
+        assert "曾延後，已於可以執行時補跑" in scheduler.status()["note"]
         manager.wait(scheduler.status()["last_job"]["job_id"])
         assert manager.page(kind="backup")["total"] == 2
     finally:

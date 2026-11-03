@@ -56,6 +56,15 @@ if ($Existing.Count -gt 0) {
     throw "FANBOX Archiver is already installed for this Windows environment ($Locations). Refusing to replace a real installation during the smoke test."
 }
 
+$TaskPath = "\FANBOX Archiver\"
+$TaskNames = @("Scheduled Backup", "Scheduled Backup Wake")
+function Get-FanboxScheduledTasks {
+    @(Get-ScheduledTask -TaskPath $TaskPath -ErrorAction SilentlyContinue)
+}
+if ((Get-FanboxScheduledTasks).Count -gt 0) {
+    throw "FANBOX Archiver background tasks already exist. Refusing to replace them during the smoke test."
+}
+
 if (Test-Path -LiteralPath $TestRoot) {
     Remove-Item -LiteralPath $TestRoot -Recurse -Force
 }
@@ -96,6 +105,7 @@ function Assert-InstalledPayload([string]$ExpectedVersion) {
 
 $Installed = $false
 $Succeeded = $false
+$CreatedTasks = $false
 try {
     $FirstInstaller = if ($PreviousInstallerPath) { $PreviousInstallerPath } else { $InstallerPath }
     $FirstVersion = (Get-Item -LiteralPath $FirstInstaller).VersionInfo.ProductVersion
@@ -104,8 +114,18 @@ try {
     $Installed = $true
     Assert-InstalledPayload $FirstVersion
 
+    # Placeholder background tasks the uninstaller must remove; they never fire.
+    $Action = New-ScheduledTaskAction -Execute (Join-Path $InstallDirectory "fanbox-archiver-desktop.exe") `
+        -Argument "--scheduled-backup --config `"$ConfigPath`""
+    $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddYears(50)
+    foreach ($Name in $TaskNames) {
+        Register-ScheduledTask -TaskPath $TaskPath -TaskName $Name -Action $Action -Trigger $Trigger | Out-Null
+    }
+    $CreatedTasks = $true
+
     Invoke-SilentInstall $InstallerPath
     Assert-InstalledPayload $CurrentVersion
+    $TasksAfterUpgrade = (Get-FanboxScheduledTasks).Count
     if ((Get-Content -LiteralPath $SentinelPath -Raw).Trim() -ne "installer-smoke-data") {
         throw "Archive sentinel changed during the overwrite upgrade."
     }
@@ -127,10 +147,14 @@ try {
     if (@(Get-FanboxInstallEntries).Count -gt 0) {
         throw "Uninstall registry entry remains after uninstall."
     }
+    if ((Get-FanboxScheduledTasks).Count -gt 0) {
+        throw "Background scheduled backup tasks remain after uninstall."
+    }
 
     $Succeeded = $true
     Write-Host "Installer lifecycle smoke test passed."
     Write-Host "Install $FirstVersion -> $CurrentVersion upgrade, uninstall, and archive retention were verified."
+    Write-Host "Background tasks kept by the overwrite upgrade: $TasksAfterUpgrade of $($TaskNames.Count); removed by uninstall: yes."
 }
 finally {
     if ($Installed) {
@@ -138,6 +162,14 @@ finally {
         if (Test-Path -LiteralPath $Uninstaller -PathType Leaf) {
             Start-Process -FilePath $Uninstaller -ArgumentList "/S" -Wait -WindowStyle Hidden
         }
+    }
+    if ($CreatedTasks) {
+        foreach ($Task in Get-FanboxScheduledTasks) {
+            Unregister-ScheduledTask -TaskPath $Task.TaskPath -TaskName $Task.TaskName -Confirm:$false
+        }
+        $Service = New-Object -ComObject Schedule.Service
+        $Service.Connect()
+        try { $Service.GetFolder("\").DeleteFolder("FANBOX Archiver", 0) } catch {}
     }
     if ($Succeeded -and -not $KeepArtifacts -and (Test-Path -LiteralPath $TestRoot)) {
         Remove-Item -LiteralPath $TestRoot -Recurse -Force

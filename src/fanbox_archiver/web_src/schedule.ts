@@ -26,6 +26,7 @@ namespace FanboxUI {
   ): ScheduleSection {
     const enabled = h("input", {type: "checkbox", checked: value.enabled}) as HTMLInputElement;
     let frequencyValue: ScheduleFrequency = value.frequency;
+    let powerValue: SchedulePower = value.power;
     let monthDay = value.month_day;
     const interval = h("input", {type: "number", value: value.interval, min: 1, max: 30, step: 1}) as HTMLInputElement;
     const time = h("input", {type: "time", value: value.time, step: 60, required: true}) as HTMLInputElement;
@@ -37,6 +38,11 @@ namespace FanboxUI {
       options: [{value: "daily", label: "每天／每 N 天"}, {value: "weekly", label: "每週／每 N 週"},
         {value: "monthly", label: "每月指定日期"}],
       onChange: next => { frequencyValue = next as ScheduleFrequency; sync(); }});
+    const power = customSelect({id: "schedule-power", label: "電源與休眠", value: powerValue, disabled: blocked,
+      options: [{value: "no_wake_battery_ok", label: "不喚醒電腦，使用電池時也執行"},
+        {value: "no_wake_ac_only", label: "不喚醒電腦，只在接上電源時執行"},
+        {value: "wake", label: "喚醒休眠中的電腦執行"}],
+      onChange: next => { powerValue = next as SchedulePower; sync(); }});
     const weekday = customSelect({id: "schedule-weekday", label: "星期", value: value.weekday, disabled: blocked,
       options: WEEKDAYS.map((label, index) => ({value: index, label})), onChange: () => sync()});
     const dayButtons = Array.from({length: 31}, (_, index) => h("button", {type: "button",
@@ -60,7 +66,7 @@ namespace FanboxUI {
     const read = (): ScheduleSettingsPatch => ({
       enabled: enabled.checked, frequency: frequencyValue,
       interval: Math.min(30, Math.max(1, Math.round(Number(interval.value) || 1))),
-      weekday: Number(weekday.value), month_day: monthDay, time: time.value,
+      weekday: Number(weekday.value), month_day: monthDay, time: time.value, power: powerValue,
       creators: [...creatorBoxes.filter(item => item.input.checked).map(item => item.input.value), ...unknownCreators],
     });
 
@@ -97,16 +103,20 @@ namespace FanboxUI {
     const node = h("section", {class: "settings-section schedule-settings"},
       h("h3", {}, "自動備份"),
       h("p", {class: "settings-section-description"},
-        "程式開著時依排程自動開始完整備份；關閉期間錯過的排程，下次開啟時只會補跑一次。時間一律以 Asia/Taipei 計算。"),
+        "依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次，時間一律以 Asia/Taipei 計算。"),
       h("dl", {class: "schedule-status"},
         h("div", {}, h("dt", {}, "目前排程"), h("dd", {}, status.enabled ? status.summary : "未啟用")),
         h("div", {}, h("dt", {}, "下一次執行"), h("dd", {}, status.next_run_at ? formatDate(status.next_run_at) : "—")),
-        h("div", {}, h("dt", {}, "上次結果"), h("dd", {}, lastResultText(status)))),
+        h("div", {}, h("dt", {}, "上次結果"), h("dd", {}, lastResultText(status))),
+        h("div", {class: `schedule-background state-${status.background.state}`},
+          h("dt", {}, "程式關閉時"), h("dd", {}, status.background.message))),
       status.note ? h("p", {class: "notice schedule-note"}, status.note) : null,
       h("label", {class: "setting-toggle"}, enabled, h("span", {}, "啟用自動備份")),
       h("div", {class: "settings-grid"}, h("div", {class: "setting-field"}, h("span", {}, "週期"), frequency),
         intervalField, weekdayField, h("label", {class: "setting-field"}, h("span", {}, "時間（Asia/Taipei）"), time)),
       monthField,
+      h("div", {class: "setting-field schedule-power"}, h("span", {}, "電源與休眠"), power,
+        h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。")),
       h("details", {class: "schedule-creators"}, h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"),
         creatorBoxes.length ? h("div", {class: "setting-toggles"}, creatorBoxes.map(item => item.node))
           : h("p", {class: "settings-section-description"}, "目前沒有已知的創作者；將備份全部支援中的創作者。")),

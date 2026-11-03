@@ -220,6 +220,8 @@ namespace FanboxUI {
     };
     result?: WebJobResult | null;
     events?: WebJobEvent[];
+    /** Run by the background scheduled backup process, not by this app. */
+    external?: boolean;
   }
 
   export interface WebJobEvent {
@@ -310,8 +312,11 @@ namespace FanboxUI {
     time: string;
     start_date: string | null;
     creators: string[];
+    power: SchedulePower;
     timezone: "Asia/Taipei";
   }
+
+  export type SchedulePower = "no_wake_battery_ok" | "no_wake_ac_only" | "wake";
 
   export type ScheduleSettingsPatch = Omit<ScheduleSettings, "start_date" | "timezone">;
 
@@ -324,6 +329,8 @@ namespace FanboxUI {
     deferred_due: string | null;
     note: string | null;
     last_job: {job_id: string; status: JobStatus; error: string | null; created_at: string; finished_at: string | null} | null;
+    /** Windows Task Scheduler state for runs while the app is closed. */
+    background: {state: "registered" | "removed" | "unavailable" | "error"; message: string};
   }
 
   export interface SchedulePreview {
