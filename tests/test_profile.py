@@ -79,11 +79,14 @@ def test_profile_new_unchanged_updated_and_reader_hides_raw(tmp_path: Path):
     assert first_path.name == "v0001"
     assert (first_path / "profile.json").is_file()
     assert (first_path.parent.parent / "profile.json").is_file()
+    first_captured_at = archive.db.profile_versions("alice")[0]["captured_at"]
 
     status, same_path = archive.save_profile(first)
     assert status == "unchanged"
     assert same_path == first_path
-    assert len(archive.db.profile_versions("alice")) == 1
+    unchanged_rows = archive.db.profile_versions("alice")
+    assert len(unchanged_rows) == 1
+    assert unchanged_rows[0]["captured_at"] == first_captured_at
 
     second = profile("已更新")
     status, second_path = archive.save_profile(second)
@@ -103,6 +106,31 @@ def test_profile_new_unchanged_updated_and_reader_hides_raw(tmp_path: Path):
     assert archive.clear_posts() == 0
     assert archive.db.latest_profile_version("alice") is not None
     assert second_path.is_dir()
+
+
+def test_profile_a_b_a_is_immutable_and_reader_follows_latest_pointer(tmp_path: Path):
+    app_config = config(tmp_path)
+    archive = ArchiveService(app_config)
+    archive.save_profile(profile("A"))
+    first = archive.db.profile_versions("alice")[0]
+    first_captured_at = first["captured_at"]
+    archive.save_profile(profile("B"))
+    archive.save_profile(profile("A"))
+
+    rows = archive.db.profile_versions("alice")
+    assert [row["version_number"] for row in rows] == [1, 2, 3]
+    assert rows[0]["content_fingerprint"] == rows[2]["content_fingerprint"]
+    assert rows[0]["captured_at"] == first_captured_at
+    assert archive.db.latest_profile_version("alice")["version_number"] == 3
+
+    with archive.db.connect() as db:
+        db.execute(
+            "UPDATE creators SET latest_profile_version_id=? WHERE creator_id='alice'",
+            (rows[0]["profile_version_id"],),
+        )
+    result = ArchiveReader(app_config).creator_profile("alice")
+    assert result["version"] == 1
+    assert result["description"] == "A"
 
 
 def test_profile_item_images_are_archived_and_served_locally(monkeypatch, tmp_path: Path):

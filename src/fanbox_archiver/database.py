@@ -87,8 +87,7 @@ CREATE TABLE IF NOT EXISTS post_versions (
   markdown_path TEXT,
   json_path TEXT,
   last_error TEXT,
-  UNIQUE(post_id, version_number),
-  UNIQUE(post_id, content_fingerprint)
+  UNIQUE(post_id, version_number)
 );
 CREATE TABLE IF NOT EXISTS fancard_versions (
   fancard_version_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,8 +101,7 @@ CREATE TABLE IF NOT EXISTS fancard_versions (
   image_path TEXT,
   image_sha256 TEXT,
   last_error TEXT,
-  UNIQUE(creator_id,target_month,version_number),
-  UNIQUE(creator_id,target_month,content_fingerprint)
+  UNIQUE(creator_id,target_month,version_number)
 );
 CREATE TABLE IF NOT EXISTS creator_profile_versions (
   profile_version_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,8 +115,7 @@ CREATE TABLE IF NOT EXISTS creator_profile_versions (
   cover_path TEXT,
   cover_sha256 TEXT,
   last_error TEXT,
-  UNIQUE(creator_id,version_number),
-  UNIQUE(creator_id,content_fingerprint)
+  UNIQUE(creator_id,version_number)
 );
 CREATE TABLE IF NOT EXISTS web_jobs (
   job_id TEXT PRIMARY KEY,
@@ -150,7 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_web_jobs_updated ON web_jobs(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_web_job_events_job ON web_job_events(job_id,event_id);
 """
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def now_iso() -> str:
@@ -182,6 +179,7 @@ class Database:
 
     @staticmethod
     def _migrate(db: sqlite3.Connection) -> None:
+        Database._remove_fingerprint_uniqueness(db)
         columns = {row["name"] for row in db.execute("PRAGMA table_info(backup_runs)")}
         for name in ("discovered_count", "new_count", "updated_count", "skipped_count", "retried_count"):
             if name not in columns:
@@ -208,6 +206,63 @@ class Database:
             "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(?,?)",
             (SCHEMA_VERSION, now_iso()),
         )
+
+    @staticmethod
+    def _remove_fingerprint_uniqueness(db: sqlite3.Connection) -> None:
+        definitions = {
+            "post_versions": (
+                "version_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "post_id TEXT NOT NULL REFERENCES posts(post_id) ON DELETE CASCADE,"
+                "version_number INTEGER NOT NULL,remote_updated_at TEXT,captured_at TEXT,"
+                "content_fingerprint TEXT NOT NULL,status TEXT NOT NULL,local_path TEXT NOT NULL,"
+                "markdown_path TEXT,json_path TEXT,last_error TEXT,"
+                "UNIQUE(post_id,version_number)",
+                "idx_post_versions_post",
+                "post_id,version_number",
+            ),
+            "fancard_versions": (
+                "fancard_version_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "creator_id TEXT NOT NULL REFERENCES creators(creator_id),target_month TEXT NOT NULL,"
+                "version_number INTEGER NOT NULL,captured_at TEXT NOT NULL,"
+                "content_fingerprint TEXT NOT NULL,status TEXT NOT NULL,local_path TEXT NOT NULL,"
+                "image_path TEXT,image_sha256 TEXT,last_error TEXT,"
+                "UNIQUE(creator_id,target_month,version_number)",
+                "idx_fancard_versions_creator",
+                "creator_id,target_month,version_number",
+            ),
+            "creator_profile_versions": (
+                "profile_version_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "creator_id TEXT NOT NULL REFERENCES creators(creator_id),"
+                "version_number INTEGER NOT NULL,captured_at TEXT NOT NULL,"
+                "content_fingerprint TEXT NOT NULL,status TEXT NOT NULL,local_path TEXT NOT NULL,"
+                "json_path TEXT NOT NULL,cover_path TEXT,cover_sha256 TEXT,last_error TEXT,"
+                "UNIQUE(creator_id,version_number)",
+                "idx_profile_versions_creator",
+                "creator_id,version_number",
+            ),
+        }
+        for table, (columns_sql, index_name, index_columns) in definitions.items():
+            fingerprint_unique = False
+            for index in db.execute(f"PRAGMA index_list({table})"):
+                if not index["unique"]:
+                    continue
+                columns = [
+                    str(row["name"])
+                    for row in db.execute(f"PRAGMA index_info({index['name']})")
+                ]
+                if "content_fingerprint" in columns:
+                    fingerprint_unique = True
+                    break
+            if not fingerprint_unique:
+                continue
+            legacy = f"{table}_with_unique_fingerprint"
+            column_names = [str(row["name"]) for row in db.execute(f"PRAGMA table_info({table})")]
+            db.execute(f"ALTER TABLE {table} RENAME TO {legacy}")
+            db.execute(f"CREATE TABLE {table} ({columns_sql})")
+            names = ",".join(column_names)
+            db.execute(f"INSERT INTO {table}({names}) SELECT {names} FROM {legacy}")
+            db.execute(f"DROP TABLE {legacy}")
+            db.execute(f"CREATE INDEX {index_name} ON {table}({index_columns})")
 
     @staticmethod
     def _backfill_post_pins(db: sqlite3.Connection) -> None:
@@ -343,35 +398,58 @@ class Database:
             ))
 
     def latest_version(self, post_id: str, *, completed_only: bool = False) -> sqlite3.Row | None:
-        query = "SELECT * FROM post_versions WHERE post_id=?"
-        params: list[object] = [post_id]
-        if completed_only:
-            query += " AND status='completed'"
-        query += " ORDER BY version_number DESC LIMIT 1"
         with self.connect() as db:
-            return db.execute(query, params).fetchone()
+            if completed_only:
+                pointed = db.execute(
+                    "SELECT v.* FROM posts p JOIN post_versions v ON v.version_id=p.latest_version_id "
+                    "WHERE p.post_id=? AND v.post_id=p.post_id AND v.status='completed'",
+                    (post_id,),
+                ).fetchone()
+                if pointed is not None:
+                    return pointed
+            query = "SELECT * FROM post_versions WHERE post_id=?"
+            if completed_only:
+                query += " AND status='completed'"
+            query += " ORDER BY version_number DESC LIMIT 1"
+            return db.execute(query, (post_id,)).fetchone()
 
     def begin_version(self, post: Post, version_number: int, local_path: str) -> int:
         with self.connect() as db:
-            db.execute(
-                "INSERT INTO post_versions(post_id,version_number,remote_updated_at,content_fingerprint,status,local_path) "
-                "VALUES(?,?,?,?,?,?) ON CONFLICT(post_id,content_fingerprint) DO UPDATE SET "
-                "status='downloading',last_error=NULL,local_path=excluded.local_path",
-                (post.post_id, version_number,
-                 post.updated_at.isoformat() if post.updated_at else None,
-                 post.content_fingerprint or "", "downloading", local_path),
-            )
             row = db.execute(
-                "SELECT version_id FROM post_versions WHERE post_id=? AND content_fingerprint=?",
-                (post.post_id, post.content_fingerprint or ""),
+                "SELECT version_id,status,content_fingerprint FROM post_versions "
+                "WHERE post_id=? AND version_number=?",
+                (post.post_id, version_number),
             ).fetchone()
-            return int(row["version_id"])
+            fingerprint = post.content_fingerprint or ""
+            remote_updated_at = post.updated_at.isoformat() if post.updated_at else None
+            if row is not None:
+                if row["status"] == PostStatus.COMPLETED.value:
+                    raise ValueError("已完成的歷史版本不可覆寫")
+                if str(row["content_fingerprint"]) != fingerprint:
+                    raise ValueError("重試版本的內容指紋不一致")
+                db.execute(
+                    "UPDATE post_versions SET remote_updated_at=?,status='downloading',"
+                    "last_error=NULL,local_path=? WHERE version_id=?",
+                    (remote_updated_at, local_path, row["version_id"]),
+                )
+                return int(row["version_id"])
+            cursor = db.execute(
+                "INSERT INTO post_versions(post_id,version_number,remote_updated_at,"
+                "content_fingerprint,status,local_path) VALUES(?,?,?,?,?,?)",
+                (post.post_id, version_number, remote_updated_at, fingerprint,
+                 "downloading", local_path),
+            )
+            return int(cursor.lastrowid)
 
-    def version_by_fingerprint(self, post_id: str, fingerprint: str) -> sqlite3.Row | None:
+    def retryable_version_by_fingerprint(
+        self, post_id: str, fingerprint: str, *, after_version: int = 0,
+    ) -> sqlite3.Row | None:
         with self.connect() as db:
             return db.execute(
-                "SELECT * FROM post_versions WHERE post_id=? AND content_fingerprint=?",
-                (post_id, fingerprint),
+                "SELECT * FROM post_versions WHERE post_id=? AND content_fingerprint=? "
+                "AND status!='completed' AND version_number>? "
+                "ORDER BY version_number DESC LIMIT 1",
+                (post_id, fingerprint, after_version),
             ).fetchone()
 
     def finish_version(
@@ -429,6 +507,14 @@ class Database:
 
     def latest_profile_version(self, creator_id: str) -> sqlite3.Row | None:
         with self.connect() as db:
+            pointed = db.execute(
+                "SELECT v.* FROM creators c JOIN creator_profile_versions v "
+                "ON v.profile_version_id=c.latest_profile_version_id "
+                "WHERE c.creator_id=? AND v.creator_id=c.creator_id AND v.status='completed'",
+                (creator_id,),
+            ).fetchone()
+            if pointed is not None:
+                return pointed
             return db.execute(
                 "SELECT * FROM creator_profile_versions WHERE creator_id=? "
                 "AND status='completed' ORDER BY version_number DESC LIMIT 1",
@@ -446,22 +532,14 @@ class Database:
                 "last_checked_at=excluded.last_checked_at",
                 (creator_id, name, f"https://www.fanbox.cc/@{creator_id}", now_iso()),
             )
-            db.execute(
+            cursor = db.execute(
                 "INSERT INTO creator_profile_versions(creator_id,version_number,captured_at,"
                 "content_fingerprint,status,local_path,json_path,cover_path,cover_sha256) "
-                "VALUES(?,?,?,?, 'completed',?,?,?,?) "
-                "ON CONFLICT(creator_id,content_fingerprint) DO UPDATE SET "
-                "captured_at=excluded.captured_at,status='completed',local_path=excluded.local_path,"
-                "json_path=excluded.json_path,cover_path=excluded.cover_path,"
-                "cover_sha256=excluded.cover_sha256,last_error=NULL",
+                "VALUES(?,?,?,?, 'completed',?,?,?,?)",
                 (creator_id, version_number, now_iso(), fingerprint, local_path, json_path,
                  cover_path, cover_sha256),
             )
-            row = db.execute(
-                "SELECT profile_version_id FROM creator_profile_versions "
-                "WHERE creator_id=? AND content_fingerprint=?", (creator_id, fingerprint),
-            ).fetchone()
-            version_id = int(row["profile_version_id"])
+            version_id = int(cursor.lastrowid)
             db.execute(
                 "UPDATE creators SET latest_profile_version_id=? WHERE creator_id=?",
                 (version_id, creator_id),
@@ -515,7 +593,12 @@ class Database:
                        COALESCE(s.is_supporting,0) AS is_supporting,
                        s.last_recent_check_at,s.backfill_completed,s.last_success_at,s.last_error,
                        COUNT(DISTINCT pv.profile_version_id) AS profile_version_count,
-                       MAX(pv.captured_at) AS latest_profile_captured_at,
+                       COALESCE(
+                           (SELECT pointed.captured_at FROM creator_profile_versions pointed
+                            WHERE pointed.profile_version_id=c.latest_profile_version_id
+                              AND pointed.creator_id=c.creator_id AND pointed.status='completed'),
+                           MAX(pv.captured_at)
+                       ) AS latest_profile_captured_at,
                        COUNT(DISTINCT p.post_id) AS post_count,
                        COUNT(DISTINCT CASE WHEN p.status='completed' THEN p.post_id END) AS completed_count
                 FROM creators c

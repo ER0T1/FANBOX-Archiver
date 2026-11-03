@@ -9,6 +9,7 @@ from fanbox_archiver.parser import fingerprint
 from fanbox_archiver.service import ArchiveService
 from fanbox_archiver.database import Database, SCHEMA_VERSION
 from fanbox_archiver.downloader import DownloadError, sha256_file
+from fanbox_archiver.reader import ArchiveReader
 
 
 def configured(tmp_path: Path) -> AppConfig:
@@ -51,8 +52,31 @@ def test_identical_content_does_not_create_another_version(tmp_path: Path):
     service = ArchiveService(configured(tmp_path))
     post = make_post("same")
     service.save(post)
+    captured_at = service.db.version_rows("42")[0]["captured_at"]
     service.save(make_post("same"))
-    assert [row["version_number"] for row in service.db.version_rows("42")] == [1]
+    rows = service.db.version_rows("42")
+    assert [row["version_number"] for row in rows] == [1]
+    assert rows[0]["captured_at"] == captured_at
+
+
+def test_post_a_b_a_creates_three_immutable_versions_and_reader_follows_pointer(tmp_path: Path):
+    service = ArchiveService(configured(tmp_path))
+    service.save(make_post("A"))
+    first = service.db.version_rows("42")[0]
+    first_captured_at = first["captured_at"]
+    service.save(make_post("B"))
+    service.save(make_post("A"))
+
+    rows = service.db.version_rows("42")
+    assert [row["version_number"] for row in rows] == [1, 2, 3]
+    assert [row["content_fingerprint"] for row in rows][0] == rows[2]["content_fingerprint"]
+    assert rows[0]["captured_at"] == first_captured_at
+    assert service.db.latest_version("42", completed_only=True)["version_number"] == 3
+
+    with service.db.connect() as db:
+        db.execute("UPDATE posts SET latest_version_id=? WHERE post_id='42'", (rows[0]["version_id"],))
+    assert service.db.latest_version("42", completed_only=True)["version_number"] == 1
+    assert ArchiveReader(configured(tmp_path)).list_posts()["items"][0]["latest_version"] == 1
 
 
 def test_manifest_detects_historical_tampering(tmp_path: Path):
@@ -126,6 +150,37 @@ def test_schema_migration_backs_up_existing_database_once(tmp_path: Path):
     first_mtime = backup.stat().st_mtime_ns
     Database(path)
     assert backup.stat().st_mtime_ns == first_mtime
+
+
+def test_schema_v9_removes_legacy_fingerprint_unique_constraint(tmp_path: Path):
+    path = tmp_path / "v8.db"
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+            CREATE TABLE creators(creator_id TEXT PRIMARY KEY,name TEXT NOT NULL,url TEXT,last_checked_at TEXT);
+            CREATE TABLE posts(post_id TEXT PRIMARY KEY,creator_id TEXT NOT NULL REFERENCES creators(creator_id),
+                title TEXT NOT NULL,published_at TEXT,updated_at TEXT,status TEXT NOT NULL,local_path TEXT,
+                content_fingerprint TEXT,is_pinned INTEGER NOT NULL DEFAULT 0,last_error TEXT,last_checked_at TEXT NOT NULL,
+                latest_version_id INTEGER);
+            CREATE TABLE post_versions(version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id TEXT NOT NULL REFERENCES posts(post_id) ON DELETE CASCADE,version_number INTEGER NOT NULL,
+                remote_updated_at TEXT,captured_at TEXT,content_fingerprint TEXT NOT NULL,status TEXT NOT NULL,
+                local_path TEXT NOT NULL,markdown_path TEXT,json_path TEXT,last_error TEXT,
+                UNIQUE(post_id,version_number),UNIQUE(post_id,content_fingerprint));
+            CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+            INSERT INTO creators VALUES('alice','Alice',NULL,NULL);
+            INSERT INTO posts VALUES('42','alice','A',NULL,NULL,'completed','out','same',0,NULL,'now',1);
+            INSERT INTO post_versions VALUES(1,'42',1,NULL,'first','same','completed','v1',NULL,NULL,NULL);
+            INSERT INTO schema_migrations VALUES(8,'now');
+        """)
+
+    migrated = Database(path)
+    with migrated.connect() as db:
+        db.execute(
+            "INSERT INTO post_versions(post_id,version_number,captured_at,content_fingerprint,status,local_path) "
+            "VALUES('42',2,'second','same','completed','v2')"
+        )
+        assert db.execute("SELECT COUNT(*) FROM post_versions").fetchone()[0] == 2
+        assert db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 9
 
 
 def test_partial_retry_finishes_same_version_before_switching_latest(tmp_path: Path, monkeypatch):

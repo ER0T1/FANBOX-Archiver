@@ -54,12 +54,39 @@ def test_fancard_is_saved_by_month_with_readable_metadata(tmp_path: Path):
 def test_fancard_unchanged_is_not_duplicated_and_change_creates_version(tmp_path: Path):
     archive = service(tmp_path)
     first_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg")
+    with archive.db.connect() as db:
+        first_captured_at = db.execute(
+            "SELECT captured_at FROM fancard_versions WHERE version_number=1"
+        ).fetchone()[0]
     same_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg")
     changed_status, changed = archive.save_fancard(payload("new password"), b"two", "image/jpeg")
     assert (first_status, same_status, changed_status) == ("new", "unchanged", "updated")
     assert changed.name == "v0002"
     with archive.db.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM fancard_versions").fetchone()[0] == 2
+        assert db.execute(
+            "SELECT captured_at FROM fancard_versions WHERE version_number=1"
+        ).fetchone()[0] == first_captured_at
+
+
+def test_fancard_a_b_a_creates_three_immutable_versions(tmp_path: Path):
+    archive = service(tmp_path)
+    archive.save_fancard(payload("A"), b"one", "image/jpeg")
+    with archive.db.connect() as db:
+        first_captured_at = db.execute(
+            "SELECT captured_at FROM fancard_versions WHERE version_number=1"
+        ).fetchone()[0]
+    archive.save_fancard(payload("B"), b"two", "image/jpeg")
+    archive.save_fancard(payload("A"), b"three", "image/jpeg")
+
+    with archive.db.connect() as db:
+        rows = db.execute(
+            "SELECT * FROM fancard_versions ORDER BY version_number"
+        ).fetchall()
+    assert [row["version_number"] for row in rows] == [1, 2, 3]
+    assert rows[0]["content_fingerprint"] == rows[2]["content_fingerprint"]
+    assert rows[0]["captured_at"] == first_captured_at
+    assert archive.db.latest_fancard_version("alice", "2026-10")["version_number"] == 3
 
 
 def test_fancard_without_custom_image_saves_metadata_and_stays_incremental(tmp_path: Path):

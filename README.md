@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.23-alpha（2026-11-02）**
+**內部測試版本：v1.3.24-alpha（2026-11-03）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.24-alpha 更新重點
+
+- 修正 Post、Creator Profile 與 Fan Card 將內容指紋誤當永久唯一鍵的問題；內容從 A 變成 B 再回到 A 時，現在會保留三個獨立且單調遞增的歷史版本。
+- 已完成的歷史版本不再因同指紋內容或一般重試被覆寫；只有尚未完成、且位於目前完成版本之後的同一版本可原地續跑。
+- 本機 Reader 與資料庫預設讀取會優先遵循 Post／Creator Profile 的 latest pointer，舊資料庫升級至 schema v9 時會先備份並移除錯誤的 fingerprint 唯一限制。
+- 本版先阻止新增版本歷史損壞；既有封存的版本／日期稽核、修復工具與 Asia/Taipei 顯示一致性仍列為後續 P0 工作，不會在升級時自動改寫使用者資料。
 
 ## v1.3.23-alpha 更新重點
 

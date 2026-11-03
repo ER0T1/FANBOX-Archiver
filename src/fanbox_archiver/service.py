@@ -63,9 +63,13 @@ class ArchiveService:
                     asset.status = AssetStatus.PENDING
 
         latest = self.db.latest_version(post.post_id, completed_only=True)
-        retry_version = self.db.version_by_fingerprint(post.post_id, post.content_fingerprint or "")
+        latest_number = int(latest["version_number"]) if latest else 0
+        retry_version = self.db.retryable_version_by_fingerprint(
+            post.post_id, post.content_fingerprint or "", after_version=latest_number,
+        )
+        newest = self.db.latest_version(post.post_id)
         version_number = (int(retry_version["version_number"]) if retry_version
-                          else (int(latest["version_number"]) + 1 if latest else 1))
+                          else (int(newest["version_number"]) + 1 if newest else 1))
         temp_dir, version_dir = self.storage.prepare_version(post, version_number)
         self.db.upsert_post(post, str(post_dir), PostStatus.DOWNLOADING)
         version_id = self.db.begin_version(post, version_number, str(version_dir))
@@ -263,12 +267,7 @@ class ArchiveService:
             self._update_profile_aliases(root, Path(str(latest["local_path"])))
             return status, Path(str(latest["local_path"]))
 
-        repairing = bool(
-            latest and str(latest["content_fingerprint"]) == profile.content_fingerprint
-        )
-        number = int(latest["version_number"]) if repairing else (
-            int(latest["version_number"]) + 1 if latest else 1
-        )
+        number = int(latest["version_number"]) + 1 if latest else 1
         root = self._profile_root(profile.creator_id)
         versions = confined_path(root, Path("versions"))
         final = confined_path(versions, Path(f"v{number:04d}"))

@@ -227,7 +227,8 @@ class IndexBuilder:
         rendered = reused = 0
         warnings: list[str] = []
         state: dict[str, str] = {}
-        completed_pages: list[tuple[int, str]] = []
+        completed_pages: dict[int, str] = {}
+        latest = self.db.latest_profile_version(creator_id)
         safe_creator = safe_filename(creator_id, fallback="unknown")
         for version in versions:
             number = int(version["version_number"])
@@ -258,9 +259,11 @@ class IndexBuilder:
                 rendered += 1
             state[relative] = fingerprint
             if version["status"] == "completed":
-                completed_pages.append((number, relative))
-        if completed_pages:
-            _, latest_relative = max(completed_pages)
+                completed_pages[int(version["profile_version_id"])] = relative
+        latest_relative = (
+            completed_pages.get(int(latest["profile_version_id"])) if latest is not None else None
+        )
+        if latest_relative:
             latest_out = f"creators/{safe_creator}/profile/latest.html"
             latest_destination = confined_path(staging, Path(latest_out))
             latest_destination.parent.mkdir(parents=True, exist_ok=True)
@@ -290,7 +293,9 @@ class IndexBuilder:
         rendered = reused = 0
         warnings: list[str] = []
         state: dict[str, str] = {}
-        completed_pages: list[tuple[int, str]] = []
+        completed_pages: dict[int, str] = {}
+        latest = self.db.latest_version(post_id, completed_only=True)
+        latest_id = int(latest["version_id"]) if latest is not None else None
         for version in versions:
             number = int(version["version_number"])
             relative = f"posts/{post_id}/v{number:04d}.html"
@@ -309,11 +314,13 @@ class IndexBuilder:
                 warnings.append(f"Post {post_id} v{number:04d} 缺少 post.json")
                 continue
             post = Post.model_validate_json(source_json.read_text(encoding="utf-8"))
-            if not item["tags"]:
+            is_latest = int(version["version_id"]) == latest_id
+            if is_latest:
+                item["title"] = post.title
                 item["tags"] = post.tags
                 item["fee_required"] = post.fee_required
                 item["url"] = post.url
-            if post.cover and post.cover.local_path:
+            if is_latest and post.cover and post.cover.local_path:
                 cover = confined_path(Path(str(version["local_path"])), Path(post.cover.local_path))
                 if cover.is_file():
                     item["cover"] = self._relative_url(self.root / "index.html", cover)
@@ -328,9 +335,9 @@ class IndexBuilder:
                 rendered += 1
             state[relative] = fingerprint
             if version["status"] == "completed":
-                completed_pages.append((number, relative))
-        if completed_pages:
-            _, latest_relative = max(completed_pages)
+                completed_pages[int(version["version_id"])] = relative
+        latest_relative = completed_pages.get(latest_id) if latest_id is not None else None
+        if latest_relative:
             latest_out = f"posts/{post_id}/latest.html"
             latest_destination = confined_path(staging, Path(latest_out))
             latest_destination.parent.mkdir(parents=True, exist_ok=True)

@@ -60,8 +60,13 @@ class ArchiveReader:
                 SELECT p.*,c.name AS creator_name,
                        (SELECT COUNT(*) FROM post_versions v
                         WHERE v.post_id=p.post_id) AS version_count,
-                       (SELECT MAX(v.version_number) FROM post_versions v
-                        WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                       COALESCE(
+                         (SELECT pointed.version_number FROM post_versions pointed
+                          WHERE pointed.version_id=p.latest_version_id
+                            AND pointed.post_id=p.post_id AND pointed.status='completed'),
+                         (SELECT MAX(v.version_number) FROM post_versions v
+                          WHERE v.post_id=p.post_id AND v.status='completed')
+                       ) AS latest_version
                 FROM posts p
                 JOIN creators c ON c.creator_id=p.creator_id
                 {where}
@@ -81,8 +86,13 @@ class ArchiveReader:
                     SELECT p.*,c.name AS creator_name,
                            (SELECT COUNT(*) FROM post_versions v
                             WHERE v.post_id=p.post_id) AS version_count,
-                           (SELECT MAX(v.version_number) FROM post_versions v
-                            WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                           COALESCE(
+                             (SELECT pointed.version_number FROM post_versions pointed
+                              WHERE pointed.version_id=p.latest_version_id
+                                AND pointed.post_id=p.post_id AND pointed.status='completed'),
+                             (SELECT MAX(v.version_number) FROM post_versions v
+                              WHERE v.post_id=p.post_id AND v.status='completed')
+                           ) AS latest_version
                     FROM posts p
                     JOIN creators c ON c.creator_id=p.creator_id
                     {facet_where}
@@ -115,8 +125,13 @@ class ArchiveReader:
                         SELECT p.*,c.name AS creator_name,
                                (SELECT COUNT(*) FROM post_versions v
                                 WHERE v.post_id=p.post_id) AS version_count,
-                               (SELECT MAX(v.version_number) FROM post_versions v
-                                WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                               COALESCE(
+                                 (SELECT pointed.version_number FROM post_versions pointed
+                                  WHERE pointed.version_id=p.latest_version_id
+                                    AND pointed.post_id=p.post_id AND pointed.status='completed'),
+                                 (SELECT MAX(v.version_number) FROM post_versions v
+                                  WHERE v.post_id=p.post_id AND v.status='completed')
+                               ) AS latest_version
                         FROM posts p
                         JOIN creators c ON c.creator_id=p.creator_id
                         {filtered_where}
@@ -153,8 +168,13 @@ class ArchiveReader:
                 f"""
                 SELECT p.post_id,p.creator_id,c.name AS creator_name,p.title,
                        p.published_at,p.is_pinned,
-                       (SELECT MAX(v.version_number) FROM post_versions v
-                        WHERE v.post_id=p.post_id AND v.status='completed') AS latest_version
+                       COALESCE(
+                         (SELECT pointed.version_number FROM post_versions pointed
+                          WHERE pointed.version_id=p.latest_version_id
+                            AND pointed.post_id=p.post_id AND pointed.status='completed'),
+                         (SELECT MAX(v.version_number) FROM post_versions v
+                          WHERE v.post_id=p.post_id AND v.status='completed')
+                       ) AS latest_version
                 FROM posts p
                 JOIN creators c ON c.creator_id=p.creator_id
                 {where}
@@ -549,8 +569,7 @@ class ArchiveReader:
     ) -> tuple[Any, CreatorProfile]:
         rows = self.db.profile_versions(creator_id)
         if version is None:
-            completed = [row for row in rows if row["status"] == "completed"]
-            row = completed[-1] if completed else None
+            row = self.db.latest_profile_version(creator_id)
         else:
             row = next(
                 (item for item in rows if int(item["version_number"]) == version), None
