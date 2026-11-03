@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.27-alpha（2026-11-03）**
+**內部測試版本：v1.3.28-alpha（2026-11-03）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,13 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.28-alpha 更新重點
+
+- `audit` 新增 `version_rebuild`：當 Creator Profile 或 Fan Card 的磁碟版本目錄連續、所有 manifest 檔案 SHA-256 一致、捕捉時間嚴格遞增，且既有資料列都指向其中一個版本並具相同 fingerprint 時，可依 manifest 確定性重建版本資料列（例如 A→B→A 被壓成兩列的歷史會恢復為 v0001／v0002／v0003）。
+- `repair-copy` 會先保存修復前資料庫，再在副本內升級至目前 schema（移除舊版 fingerprint 唯一限制），並分回合套用修復直到沒有可自動處理的項目；原始封存仍全程唯讀。重建只重新編號既有資料列並補回缺少的版本，不改寫任何檔案或捕捉時間。
+- v1.3.25-alpha 以前 manifest 與資料庫分開取時造成的 `captured_at` 差距（資料庫較晚且不超過 60 秒）改列為資訊等級的 `manifest_captured_at_drift`，不再阻擋 latest pointer／alias 的確定性修復；`audit` 只在有需要處理的問題時回傳非零結束碼。
+- 投稿版本的重建不在本版範圍內，仍維持人工判讀。
 
 ## v1.3.27-alpha 更新重點
 

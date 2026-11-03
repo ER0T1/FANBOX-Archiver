@@ -380,16 +380,20 @@ def audit(
     if json_output:
         console.print_json(data=report.model_dump(mode="json"))
     else:
+        info_count = report.finding_count - report.blocking_count
         console.print(
-            f"唯讀稽核完成：{report.finding_count} 個問題，"
-            f"{report.automatic_count} 個可產生確定性修復預覽。"
+            f"唯讀稽核完成：{report.blocking_count} 個問題，"
+            f"{report.automatic_count} 個可產生確定性修復預覽；"
+            f"另有 {info_count} 項不需處理的資訊。"
         )
         for finding in report.findings:
+            if finding.severity == "info":
+                continue
             console.print(
                 f"[red]{finding.code}[/red] {finding.subject_type}/{finding.subject_id} "
                 f"{finding.issue} {finding.evidence}"
             )
-    if report.findings:
+    if report.blocking_count:
         raise typer.Exit(1)
 
 
