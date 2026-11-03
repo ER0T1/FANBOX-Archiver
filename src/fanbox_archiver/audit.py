@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
+import uuid
 from collections import defaultdict
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .config import AppConfig
+from .config import AppConfig, StorageConfig
+from .indexer import IndexBuilder
+from .storage import BackupStorage
 
 
 Severity = Literal["error", "warning"]
@@ -48,6 +54,12 @@ class AuditReport(BaseModel):
     automatic_count: int
     findings: list[AuditFinding]
     repair_plan: list[AuditRepairAction]
+
+
+class RepairCopyResult(BaseModel):
+    applied_actions: int
+    remaining_findings: int
+    database_backup: str
 
 
 class ArchiveAuditor:
@@ -104,7 +116,7 @@ class ArchiveAuditor:
 
         uri = self.database.as_uri() + "?mode=ro"
         try:
-            with sqlite3.connect(uri, uri=True) as db:
+            with closing(sqlite3.connect(uri, uri=True)) as db:
                 db.row_factory = sqlite3.Row
                 db.execute("PRAGMA query_only = ON")
                 schema_version = self._schema_version(db)
@@ -561,3 +573,160 @@ class ArchiveAuditor:
 
     def _add(self, **values: object) -> None:
         self.findings.append(AuditFinding.model_validate(values))
+
+
+class ArchiveRepairer:
+    """Apply deterministic audit repairs to a new archive copy only."""
+
+    _PATH_COLUMNS = {
+        "creators": ("icon_path",),
+        "posts": ("local_path",),
+        "assets": ("local_path",),
+        "post_versions": ("local_path", "markdown_path", "json_path"),
+        "creator_profile_versions": ("local_path", "json_path", "cover_path"),
+        "fancard_versions": ("local_path", "image_path"),
+    }
+
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.root = config.storage.output_dir.resolve()
+        self.database = config.storage.database.resolve()
+
+    def repair_copy(self, destination: Path) -> RepairCopyResult:
+        destination = destination.resolve()
+        try:
+            database_relative = self.database.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError("資料庫必須位於封存根目錄內，才能建立可修復副本。") from exc
+        if destination.exists():
+            raise ValueError("修復副本目的地已存在。")
+        try:
+            destination.relative_to(self.root)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("修復副本目的地不可位於原始封存內。")
+        if not self.root.is_dir() or not self.database.is_file():
+            raise ValueError("原始封存或資料庫不存在。")
+        if not ArchiveAuditor(self.config).run().repair_plan:
+            raise ValueError("稽核沒有可確定性套用的修復，不建立副本。")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staging = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.repair.tmp")
+        try:
+            shutil.copytree(self.root, staging, copy_function=shutil.copy2)
+            copied_database = staging / database_relative
+            self._snapshot_database(copied_database)
+            self._remap_paths(copied_database, self.root, staging)
+            copied_config = self.config.model_copy(deep=True)
+            copied_config.storage = StorageConfig(output_dir=staging, database=copied_database)
+
+            report = ArchiveAuditor(copied_config).run()
+            actions = report.repair_plan
+            database_backup = copied_database.with_name(f"{copied_database.name}.pre-repair.bak")
+            shutil.copy2(copied_database, database_backup)
+            self._apply(copied_config, actions)
+            indexer = IndexBuilder(copied_config)
+            indexer.build(force=True)
+            index_issues = indexer.check()
+            if index_issues:
+                raise RuntimeError(f"修復副本的靜態索引驗證失敗：{len(index_issues)} 項。")
+            remaining = ArchiveAuditor(copied_config).run()
+            if any(item.repairability == "automatic" for item in remaining.findings):
+                raise RuntimeError("確定性修復後仍存在可自動修復問題。")
+
+            self._remap_paths(copied_database, staging, destination)
+            self._remap_paths(database_backup, staging, destination)
+            BackupStorage._replace_with_retry(staging, destination)
+            return RepairCopyResult(
+                applied_actions=len(actions),
+                remaining_findings=remaining.finding_count,
+                database_backup=database_backup.relative_to(staging).as_posix(),
+            )
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    def _snapshot_database(self, copied_database: Path) -> None:
+        copied_database.unlink(missing_ok=True)
+        copied_database.with_name(f"{copied_database.name}-wal").unlink(missing_ok=True)
+        copied_database.with_name(f"{copied_database.name}-shm").unlink(missing_ok=True)
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as source:
+            with closing(sqlite3.connect(copied_database)) as target:
+                source.backup(target)
+
+    def _remap_paths(self, database: Path, old_root: Path, new_root: Path) -> None:
+        with closing(sqlite3.connect(database)) as db:
+            with db:
+                for table, columns in self._PATH_COLUMNS.items():
+                    if not ArchiveAuditor._table_exists(db, table):
+                        continue
+                    available = {str(row[1]) for row in db.execute(f"PRAGMA table_info({table})")}
+                    for column in columns:
+                        if column not in available:
+                            continue
+                        for rowid, value in db.execute(
+                            f"SELECT rowid,{column} FROM {table} WHERE {column} IS NOT NULL"
+                        ):
+                            path = Path(str(value))
+                            if not path.is_absolute():
+                                continue
+                            try:
+                                relative = path.resolve().relative_to(old_root)
+                            except ValueError:
+                                continue
+                            db.execute(
+                                f"UPDATE {table} SET {column}=? WHERE rowid=?",
+                                (str(new_root / relative), rowid),
+                            )
+
+    def _apply(self, config: AppConfig, actions: list[AuditRepairAction]) -> None:
+        with closing(sqlite3.connect(config.storage.database)) as db, db:
+            db.row_factory = sqlite3.Row
+            for action in actions:
+                row = self._canonical_row(db, action)
+                if row is None or not ArchiveAuditor(config)._manifest_is_consistent(row):
+                    raise RuntimeError(f"修復前 canonical 證據已改變：{action.action_id}")
+                if action.finding_code == "latest_pointer":
+                    if action.subject_type == "post":
+                        db.execute(
+                            "UPDATE posts SET latest_version_id=? WHERE post_id=?",
+                            (row["version_id"], action.subject_id),
+                        )
+                    elif action.subject_type == "profile":
+                        db.execute(
+                            "UPDATE creators SET latest_profile_version_id=? WHERE creator_id=?",
+                            (row["profile_version_id"], action.subject_id),
+                        )
+                elif action.finding_code == "latest_alias":
+                    alias_name = {
+                        "post": "post.json", "profile": "profile.json", "fancard": "fancard.json",
+                    }[action.subject_type]
+                    source = Path(str(row["local_path"])) / alias_name
+                    target = Path(str(row["local_path"])).parent.parent / alias_name
+                    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+                    shutil.copy2(source, temporary)
+                    os.replace(temporary, target)
+
+    @staticmethod
+    def _canonical_row(
+        db: sqlite3.Connection, action: AuditRepairAction,
+    ) -> sqlite3.Row | None:
+        if action.subject_type == "post":
+            return db.execute(
+                "SELECT * FROM post_versions WHERE post_id=? AND status='completed' "
+                "ORDER BY version_number DESC LIMIT 1", (action.subject_id,),
+            ).fetchone()
+        if action.subject_type == "profile":
+            return db.execute(
+                "SELECT * FROM creator_profile_versions WHERE creator_id=? AND status='completed' "
+                "ORDER BY version_number DESC LIMIT 1", (action.subject_id,),
+            ).fetchone()
+        if action.subject_type == "fancard":
+            creator_id, target_month = action.subject_id.rsplit("/", 1)
+            return db.execute(
+                "SELECT * FROM fancard_versions WHERE creator_id=? AND target_month=? "
+                "AND status='completed' ORDER BY version_number DESC LIMIT 1",
+                (creator_id, target_month),
+            ).fetchone()
+        return None

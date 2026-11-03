@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import sqlite3
 import subprocess
 import sys
 import webbrowser
@@ -32,7 +33,7 @@ from .service import ArchiveService
 from .application import AuthenticationService, BackupEvent, BackupRequest, BackupUseCase
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
-from .audit import ArchiveAuditor
+from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 
 
@@ -398,6 +399,25 @@ def audit(
             )
     if report.findings:
         raise typer.Exit(1)
+
+
+@app.command("repair-copy")
+def repair_copy(
+    output: Annotated[Path, typer.Option("--output", help="建立修復後封存副本的全新目錄")],
+    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+) -> None:
+    """只在新副本套用 audit 已確認的 pointer／alias 修復。"""
+    try:
+        settings = AppConfig.load(config)
+        result = ArchiveRepairer(settings).repair_copy(output)
+    except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+        console.print(f"[red]建立修復副本失敗：[/red]{exc}")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]修復副本已建立。[/green]套用 {result.applied_actions} 項確定性修復，"
+        f"仍有 {result.remaining_findings} 項需人工判讀。"
+    )
+    console.print(f"副本內資料庫備份：{result.database_backup}")
 
 
 @app.command("index")

@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.25-alpha（2026-11-03）**
+**內部測試版本：v1.3.26-alpha（2026-11-03）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,14 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.26-alpha 更新重點
+
+- 新增 `fanbox-archiver repair-copy --output <全新目錄>`：以 SQLite backup API 與封存 staging 建立一致副本，只在副本套用 audit 已確認的 latest pointer／alias 修復並重建、檢查靜態索引，原始封存保持唯讀。
+- 目的地必須不存在且位於原始封存之外；失敗時清除未發布的 staging，成功後才原子發布副本，不覆寫既有目錄。
+- 副本內的絕對路徑會重定位至新封存根目錄，並保留 `backup.db.pre-repair.bak` 修復前資料庫；備份路徑同樣指向最終副本，可供還原與差異比對。
+- 修復前會重新驗證 canonical manifest metadata 與所有列出檔案的 SHA-256；無完整證據、時間倒退或不可恢復歷史仍只列入報告，不自動猜測或改寫。
+- 明確關閉唯讀稽核與修復使用的 SQLite 連線，避免 Windows 檔案鎖阻止 staging 副本發布。
 
 ## v1.3.25-alpha 更新重點
 
@@ -352,6 +360,7 @@ fanbox-archiver creators --json
 fanbox-archiver creators
 fanbox-archiver audit
 fanbox-archiver audit --json
+fanbox-archiver repair-copy --output FANBOX-repaired
 fanbox-archiver verify
 fanbox-archiver retry
 fanbox-archiver status
@@ -361,6 +370,8 @@ fanbox-archiver versions 123456
 `backup` 是唯一下載入口；不帶 selector 時會輪替處理支援中創作者、保存 Profile 與 Fan Card，並持續保存歷史回補游標。指定 `--creator` 時預設備份投稿，可用 `--profile`、`--fancard` 加入對應資料；指定 `--post` 時只處理明列投稿。`--creator` 與 `--post` 互斥。已完成且未更新的投稿不占 `sync.max_posts_per_run` 額度。`--dry-run` 只查詢並顯示計畫，不寫入封存內容、同步狀態或執行紀錄。
 
 `audit` 是版本與時間契約的唯讀稽核，不會像修復工具一樣修改資料；發現問題時以結束碼 `1` 回報。`--json` 適合保存或比較結構化報告，其中的 `repair_plan` 仍是 dry-run 預覽，不會自動套用。現有 `verify` 則保留資源完整性驗證與重試狀態整合語意，兩者用途不同。
+
+`repair-copy` 不會修改原始封存，只接受尚不存在且位於原始封存外的 `--output` 目錄。它建立完整副本與修復前資料庫備份，並只套用 `audit` 已標示為 automatic 的 latest pointer／alias 動作；沒有 automatic 動作時不建立副本，其餘問題仍需人工判讀。確認副本內容前，不要用它取代原始封存。
 
 舊指令遷移：`download <post>` 改用 `backup --post <post>`；`sync --creator <creator>` 改用 `backup --creator <creator>`；`sync --supporting` 改用不帶 selector 的 `backup`。
 

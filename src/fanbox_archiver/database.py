@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import shutil
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
@@ -166,7 +166,7 @@ class Database:
     def _backup_before_migration(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
             return
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db:
             exists = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
             ).fetchone()

@@ -1,11 +1,12 @@
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 import fanbox_archiver.cli as cli
-from fanbox_archiver.audit import ArchiveAuditor
+from fanbox_archiver.audit import ArchiveAuditor, ArchiveRepairer
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.models import ContentBlock, CreatorProfile, Post
 from fanbox_archiver.parser import fingerprint
@@ -167,3 +168,70 @@ def test_audit_missing_database_is_read_only_and_cli_json_has_no_absolute_path(t
     assert payload["findings"][0]["code"] == "database_missing"
     assert not archive.exists()
     assert str(tmp_path) not in result.output
+
+
+def test_repair_copy_fixes_deterministic_pointer_and_alias_without_touching_source(tmp_path: Path):
+    config = configured(tmp_path)
+    service = ArchiveService(config)
+    service.save(make_post("A"))
+    service.save(make_post("B"))
+    rows = service.db.version_rows("42")
+    with service.db.connect() as db:
+        db.execute(
+            "UPDATE posts SET latest_version_id=? WHERE post_id='42'",
+            (rows[0]["version_id"],),
+        )
+    post_root = Path(str(service.db.post_row("42")["local_path"]))
+    (post_root / "post.json").unlink()
+    (post_root / "post.json").write_bytes(
+        (Path(str(rows[0]["local_path"])) / "post.json").read_bytes()
+    )
+    before_database = config.storage.database.read_bytes()
+    before_database_mtime = config.storage.database.stat().st_mtime_ns
+    before_alias = (post_root / "post.json").read_bytes()
+    destination = tmp_path / "repaired"
+
+    result = ArchiveRepairer(config).repair_copy(destination)
+
+    assert result.applied_actions == 2
+    assert result.remaining_findings == 0
+    assert config.storage.database.read_bytes() == before_database
+    assert config.storage.database.stat().st_mtime_ns == before_database_mtime
+    assert (post_root / "post.json").read_bytes() == before_alias
+    assert (destination / result.database_backup).is_file()
+    with sqlite3.connect(destination / result.database_backup) as backup:
+        assert backup.execute(
+            "SELECT latest_version_id FROM posts WHERE post_id='42'"
+        ).fetchone()[0] == rows[0]["version_id"]
+        assert Path(backup.execute(
+            "SELECT local_path FROM post_versions ORDER BY version_number DESC LIMIT 1"
+        ).fetchone()[0]).is_relative_to(destination)
+    copied = AppConfig(storage=StorageConfig(
+        output_dir=destination, database=destination / "backup.db",
+    ))
+    copied_service = ArchiveService(copied)
+    copied_rows = copied_service.db.version_rows("42")
+    assert copied_service.db.post_row("42")["latest_version_id"] == copied_rows[-1]["version_id"]
+    copied_root = Path(str(copied_service.db.post_row("42")["local_path"]))
+    assert copied_root.is_relative_to(destination)
+    assert (copied_root / "post.json").read_bytes() == (
+        Path(str(copied_rows[-1]["local_path"])) / "post.json"
+    ).read_bytes()
+    assert ArchiveAuditor(copied).run().findings == []
+
+
+def test_repair_copy_rejects_existing_or_nested_destination(tmp_path: Path):
+    config = configured(tmp_path)
+    ArchiveService(config)
+    existing = tmp_path / "existing"
+    existing.mkdir()
+
+    destinations = (existing, config.storage.output_dir / "nested", tmp_path / "no-repairs")
+    for destination in destinations:
+        try:
+            ArchiveRepairer(config).repair_copy(destination)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unsafe repair destination should be rejected")
+    assert not destinations[-1].exists()
