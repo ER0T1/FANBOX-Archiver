@@ -24,7 +24,9 @@ from .application import (
 from .archive_lock import ArchiveLock
 from .database import Database
 from .schedule import describe, upcoming
-from .timestamps import TAIPEI
+from .timestamps import (
+    COMMON_TIMEZONES, display_zone, resolve_timezone, set_display_timezone, timezone_names,
+)
 from .windows_task import DESKTOP_EXE_ENV, sync_background_schedule
 from .client import FanboxClient
 from .reader import ArchiveReader, ReaderNotFound
@@ -117,6 +119,11 @@ class ScheduleConfigPatch(BaseModel):
     power: Literal["no_wake_battery_ok", "no_wake_ac_only", "wake"] | None = None
 
 
+class DisplayConfigPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    timezone: str | None = Field(None, max_length=64)
+
+
 class LoggingConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     level: str | None = None
@@ -130,6 +137,7 @@ class ConfigPatch(BaseModel):
     sync: SyncConfigPatch | None = None
     backup_defaults: BackupDefaultsConfigPatch | None = None
     schedule: ScheduleConfigPatch | None = None
+    display: DisplayConfigPatch | None = None
     markdown: MarkdownConfigPatch | None = None
     logging: LoggingConfigPatch | None = None
 
@@ -141,6 +149,7 @@ class LoginBody(BaseModel):
 def create_app(
     config: AppConfig, *, config_path: Path | None = None, run_scheduler: bool = False,
 ) -> FastAPI:
+    set_display_timezone(config.display.timezone)
     reader = ArchiveReader(config)
     # A real server owns its archive so the background scheduled backup never writes alongside it.
     jobs = BackupJobManager(
@@ -153,6 +162,12 @@ def create_app(
     home_html = (assets / "index.html").read_text(encoding="utf-8").replace(
         "__FANBOX_SESSION_TOKEN__", session_token
     )
+
+    def display_info() -> dict:
+        zone = display_zone()
+        system = zone if zone.setting == "system" else resolve_timezone("system")
+        return {"setting": zone.setting, "timezone": zone.name, "notice": zone.notice,
+                "system_timezone": system.name}
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Only a real server runs the background schedule; test clients never start it.
@@ -196,7 +211,8 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     async def home():
-        return HTMLResponse(home_html)
+        # The effective zone is read per request so a saved change applies on reload.
+        return HTMLResponse(home_html.replace("__FANBOX_TIMEZONE__", display_zone().name))
 
     @app.get("/api/health")
     async def health():
@@ -223,6 +239,8 @@ def create_app(
             },
             "config_path": str(app.state.config_path) if app.state.config_path else None,
             "writable": app.state.config_path is not None,
+            "display": display_info(),
+            "timezones": {"common": list(COMMON_TIMEZONES), "all": list(timezone_names())},
         }
 
     def remember_auth(state: str) -> None:
@@ -305,18 +323,23 @@ def create_app(
             updated = app.state.config.with_editable_patch(patch)
             if updated.schedule.enabled and updated.schedule.start_date is None:
                 # N-day / N-week cycles count from the day the schedule is switched on.
-                patch["schedule"]["start_date"] = datetime.now(TAIPEI).date()
+                patch["schedule"]["start_date"] = datetime.now(display_zone().tz).date()
                 updated = app.state.config.with_editable_patch(patch)
             AppConfig.save_editable(app.state.config_path, updated, patch)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         schedule_changed = updated.schedule != app.state.config.schedule
+        timezone_changed = updated.display != app.state.config.display
         app.state.config = updated
         app.state.jobs.config = updated
-        if schedule_changed:
+        if timezone_changed:
+            set_display_timezone(updated.display.timezone)
+        if schedule_changed or timezone_changed:
+            # Schedule times are read in the display zone: count from now so a
+            # reinterpretation never re-runs or "misses" an occurrence.
             await run_in_threadpool(app.state.scheduler.reset)
             await run_in_threadpool(sync_background)
-        return {"editable": updated.editable_dict(), "saved": True}
+        return {"editable": updated.editable_dict(), "display": display_info(), "saved": True}
 
     def normalize_schedule_patch(values: dict) -> dict:
         if "creators" in values:
@@ -338,7 +361,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if schedule.start_date is None:
-            schedule.start_date = datetime.now(TAIPEI).date()
+            schedule.start_date = datetime.now(display_zone().tz).date()
         runs = upcoming(schedule, datetime.now(UTC), 3)
         return {"summary": describe(schedule), "next_runs": [item.isoformat() for item in runs]}
 

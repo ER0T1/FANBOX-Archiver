@@ -31,6 +31,8 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory, $WorkDirectory, $Spe
     --paths (Join-Path $ProjectRoot "src") `
     --collect-all "fanbox_archiver" `
     --collect-submodules "uvicorn" `
+    --collect-data "tzdata" `
+    --collect-submodules "tzlocal" `
     --distpath $OutputDirectory `
     --workpath $WorkDirectory `
     --specpath $SpecDirectory `

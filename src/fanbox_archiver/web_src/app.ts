@@ -12,6 +12,7 @@ namespace FanboxUI {
     const search: HTMLInputElement = searchElement;
     const nav: HTMLElement = navElement;
     const sessionToken = tokenMeta.content;
+    setDisplayTimeZone(document.querySelector<HTMLMetaElement>('meta[name="fanbox-timezone"]')?.content);
     const state = createInitialState();
     let jobTimer: number | undefined;
     let searchTimer: number | undefined;
@@ -439,6 +440,7 @@ namespace FanboxUI {
           getSettings(), getJobs(), getAuthStatus(sessionToken), getScheduleStatus(), getCreators(),
         ]);
         updateActiveJob(jobData);
+        setDisplayTimeZone(data.display.timezone);
         app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
           patch => saveSettingsForm(patch),
           () => void loadSettings("", false),

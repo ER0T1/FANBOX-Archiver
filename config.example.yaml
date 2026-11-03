@@ -41,7 +41,8 @@ schedule:
   start_date: null
   creators: []
   power: no_wake_battery_ok
-  timezone: Asia/Taipei
+display:
+  timezone: system
 logging:
   level: INFO
   write_to_file: true

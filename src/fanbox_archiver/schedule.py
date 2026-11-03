@@ -1,17 +1,17 @@
 """Pure occurrence arithmetic for the automatic backup schedule.
 
-Every occurrence is a wall-clock time in Asia/Taipei, which has no DST, so each
-day has exactly one instant for a given HH:MM. Monthly schedules on a day the
-month does not have (29–31) run on that month's last day.
+Every occurrence is a wall-clock time in the display timezone (the global
+timezone setting). Monthly schedules on a day the month does not have (29–31)
+run on that month's last day. DST transitions get no special handling.
 """
 
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 
 from .config import ScheduleConfig
-from .timestamps import TAIPEI
+from .timestamps import display_zone
 
 _WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # Occurrences are at most a month apart, so a few hundred steps cover any search.
@@ -23,8 +23,12 @@ def _clock(schedule: ScheduleConfig) -> time:
     return time(hour, minute)
 
 
-def _start(schedule: ScheduleConfig, reference: datetime) -> date:
-    return schedule.start_date or reference.astimezone(TAIPEI).date()
+def _zone(zone: tzinfo | None) -> tzinfo:
+    return zone or display_zone().tz
+
+
+def _start(schedule: ScheduleConfig, reference: datetime, zone: tzinfo) -> date:
+    return schedule.start_date or reference.astimezone(zone).date()
 
 
 def _month_day(year: int, month: int, wanted: int) -> date:
@@ -79,60 +83,66 @@ def _last_day_on_or_before(schedule: ScheduleConfig, start: date, day: date) -> 
     return candidate if candidate >= start else None
 
 
-def next_run(schedule: ScheduleConfig, after: datetime) -> datetime:
+def next_run(schedule: ScheduleConfig, after: datetime, zone: tzinfo | None = None) -> datetime:
     """The first occurrence strictly after ``after`` (an aware datetime)."""
-    start = _start(schedule, after)
+    zone = _zone(zone)
+    start = _start(schedule, after, zone)
     clock = _clock(schedule)
-    day = after.astimezone(TAIPEI).date()
+    day = after.astimezone(zone).date()
     for _ in range(_MAX_STEPS):
         day = _first_day_on_or_after(schedule, start, day)
-        occurrence = datetime.combine(day, clock, TAIPEI)
+        occurrence = datetime.combine(day, clock, zone)
         if occurrence > after:
             return occurrence
         day += timedelta(days=1)
     raise RuntimeError("排程無法計算下一次執行時間")
 
 
-def latest_due(schedule: ScheduleConfig, now: datetime) -> datetime | None:
+def latest_due(schedule: ScheduleConfig, now: datetime, zone: tzinfo | None = None) -> datetime | None:
     """The most recent occurrence at or before ``now``, or None before the first one."""
-    start = _start(schedule, now)
+    zone = _zone(zone)
+    start = _start(schedule, now, zone)
     clock = _clock(schedule)
-    day = now.astimezone(TAIPEI).date()
+    day = now.astimezone(zone).date()
     for _ in range(_MAX_STEPS):
         found = _last_day_on_or_before(schedule, start, day)
         if found is None:
             return None
-        occurrence = datetime.combine(found, clock, TAIPEI)
+        occurrence = datetime.combine(found, clock, zone)
         if occurrence <= now:
             return occurrence
         day = found - timedelta(days=1)
     return None
 
 
-def upcoming(schedule: ScheduleConfig, after: datetime, count: int = 3) -> list[datetime]:
+def upcoming(
+    schedule: ScheduleConfig, after: datetime, count: int = 3, zone: tzinfo | None = None,
+) -> list[datetime]:
     runs: list[datetime] = []
     cursor = after
     for _ in range(count):
-        cursor = next_run(schedule, cursor)
+        cursor = next_run(schedule, cursor, zone)
         runs.append(cursor)
     return runs
 
 
-def count_between(schedule: ScheduleConfig, after: datetime, until: datetime, limit: int = 100) -> int:
+def count_between(
+    schedule: ScheduleConfig, after: datetime, until: datetime, limit: int = 100, zone: tzinfo | None = None,
+) -> int:
     """Occurrences in (after, until], capped at ``limit``."""
     count = 0
     cursor = after
     while count < limit:
-        cursor = next_run(schedule, cursor)
+        cursor = next_run(schedule, cursor, zone)
         if cursor > until:
             break
         count += 1
     return count
 
 
-def describe(schedule: ScheduleConfig) -> str:
+def describe(schedule: ScheduleConfig, zone_name: str | None = None) -> str:
     """Human-readable summary, e.g. 每 2 週的週三 03:00（Asia/Taipei）."""
-    at = f"{schedule.time}（Asia/Taipei）"
+    at = f"{schedule.time}（{zone_name or display_zone().name}）"
     if schedule.frequency == "daily":
         period = "每天" if schedule.interval == 1 else f"每 {schedule.interval} 天"
         return f"{period} {at}"

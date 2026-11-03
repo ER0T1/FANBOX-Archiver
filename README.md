@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.33-alpha（2026-11-03）**
+**內部測試版本：v1.3.34-alpha（2026-11-04）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,15 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.34-alpha 更新重點
+
+- 新增「設定 → 輸出與紀錄 → 時區」：預設「電腦系統」（顯示目前解析出的時區，例如 Asia/Taipei），也可改選常用時區或以「其他時區…」搜尋完整的 IANA 時區清單；設定寫入 `config.yaml` 的 `display.timezone`，無效時區會被拒絕，工作執行期間與其他設定一起鎖定。
+- 此時區同時套用到 GUI、CLI 輸出、Markdown front matter、新匯出的靜態網站與自動備份排程；只改變顯示與排程時刻的解讀，不改寫既有封存、manifest 或資料庫。網頁不使用瀏覽器自己的時區，靜態網站記錄匯出當下的時區，在其他電腦開啟也一致；改變時區後下次建置會重新產生頁面。
+- 自動備份的時間改依此時區解讀（摘要例如「每天 00:00（Asia/Tokyo）」），Windows 背景排程也同步改用該時區的時差；變更時區時會從當下重新起算，不會重複執行或誤判錯過。原本 `schedule.timezone` 欄位不再使用。
+- 升級相容：設定檔已有 `schedule.timezone: Asia/Taipei` 且尚未設定全域時區時，會自動寫入 `display.timezone: Asia/Taipei`，升級前後顯示與排程時間不變；全新設定檔才預設「電腦系統」。無法辨識電腦時區名稱時，暫以目前的 UTC 時差顯示並在設定頁提示。
+- 所有時間一律 24 小時制 `HH:mm`：排程時間改為「時／分」下拉選單，不再使用會依 Windows 地區設定顯示「上午／下午」的原生時間欄位。
+- 新增相依套件 `tzdata`（Windows 沒有系統時區資料庫）與 `tzlocal`（把 Windows 時區名稱對應到 IANA），並打包進桌面版 sidecar。不處理日光節約切換當天的特殊情況（已知限制）。
 
 ## v1.3.33-alpha 更新重點
 

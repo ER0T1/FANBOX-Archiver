@@ -377,26 +377,50 @@ def page():
 
 
 @pytest.fixture
-def la_page():
-    # A browser on another continent must still show Asia/Taipei dates.
-    with _browser_page("America/Los_Angeles") as current_page:
+def tokyo_page():
+    # A browser in another zone must still show the server's display timezone.
+    with _browser_page("Asia/Tokyo") as current_page:
         yield current_page
 
 
-def test_job_history_shows_taipei_date_across_midnight_in_foreign_browser_timezone(
-    la_page: Page, live_gui,
+def test_job_history_uses_the_display_timezone_not_the_browser_timezone(
+    tokyo_page: Page, live_gui,
 ) -> None:
-    base_url, _, jobs = live_gui
-    jobs.created_at = "2026-11-02T16:00:00+00:00"  # 2026-11-03 00:00 in Taipei, 11-02 08:00 in LA
+    base_url, config_path, jobs = live_gui
+    jobs.created_at = "2026-11-02T16:00:00+00:00"  # 11-03 00:00 in Taipei, 11-03 01:00 in Tokyo
     jobs.hold_backup = False
-    assert la_page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone") == "America/Los_Angeles"
-    la_page.goto(base_url, wait_until="networkidle")
-    la_page.get_by_role("button", name="備份", exact=True).click()
-    la_page.get_by_role("button", name="工作歷史", exact=True).click()
-    expect(la_page.get_by_role("heading", name="工作歷史", exact=True)).to_be_visible()
-    history = la_page.locator(".job-history")
+    assert tokyo_page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone") == "Asia/Tokyo"
+    tokyo_page.goto(base_url, wait_until="networkidle")
+    tokyo_page.get_by_role("button", name="備份", exact=True).click()
+    tokyo_page.get_by_role("button", name="工作歷史", exact=True).click()
+    expect(tokyo_page.get_by_role("heading", name="工作歷史", exact=True)).to_be_visible()
+    history = tokyo_page.locator(".job-history")
     expect(history.get_by_text("2026年11月03日 00:00").first).to_be_visible()
-    expect(history.get_by_text("2026年11月02日 08:00")).to_have_count(0)
+    expect(history.get_by_text("2026年11月03日 01:00")).to_have_count(0)
+
+    # Choosing Asia/Tokyo in settings moves every displayed time, in 24-hour form.
+    tokyo_page.get_by_role("button", name="設定", exact=True).click()
+    tokyo_page.get_by_role("combobox", name="時區", exact=True).click()
+    tokyo_page.get_by_role("option", name="Asia/Tokyo", exact=True).click()
+    tokyo_page.get_by_role("button", name="儲存設定", exact=True).click()
+    expect(tokyo_page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert AppConfig.load(config_path).display.timezone == "Asia/Tokyo"
+    expect(tokyo_page.get_by_text("目前生效：Asia/Tokyo", exact=False)).to_be_visible()
+    expect(tokyo_page.locator(".schedule-settings")).to_contain_text("Asia/Tokyo，24 小時制")
+    body = tokyo_page.locator("body").inner_text()
+    assert "上午" not in body and "下午" not in body
+    tokyo_page.get_by_role("button", name="備份", exact=True).click()
+    tokyo_page.get_by_role("button", name="工作歷史", exact=True).click()
+    expect(history.get_by_text("2026年11月03日 01:00").first).to_be_visible()
+
+    tokyo_page.get_by_role("button", name="設定", exact=True).click()
+    tokyo_page.get_by_role("combobox", name="時區", exact=True).click()
+    tokyo_page.get_by_role("option", name="其他時區…").click()
+    other = tokyo_page.get_by_role("combobox", name="其他時區（IANA 名稱）")
+    other.fill("Mars/Olympus")
+    tokyo_page.get_by_role("button", name="儲存設定", exact=True).click()
+    expect(tokyo_page.get_by_text("儲存失敗", exact=False)).to_be_visible()
+    assert AppConfig.load(config_path).display.timezone == "Asia/Tokyo"
 
 
 def test_gui_navigation_search_pagination_settings_and_job_polling(
@@ -681,7 +705,10 @@ def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui)
     section.get_by_role("combobox", name="星期").click()
     section.get_by_role("option", name="週三").click()
     section.get_by_role("spinbutton", name="間隔").fill("2")
-    section.locator('input[type="time"]').fill("21:05")
+    section.get_by_role("combobox", name="時", exact=True).click()
+    section.get_by_role("option", name="21", exact=True).click()
+    section.get_by_role("combobox", name="分", exact=True).click()
+    section.get_by_role("option", name="05", exact=True).click()
     preview = section.locator(".schedule-preview")
     expect(preview).to_contain_text("每 2 週的週三 21:05（Asia/Taipei）")
     expect(preview).to_contain_text("接下來：")
@@ -703,7 +730,7 @@ def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui)
     saved = AppConfig.load(config_path).schedule
     assert saved.power == "no_wake_ac_only"
     assert (saved.enabled, saved.frequency, saved.month_day, saved.time) == (True, "monthly", 31, "21:05")
-    assert saved.start_date is not None and saved.timezone == "Asia/Taipei"
+    assert saved.start_date is not None
     expect(section.locator("dd").first).to_contain_text("每月 31 日 21:05")
     expect(section.locator("dd").nth(1)).not_to_have_text("—")
 

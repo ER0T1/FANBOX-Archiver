@@ -313,12 +313,11 @@ namespace FanboxUI {
     start_date: string | null;
     creators: string[];
     power: SchedulePower;
-    timezone: "Asia/Taipei";
   }
 
   export type SchedulePower = "no_wake_battery_ok" | "no_wake_ac_only" | "wake";
 
-  export type ScheduleSettingsPatch = Omit<ScheduleSettings, "start_date" | "timezone">;
+  export type ScheduleSettingsPatch = Omit<ScheduleSettings, "start_date">;
 
   export interface ScheduleStatus {
     enabled: boolean;
@@ -338,7 +337,21 @@ namespace FanboxUI {
     next_runs: string[];
   }
 
+  export interface DisplaySettings {
+    /** "system" or an IANA zone name. */
+    timezone: string;
+  }
+
+  export interface DisplayInfo {
+    setting: string;
+    /** The zone every time is shown in, resolved by the server. */
+    timezone: string;
+    notice: string | null;
+    system_timezone: string;
+  }
+
   export interface EditableSettings {
+    display: DisplaySettings;
     download: DownloadSettings;
     sync: SyncSettings;
     backup_defaults: BackupDefaultsSettings;
@@ -352,6 +365,8 @@ namespace FanboxUI {
     storage: {output_dir: string; database: string};
     config_path: string | null;
     writable: boolean;
+    display: DisplayInfo;
+    timezones: {common: string[]; all: string[]};
   }
 
   export type AuthState = "checking" | "locked" | "authenticated" | "signed_out" | "expired" | "error";
@@ -380,6 +395,7 @@ namespace FanboxUI {
     sync: Omit<SyncSettings, "supporting_only">;
     backup_defaults: BackupDefaultsSettings;
     schedule: ScheduleSettingsPatch;
+    display: DisplaySettings;
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }

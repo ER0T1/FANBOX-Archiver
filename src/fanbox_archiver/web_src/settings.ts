@@ -17,6 +17,32 @@ namespace FanboxUI {
       hint ? h("small", {}, hint) : null)};
   }
 
+  const OTHER_TIMEZONE = "__other__";
+
+  /** Timezone picker: computer system first, then common zones, then a searchable full list. */
+  function timezoneControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): string} {
+    const setting = data.editable.display.timezone;
+    const common = data.timezones.common;
+    const custom = setting !== "system" && !common.includes(setting);
+    let choice = custom ? OTHER_TIMEZONE : setting;
+    const listId = `timezone-list-${Math.random().toString(36).slice(2, 9)}`;
+    const other = h("input", {type: "text", value: custom ? setting : "", list: listId, spellcheck: "false",
+      placeholder: "例如 Asia/Tokyo", "aria-label": "其他時區（IANA 名稱）", autocomplete: "off"}) as HTMLInputElement;
+    const otherField = h("label", {class: "setting-field timezone-other", hidden: !custom},
+      h("span", {}, "其他時區（輸入以搜尋）"), other,
+      h("datalist", {id: listId}, data.timezones.all.map(name => h("option", {value: name}))));
+    const select = customSelect({id: "display-timezone", label: "時區", value: choice, disabled: blocked,
+      options: [{value: "system", label: `電腦系統（目前：${data.display.system_timezone}）`},
+        ...common.map(name => ({value: name, label: name})), {value: OTHER_TIMEZONE, label: "其他時區…"}],
+      onChange: next => { choice = next; otherField.hidden = next !== OTHER_TIMEZONE; if (!otherField.hidden) other.focus(); }});
+    const node = h("section", {class: "settings-section"}, h("h3", {}, "時區"),
+      h("p", {class: "settings-section-description"},
+        `所有時間以 24 小時制、依此時區顯示，自動備份的時間也依此解讀；切換不會改寫已保存的資料。目前生效：${data.display.timezone}`),
+      data.display.notice ? h("p", {class: "notice"}, data.display.notice) : null,
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "時區"), select), otherField));
+    return {node, read: () => choice === OTHER_TIMEZONE ? other.value.trim() : choice};
+  }
+
   export function renderSettingsPage(
     data: SettingsResponse, auth: AuthStatus, message: string, activeJob: WebJob | null,
     onSave: (patch: SettingsPatch) => Promise<string | null>,
@@ -60,6 +86,7 @@ namespace FanboxUI {
     const blocked = Boolean(activeJob);
     const scheduleSection = renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked,
       schedule.actions);
+    const timezone = timezoneControl(data, blocked);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const authBusy = auth.state === "checking";
@@ -95,7 +122,7 @@ namespace FanboxUI {
       }, backup_defaults: {
         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
         include_fancard: defaultFancard.input.checked,
-      }, schedule: scheduleSection.read(), markdown: {
+      }, schedule: scheduleSection.read(), display: {timezone: timezone.read()}, markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -121,6 +148,7 @@ namespace FanboxUI {
       h("section", {class: "settings-section"}, h("h3", {}, "網路與失敗處理"),
         h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node))),
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT & LOGGING"), h("h2", {}, "輸出與紀錄"),
+      timezone.node,
       h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
         h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),
       h("section", {class: "settings-section"}, h("h3", {}, "日誌"),

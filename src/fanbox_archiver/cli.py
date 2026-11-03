@@ -40,7 +40,7 @@ from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
-from .timestamps import isoformat_taipei
+from .timestamps import isoformat_display, set_display_timezone
 
 
 if os.name == "nt":
@@ -64,13 +64,14 @@ console = Console()
 
 
 def format_local_time(value: object) -> str:
-    return isoformat_taipei(value)
+    return isoformat_display(value)
 
 
 def load_config(path: Path) -> AppConfig:
     try:
         settings = AppConfig.load(path)
         configure_logging(settings)
+        set_display_timezone(settings.display.timezone)
         return settings
     except (OSError, ValidationError) as exc:
         console.print(f"[red]設定檔錯誤：[/red]{exc}")
@@ -379,6 +380,7 @@ def audit(
     """唯讀稽核版本、manifest、latest pointer、alias 與時間欄位。"""
     try:
         settings = AppConfig.load(config)
+        set_display_timezone(settings.display.timezone)
     except (OSError, ValidationError) as exc:
         console.print(f"[red]設定檔錯誤：[/red]{exc}")
         raise typer.Exit(2) from exc
@@ -448,6 +450,7 @@ def repair_copy(
     """只在新副本套用 audit 已確認的 pointer／alias 修復。"""
     try:
         settings = AppConfig.load(config)
+        set_display_timezone(settings.display.timezone)
         result = ArchiveRepairer(settings).repair_copy(output)
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         console.print(f"[red]建立修復副本失敗：[/red]{exc}")

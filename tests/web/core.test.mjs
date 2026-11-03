@@ -76,6 +76,16 @@ test("TypeScript core shows Asia/Taipei across midnight and refuses naive values
   assert.equal(ui.formatDate("2026-11-02"), "2026-11-02（時區未標示）");
 });
 
+test("TypeScript core follows the server's display zone, never the browser's", () => {
+  assert.equal(ui.getDisplayTimeZone(), "Asia/Taipei");
+  ui.setDisplayTimeZone("Asia/Tokyo");
+  assert.equal(ui.formatDate("2026-11-02T15:30:00Z"), "2026年11月03日 00:30");
+  ui.setDisplayTimeZone("Not/AZone");
+  assert.equal(ui.getDisplayTimeZone(), "Asia/Tokyo");
+  ui.setDisplayTimeZone("Asia/Taipei");
+  assert.equal(ui.formatDate("2026-11-02T15:30:00Z"), "2026年11月02日 23:30");
+});
+
 test("fan card perk status classes reject unknown API values", () => {
   assert.equal(ui.perkStatusClass("accessible"), "perk-status status-accessible");
   assert.equal(ui.perkStatusClass("unavailable"), "perk-status status-unavailable");

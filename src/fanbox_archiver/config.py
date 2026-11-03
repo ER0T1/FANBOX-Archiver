@@ -56,8 +56,24 @@ class BackupDefaultsConfig(BaseModel):
     include_fancard: bool = True
 
 
+class DisplayConfig(BaseModel):
+    """How times are shown and how schedule times are read: ``system`` or an IANA zone."""
+
+    timezone: str = "system"
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        from .timestamps import is_valid_timezone
+
+        value = value.strip()
+        if not is_valid_timezone(value):
+            raise ValueError(f"不支援的時區：{value}")
+        return value
+
+
 class ScheduleConfig(BaseModel):
-    """Automatic backup schedule; times are always Asia/Taipei (no DST, host independent)."""
+    """Automatic backup schedule; times are read in the global display timezone."""
 
     enabled: bool = False
     frequency: Literal["daily", "weekly", "monthly"] = "daily"
@@ -70,7 +86,6 @@ class ScheduleConfig(BaseModel):
     # no_wake_battery_ok: never wake the PC, run on battery too; no_wake_ac_only: never
     # wake, wait for mains power; wake: wake a sleeping PC (Windows Task Scheduler).
     power: Literal["no_wake_battery_ok", "no_wake_ac_only", "wake"] = "no_wake_battery_ok"
-    timezone: Literal["Asia/Taipei"] = "Asia/Taipei"
 
     @field_validator("time")
     @classmethod
@@ -103,6 +118,7 @@ class AppConfig(BaseModel):
     sync: SyncConfig = SyncConfig()
     backup_defaults: BackupDefaultsConfig = BackupDefaultsConfig()
     schedule: ScheduleConfig = ScheduleConfig()
+    display: DisplayConfig = DisplayConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
@@ -111,6 +127,7 @@ class AppConfig(BaseModel):
         if path.exists():
             with path.open("r", encoding="utf-8") as handle:
                 data = yaml.safe_load(handle) or {}
+            data = cls._migrate_display_timezone(path, data)
         config = cls.model_validate(data)
         base = path.resolve().parent
         if not config.auth.profile_dir.is_absolute():
@@ -121,6 +138,21 @@ class AppConfig(BaseModel):
             config.storage.database = (base / config.storage.database).resolve()
         return config
 
+    @staticmethod
+    def _migrate_display_timezone(path: Path, data: Any) -> Any:
+        """Settings saved before the global timezone kept times in Asia/Taipei; preserve that."""
+        if not isinstance(data, dict) or "display" in data:
+            return data
+        schedule = data.get("schedule")
+        if not isinstance(schedule, dict) or schedule.get("timezone") != "Asia/Taipei":
+            return data
+        migrated = {**data, "display": {"timezone": "Asia/Taipei"}}
+        try:
+            AppConfig._write_yaml(path, migrated)
+        except OSError:
+            pass  # a read-only file still loads with the migrated value
+        return migrated
+
     def editable_dict(self) -> dict[str, Any]:
         value = self.model_dump(mode="json")
         return {
@@ -128,6 +160,7 @@ class AppConfig(BaseModel):
             "sync": value["sync"],
             "backup_defaults": value["backup_defaults"],
             "schedule": value["schedule"],
+            "display": value["display"],
             "markdown": value["markdown"],
             "logging": value["logging"],
         }
@@ -135,7 +168,7 @@ class AppConfig(BaseModel):
     def with_editable_patch(self, patch: dict[str, Any]) -> "AppConfig":
         merged = self.model_dump(mode="python")
         for section, values in patch.items():
-            if section not in {"download", "sync", "backup_defaults", "schedule", "markdown", "logging"}:
+            if section not in {"download", "sync", "backup_defaults", "schedule", "display", "markdown", "logging"}:
                 raise ValueError(f"不允許修改設定區段：{section}")
             merged[section] = {**merged[section], **values}
         return type(self).model_validate(merged)
@@ -152,6 +185,10 @@ class AppConfig(BaseModel):
         editable = config.editable_dict()
         for section in patch:
             raw[section] = editable[section]
+        AppConfig._write_yaml(path, raw)
+
+    @staticmethod
+    def _write_yaml(path: Path, raw: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
         try:

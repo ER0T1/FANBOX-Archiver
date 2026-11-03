@@ -10,7 +10,8 @@ import yaml
 from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.markdown import render_markdown
 from fanbox_archiver.models import Post
-from fanbox_archiver.timestamps import format_taipei, isoformat_taipei, parse_instant
+from fanbox_archiver import timestamps
+from fanbox_archiver.timestamps import format_display, isoformat_display, parse_instant
 
 
 @pytest.mark.parametrize(("value", "human", "iso"), [
@@ -21,32 +22,56 @@ from fanbox_archiver.timestamps import format_taipei, isoformat_taipei, parse_in
     (datetime(2026, 12, 31, 16, tzinfo=UTC), "2027年01月01日 00:00", "2027-01-01T00:00:00+08:00"),
 ])
 def test_time_points_cross_taipei_midnight_consistently(value, human, iso):
-    assert format_taipei(value) == human
-    assert isoformat_taipei(value) == iso
+    assert format_display(value) == human
+    assert isoformat_display(value) == iso
 
 
 def test_naive_and_invalid_values_are_never_guessed():
     assert parse_instant("2026-11-02T16:00:00") is None
-    assert format_taipei("2026-11-02T16:00:00") == "2026-11-02T16:00:00（時區未標示）"
-    assert isoformat_taipei(datetime(2026, 11, 2)) == "2026-11-02T00:00:00（時區未標示）"
-    assert format_taipei("not a date") == "not a date"
-    assert format_taipei(None) == "-"
-    assert isoformat_taipei("", None) is None
+    assert format_display("2026-11-02T16:00:00") == "2026-11-02T16:00:00（時區未標示）"
+    assert isoformat_display(datetime(2026, 11, 2)) == "2026-11-02T00:00:00（時區未標示）"
+    assert format_display("not a date") == "not a date"
+    assert format_display(None) == "-"
+    assert isoformat_display("", None) is None
 
 
-def test_output_does_not_depend_on_host_timezone():
+def test_a_chosen_timezone_ignores_the_host_timezone():
+    # The host clock is set to Tokyo; an explicit Asia/Taipei setting must still win.
     script = (
-        "import json, fanbox_archiver.cli as cli; from fanbox_archiver.timestamps import format_taipei;"
-        "v='2026-11-02T16:00:00+00:00'; print(json.dumps([cli.format_local_time(v), format_taipei(v)]))"
+        "import json, fanbox_archiver.cli as cli; from fanbox_archiver import timestamps as t;"
+        "t.set_display_timezone('Asia/Taipei');"
+        "v='2026-11-02T16:00:00+00:00'; print(json.dumps([cli.format_local_time(v), t.format_display(v)]))"
     )
-    outputs = set()
-    for zone in ("UTC0", "PST8PDT", "JST-9"):
-        result = subprocess.run(
-            [sys.executable, "-c", script], env={**os.environ, "TZ": zone},
-            capture_output=True, text=True, encoding="utf-8", check=True,
-        )
-        outputs.add(result.stdout.strip())
-    assert outputs == {json.dumps(["2026-11-03T00:00:00+08:00", "2026年11月03日 00:00"])}
+    result = subprocess.run(
+        [sys.executable, "-c", script], env={**os.environ, "TZ": "JST-9"},
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    )
+    assert result.stdout.strip() == json.dumps(["2026-11-03T00:00:00+08:00", "2026年11月03日 00:00"])
+
+
+def test_tokyo_setting_changes_display_cli_and_markdown_without_touching_values():
+    timestamps.set_display_timezone("Asia/Tokyo")
+    value = "2026-11-02T15:30:00+00:00"
+    assert format_display(value) == "2026年11月03日 00:30"
+    assert isoformat_display(value) == "2026-11-03T00:30:00+09:00"
+    import fanbox_archiver.cli as cli
+    assert cli.format_local_time(value) == "2026-11-03T00:30:00+09:00"
+    post = Post(post_id="1", creator_id="alice", title="t", url="https://alice.fanbox.cc/posts/1",
+                published_at=datetime(2026, 11, 2, 15, 30, tzinfo=UTC))
+    metadata = yaml.safe_load(render_markdown(post).split("---")[1])
+    assert metadata["published_at"] == "2026-11-03T00:30:00+09:00"
+
+
+def test_system_timezone_resolution_and_fallback(monkeypatch):
+    assert timestamps.resolve_timezone("system", system_name=lambda: "Asia/Tokyo").name == "Asia/Tokyo"
+    unknown = timestamps.resolve_timezone("system", system_name=lambda: None)
+    assert unknown.setting == "system" and unknown.notice and "UTC 時差" in unknown.notice
+    monkeypatch.setattr(timestamps._time, "localtime", lambda: type("T", (), {"tm_gmtoff": 9 * 3600})())
+    assert timestamps.resolve_timezone("system", system_name=lambda: "Not/AZone").name == "Etc/GMT-9"
+    assert timestamps.resolve_timezone("Asia/Tokyo").notice is None
+    with pytest.raises(ValueError):
+        timestamps.resolve_timezone("Mars/Olympus")
+    assert {"Asia/Taipei", "Asia/Tokyo"} <= set(timestamps.timezone_names())
 
 
 def test_markdown_front_matter_uses_taipei_offsets():
@@ -66,3 +91,23 @@ def test_markdown_front_matter_uses_taipei_offsets():
 def test_static_index_dates_use_shared_contract():
     assert IndexBuilder._date("2026-11-02T16:00:00+00:00") == "2026年11月03日 00:00"
     assert IndexBuilder._date("2026-11-02T16:00:00") == "2026-11-02T16:00:00（時區未標示）"
+
+
+def test_static_site_records_its_zone_and_rerenders_when_it_changes(tmp_path):
+    from fanbox_archiver.config import AppConfig, StorageConfig
+    from fanbox_archiver.service import ArchiveService
+
+    config = AppConfig(storage=StorageConfig(output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"))
+    ArchiveService(config).save(Post(
+        post_id="1", creator_id="alice", title="t", url="https://alice.fanbox.cc/posts/1",
+        published_at=datetime(2026, 11, 2, 15, 30, tzinfo=UTC),
+    ), download_assets=False)
+    timestamps.set_display_timezone("Asia/Tokyo")
+    IndexBuilder(config).build()
+    data = (config.storage.output_dir / "_site/data.js").read_text(encoding="utf-8")
+    assert '"timezone":"Asia/Tokyo"' in data
+    page = next((config.storage.output_dir / "_site").rglob("posts/**/*.html")).read_text(encoding="utf-8")
+    assert "2026年11月03日 00:30" in page
+    assert IndexBuilder(config).build().rendered == 0  # same zone: cached pages are reused
+    timestamps.set_display_timezone("Asia/Taipei")
+    assert IndexBuilder(config).build().rendered > 0  # new zone: every page is rendered again

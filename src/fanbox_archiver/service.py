@@ -21,7 +21,7 @@ from .markdown import render_markdown
 from .models import Asset, AssetStatus, CreatorProfile, Post, PostStatus, VerificationIssue
 from .security import confined_path, safe_filename, validate_url
 from .storage import BackupStorage
-from .timestamps import isoformat_taipei
+from .timestamps import isoformat_display
 from .logging_setup import get_logger
 
 
@@ -575,13 +575,13 @@ class ArchiveService:
             f"creator_id: {json.dumps(str(plan.get('creatorId') or ''), ensure_ascii=False)}",
             f"target_month: {json.dumps(target_month)}",
             f"archive_version: {version}",
-            f"captured_at: {json.dumps(isoformat_taipei(captured_at, None))}",
+            f"captured_at: {json.dumps(isoformat_display(captured_at, None))}",
             "---", "",
             f"# Fan Card — {target_month}", "",
             f"- 創作者：{user.get('name') or plan.get('creatorId') or ''}",
             f"- 方案：{plan.get('title') or ''}",
             f"- 金額：¥{plan.get('fee') or 0}/月",
-            f"- 支援開始：{isoformat_taipei(body.get('supportStartDatetime'), '')}", "",
+            f"- 支援開始：{isoformat_display(body.get('supportStartDatetime'), '')}", "",
             "## 方案說明", "",
             str(plan.get("description") or "（無）"), "",
         ]

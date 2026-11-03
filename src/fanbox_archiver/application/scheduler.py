@@ -8,7 +8,7 @@ from ..config import AppConfig
 from ..database import Database
 from .. import power
 from ..schedule import count_between, describe, latest_due, next_run
-from ..timestamps import format_taipei, parse_instant
+from ..timestamps import display_zone, format_display, parse_instant
 from .backup import BackupRequest
 from .jobs import BackupJobManager
 
@@ -88,7 +88,7 @@ class BackupScheduler:
                 if state["deferred_due"] != due_iso:
                     self.db.set_schedule_state(
                         deferred_due=due_iso,
-                        note=f"{format_taipei(due)} 的排程遇到使用電池中，將於接上電源後執行。",
+                        note=f"{format_display(due)} 的排程遇到使用電池中，將於接上電源後執行。",
                     )
                 return "deferred"
             jobs = self.get_jobs()
@@ -96,7 +96,7 @@ class BackupScheduler:
                 if state["deferred_due"] != due_iso:
                     self.db.set_schedule_state(
                         deferred_due=due_iso,
-                        note=f"{format_taipei(due)} 的排程遇到其他工作執行中，將於該工作結束後執行。",
+                        note=f"{format_display(due)} 的排程遇到其他工作執行中，將於該工作結束後執行。",
                     )
                 return "deferred"
             try:
@@ -105,11 +105,11 @@ class BackupScheduler:
                 return "deferred"
             missed = count_between(schedule, handled, due)
             if missed > 1:
-                note = f"錯過 {missed} 次排程，已補跑最近一次（{format_taipei(due)}）。"
+                note = f"錯過 {missed} 次排程，已補跑最近一次（{format_display(due)}）。"
             elif state["deferred_due"] == due_iso:
-                note = f"{format_taipei(due)} 的排程曾延後，已於可以執行時補跑。"
+                note = f"{format_display(due)} 的排程曾延後，已於可以執行時補跑。"
             elif (now - due).total_seconds() > max(120.0, self.interval * 4):
-                note = f"已補跑錯過的排程（{format_taipei(due)}）。"
+                note = f"已補跑錯過的排程（{format_display(due)}）。"
             else:
                 note = None
             self.db.set_schedule_state(
@@ -139,7 +139,7 @@ class BackupScheduler:
         return {
             "enabled": schedule.enabled,
             "summary": describe(schedule),
-            "timezone": schedule.timezone,
+            "timezone": display_zone().name,
             "next_run_at": next_run(schedule, self.clock()).isoformat() if schedule.enabled else None,
             "last_due_at": state["last_due_at"] if state else None,
             "deferred_due": state["deferred_due"] if state else None,

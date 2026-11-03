@@ -147,7 +147,7 @@ async def test_schedule_api_saves_previews_and_validates(tmp_path: Path):
         assert schedule["creators"] == ["alice"]
         assert schedule["start_date"] == datetime.now(TAIPEI).date().isoformat()
         on_disk = yaml.safe_load(config_path.read_text(encoding="utf-8"))["schedule"]
-        assert on_disk["enabled"] is True and on_disk["timezone"] == "Asia/Taipei"
+        assert on_disk["enabled"] is True and "timezone" not in on_disk
         status = (await client.get("/api/schedule")).json()
         assert status["summary"].startswith("每月 31 日 02:30")
         assert status["next_run_at"].endswith("+08:00")

@@ -235,3 +235,48 @@ async def test_settings_save_syncs_the_background_task_and_reports_it(tmp_path: 
         bad = await client.patch("/api/config", headers=token, json={"schedule": {"power": "always"}})
         assert bad.status_code == 422
     app.state.jobs.close()
+
+
+def test_tokyo_timezone_moves_schedule_and_task_boundary():
+    from fanbox_archiver import timestamps
+    from fanbox_archiver.schedule import describe, next_run
+    from zoneinfo import ZoneInfo
+
+    timestamps.set_display_timezone("Asia/Tokyo")
+    schedule = ScheduleConfig(time="00:00", start_date=date(2026, 11, 1))
+    # 00:00 in Tokyo is 23:00 the previous day in Taipei.
+    assert next_run(schedule, datetime(2026, 11, 2, 14, 30, tzinfo=UTC)) == datetime(2026, 11, 3, tzinfo=ZoneInfo("Asia/Tokyo"))
+    assert next_run(schedule, datetime(2026, 11, 2, 14, 30, tzinfo=UTC)).astimezone(TAIPEI).hour == 23
+    assert describe(schedule) == "每天 00:00（Asia/Tokyo）"
+    assert check_start(schedule, datetime(2026, 11, 3, 1, tzinfo=UTC)).isoformat() == "2026-11-02T00:00:00+09:00"
+
+
+@pytest.mark.anyio
+async def test_saving_a_timezone_applies_everywhere_and_restarts_schedule_counting(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(webapp, "sync_background_schedule", lambda *args, **kwargs: (
+        calls.append(1) or {"state": "unavailable", "message": "x"}))
+    config = AppConfig(storage=StorageConfig(output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"),
+                       schedule=ScheduleConfig(enabled=True, start_date=date(2026, 11, 1)))
+    app = webapp.create_app(config, config_path=tmp_path / "config.yaml")
+    token = {"X-Fanbox-Token": app.state.session_token}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        current = (await client.get("/api/config")).json()
+        assert current["display"] == {"setting": "system", "timezone": "Asia/Taipei", "notice": None,
+                                      "system_timezone": "Asia/Taipei"}
+        assert "Asia/Tokyo" in current["timezones"]["all"] and current["timezones"]["common"][0] == "Asia/Taipei"
+        assert 'content="Asia/Taipei"' in (await client.get("/")).text
+
+        saved = await client.patch("/api/config", headers=token, json={"display": {"timezone": "Asia/Tokyo"}})
+        assert saved.status_code == 200 and saved.json()["display"]["timezone"] == "Asia/Tokyo"
+        assert 'content="Asia/Tokyo"' in (await client.get("/")).text
+        status = (await client.get("/api/schedule")).json()
+        assert status["timezone"] == "Asia/Tokyo" and status["summary"].endswith("（Asia/Tokyo）")
+        assert status["next_run_at"].endswith("+09:00")
+        assert calls == [1]  # the Windows task follows the new zone
+        assert Database(config.storage.database).schedule_state()["handled_through"] is not None
+
+        bad = await client.patch("/api/config", headers=token, json={"display": {"timezone": "Mars/Olympus"}})
+        assert bad.status_code == 422
+        assert (await client.get("/api/config")).json()["display"]["timezone"] == "Asia/Tokyo"
+    app.state.jobs.close()

@@ -95,3 +95,32 @@ def test_clean_environment_smoke_paths(tmp_path: Path):
     assert copied_config.model_dump() == empty_config.model_dump()
     assert not missing.exists()
     assert empty.read_text(encoding="utf-8") == "{}\n"
+
+
+def test_existing_config_with_taipei_schedule_keeps_taipei_display(tmp_path):
+    import yaml
+    from fanbox_archiver.config import AppConfig
+
+    old = tmp_path / "old.yaml"
+    old.write_text("schedule:\n  enabled: true\n  time: '03:00'\n  timezone: Asia/Taipei\n", encoding="utf-8")
+    assert AppConfig.load(old).display.timezone == "Asia/Taipei"
+    assert yaml.safe_load(old.read_text(encoding="utf-8"))["display"] == {"timezone": "Asia/Taipei"}
+    assert AppConfig.load(old).schedule.time == "03:00"
+
+    fresh = tmp_path / "fresh.yaml"
+    fresh.write_text("{}\n", encoding="utf-8")
+    assert AppConfig.load(fresh).display.timezone == "system"
+    assert AppConfig().display.timezone == "system"
+
+    chosen = tmp_path / "chosen.yaml"
+    chosen.write_text("display:\n  timezone: Asia/Tokyo\nschedule:\n  timezone: Asia/Taipei\n", encoding="utf-8")
+    assert AppConfig.load(chosen).display.timezone == "Asia/Tokyo"
+
+
+def test_invalid_display_timezone_is_rejected():
+    import pytest
+    from pydantic import ValidationError
+    from fanbox_archiver.config import AppConfig
+
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"display": {"timezone": "Mars/Olympus"}})

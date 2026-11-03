@@ -18,10 +18,10 @@ from .fancard_perks import normalize_fancard_perks
 from .models import CreatorProfile, Post
 from .security import confined_path, safe_filename
 from .storage import BackupStorage
-from .timestamps import format_taipei
+from .timestamps import display_zone, format_display
 
 
-TEMPLATE_VERSION = 14
+TEMPLATE_VERSION = 15
 
 
 @dataclass(slots=True)
@@ -137,6 +137,8 @@ class IndexBuilder:
                 "schema": 1,
                 "template_version": TEMPLATE_VERSION,
                 "built_at": built_at,
+                # Pages and the offline reader show dates in the zone in effect when built.
+                "timezone": display_zone().name,
                 "stats": stats,
                 "creators": creators,
                 "posts": posts,
@@ -162,6 +164,7 @@ class IndexBuilder:
             self._write_json(staging / "state.json", {
                 "schema": 1,
                 "template_version": TEMPLATE_VERSION,
+                "timezone": display_zone().name,
                 "pages": state_pages,
                 "hashes": page_hashes,
             })
@@ -410,6 +413,8 @@ class IndexBuilder:
 
     def _reuse_page(self, relative: str, fingerprint: str, current: Path, old_state: dict, destination: Path) -> bool:
         if old_state.get("template_version") != TEMPLATE_VERSION:
+            return False
+        if old_state.get("timezone") != display_zone().name:
             return False
         if (old_state.get("pages") or {}).get(relative) != fingerprint:
             return False
@@ -773,7 +778,7 @@ class IndexBuilder:
 
     @staticmethod
     def _date(value) -> str:
-        return format_taipei(value)
+        return format_display(value)
 
     @staticmethod
     def _fee_label(value: int | None) -> str:

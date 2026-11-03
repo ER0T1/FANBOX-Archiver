@@ -357,8 +357,10 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .schedule-status dt { color:var(--muted); font-size:.8rem; font-weight:750; }
 .schedule-status dd { margin:.2rem 0 0; font-weight:700; overflow-wrap:anywhere; }
 .schedule-note { margin:0 0 .9rem; }
-.schedule-settings [hidden] { display:none !important; }
-.schedule-settings input[type=time] { width:100%; min-height:44px; padding:.6rem .75rem; color:var(--text); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; }
+.settings-form [hidden] { display:none !important; }
+.schedule-time { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:.4rem; }
+.schedule-time > span { font-weight:800; color:var(--muted); }
+.timezone-other input { width:100%; min-height:44px; padding:.6rem .75rem; color:var(--text); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; }
 .schedule-days { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.3rem; max-width:24rem; }
 .schedule-day { min-height:38px; padding:0; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:8px; font-weight:700; cursor:pointer; }
 .schedule-day[aria-pressed="true"] { color:#fff; background:var(--accent); border-color:var(--accent); }

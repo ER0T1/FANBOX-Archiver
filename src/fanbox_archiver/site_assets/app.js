@@ -23,8 +23,10 @@
   }
 
   const normalise = value => String(value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
-  const taipeiDateTime = new Intl.DateTimeFormat("en-CA", {
-    timeZone:"Asia/Taipei", year:"numeric", month:"2-digit", day:"2-digit",
+  // The zone in effect when the archive was exported, so every computer shows the same dates.
+  const displayTimeZone = data.timezone || "Asia/Taipei";
+  const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone:displayTimeZone, year:"numeric", month:"2-digit", day:"2-digit",
     hour:"2-digit", minute:"2-digit", hourCycle:"h23",
   });
   const explicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i;
@@ -34,10 +36,10 @@
     if (!explicitOffset.test(text)) return `${text}（時區未標示）`;
     const date = new Date(text);
     if (Number.isNaN(date.valueOf())) return String(value);
-    const parts = Object.fromEntries(taipeiDateTime.formatToParts(date).map(part => [part.type, part.value]));
+    const parts = Object.fromEntries(dateTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
     return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;
   };
-  const taipeiYear = value => /^\d{4}/.exec(formatDate(value))?.[0] || "";
+  const displayYear = value => /^\d{4}/.exec(formatDate(value))?.[0] || "";
 
   function readHash() {
     const params = new URLSearchParams(location.hash.replace(/^#/, ""));
@@ -109,7 +111,7 @@
     if (state.creator && post.creator_id !== state.creator) return false;
     if (state.tag && !(post.tags || []).includes(state.tag)) return false;
     if (state.status && post.status !== state.status) return false;
-    if (state.year && taipeiYear(post.published_at) !== state.year) return false;
+    if (state.year && displayYear(post.published_at) !== state.year) return false;
     if (state.versioned === "yes" && post.version_count < 2) return false;
     const haystack = normalise([post.title, post.post_id, post.creator_id, ...(post.tags || [])].join(" "));
     return normalise(state.q).split(" ").every(term => !term || haystack.includes(term));
@@ -123,7 +125,7 @@
     const statusSelect = node("select", {"aria-label":"依狀態篩選", onchange:event => {state.status=event.target.value; resetPage();}},
       node("option", {value:""}, "全部狀態"), ...["completed","partial","failed","restricted","unavailable","missing"].map(value => node("option", {value}, value)));
     statusSelect.value = state.status;
-    const years = [...new Set(data.posts.map(post => taipeiYear(post.published_at)).filter(value => /^\d{4}$/.test(value)))].sort().reverse();
+    const years = [...new Set(data.posts.map(post => displayYear(post.published_at)).filter(value => /^\d{4}$/.test(value)))].sort().reverse();
     const yearSelect = node("select", {"aria-label":"依年份篩選", onchange:event => {state.year=event.target.value; resetPage();}},
       node("option", {value:""}, "全部年份"), ...years.map(value => node("option", {value}, value)));
     yearSelect.value = state.year;

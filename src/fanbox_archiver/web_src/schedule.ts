@@ -29,7 +29,14 @@ namespace FanboxUI {
     let powerValue: SchedulePower = value.power;
     let monthDay = value.month_day;
     const interval = h("input", {type: "number", value: value.interval, min: 1, max: 30, step: 1}) as HTMLInputElement;
-    const time = h("input", {type: "time", value: value.time, step: 60, required: true}) as HTMLInputElement;
+    // 24-hour hour/minute pickers: a native time input follows the Windows locale (上午／下午).
+    const [savedHour, savedMinute] = value.time.split(":");
+    const hour = customSelect({id: "schedule-hour", label: "時", value: savedHour, disabled: blocked,
+      options: Array.from({length: 24}, (_, index) => ({value: String(index).padStart(2, "0"), label: String(index).padStart(2, "0")})),
+      onChange: () => sync()});
+    const minute = customSelect({id: "schedule-minute", label: "分", value: savedMinute, disabled: blocked,
+      options: Array.from({length: 60}, (_, index) => ({value: String(index).padStart(2, "0"), label: String(index).padStart(2, "0")})),
+      onChange: () => sync()});
     const intervalUnit = h("small", {});
     const preview = h("p", {class: "schedule-preview", role: "status", "aria-live": "polite"});
     const runFeedback = h("p", {class: "settings-error", role: "alert", hidden: true});
@@ -66,7 +73,7 @@ namespace FanboxUI {
     const read = (): ScheduleSettingsPatch => ({
       enabled: enabled.checked, frequency: frequencyValue,
       interval: Math.min(30, Math.max(1, Math.round(Number(interval.value) || 1))),
-      weekday: Number(weekday.value), month_day: monthDay, time: time.value, power: powerValue,
+      weekday: Number(weekday.value), month_day: monthDay, time: `${hour.value}:${minute.value}`, power: powerValue,
       creators: [...creatorBoxes.filter(item => item.input.checked).map(item => item.input.value), ...unknownCreators],
     });
 
@@ -92,7 +99,7 @@ namespace FanboxUI {
         });
       }, 250);
     };
-    for (const input of [enabled, interval, time]) input.addEventListener("input", sync);
+    for (const input of [enabled, interval]) input.addEventListener("input", sync);
 
     const runNow = h("button", {type: "button", class: "secondary", disabled: blocked, onclick: async () => {
       runFeedback.hidden = true;
@@ -103,7 +110,7 @@ namespace FanboxUI {
     const node = h("section", {class: "settings-section schedule-settings"},
       h("h3", {}, "自動備份"),
       h("p", {class: "settings-section-description"},
-        "依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次，時間一律以 Asia/Taipei 計算。"),
+        `依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次；時間依「時區」設定（目前：${status.timezone}）解讀，24 小時制。`),
       h("dl", {class: "schedule-status"},
         h("div", {}, h("dt", {}, "目前排程"), h("dd", {}, status.enabled ? status.summary : "未啟用")),
         h("div", {}, h("dt", {}, "下一次執行"), h("dd", {}, status.next_run_at ? formatDate(status.next_run_at) : "—")),
@@ -113,7 +120,8 @@ namespace FanboxUI {
       status.note ? h("p", {class: "notice schedule-note"}, status.note) : null,
       h("label", {class: "setting-toggle"}, enabled, h("span", {}, "啟用自動備份")),
       h("div", {class: "settings-grid"}, h("div", {class: "setting-field"}, h("span", {}, "週期"), frequency),
-        intervalField, weekdayField, h("label", {class: "setting-field"}, h("span", {}, "時間（Asia/Taipei）"), time)),
+        intervalField, weekdayField, h("div", {class: "setting-field"}, h("span", {}, `時間（${status.timezone}，24 小時制）`),
+          h("div", {class: "schedule-time"}, hour, h("span", {"aria-hidden": "true"}, ":"), minute))),
       monthField,
       h("div", {class: "setting-field schedule-power"}, h("span", {}, "電源與休眠"), power,
         h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。")),

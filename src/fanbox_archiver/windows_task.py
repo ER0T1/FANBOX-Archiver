@@ -25,7 +25,7 @@ from xml.sax.saxutils import escape
 
 from .config import AppConfig, ScheduleConfig
 from .schedule import next_run
-from .timestamps import TAIPEI
+from .timestamps import display_zone
 
 TASK_FOLDER = "FANBOX Archiver"
 CHECK_TASK = rf"{TASK_FOLDER}\Scheduled Backup"
@@ -95,10 +95,12 @@ def task_xml(
 
 
 def check_start(schedule: ScheduleConfig, now: datetime) -> datetime:
-    """Yesterday at the schedule time, so 15-minute checks land on the schedule time."""
+    """Yesterday at the schedule time in the display timezone, with that zone's offset,
+    so 15-minute checks land on the schedule time; the app re-syncs on every start."""
+    zone = display_zone().tz
     hour, minute = (int(part) for part in schedule.time.split(":"))
-    day = now.astimezone(TAIPEI).date() - timedelta(days=1)
-    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=TAIPEI)
+    day = now.astimezone(zone).date() - timedelta(days=1)
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
 
 
 class TaskScheduler:
