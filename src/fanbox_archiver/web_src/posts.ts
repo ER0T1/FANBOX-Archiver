@@ -4,6 +4,8 @@ namespace FanboxUI {
     onPage(page: number): void;
     onTag?(tag: string): void;
     activeTag?: string;
+    order?: SortOrder;
+    onOrder?(order: SortOrder): void;
   }
 
   export interface PostReaderActions {
@@ -65,7 +67,8 @@ namespace FanboxUI {
     const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
     return h("section", {class: "page"},
       h("header", {class: "heading"}, h("div", {},
-        h("p", {class: "eyebrow"}, "POSTS"), h("h1", {}, "投稿"), h("p", {}, `${data.total} 篇備份`))),
+        h("p", {class: "eyebrow"}, "POSTS"), h("h1", {}, "投稿"), h("p", {}, `${data.total} 篇備份`)),
+      actions.onOrder ? sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序") : null),
       h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, "沒有符合條件的投稿。")),
       renderPagination(data, actions.onPage));
   }
@@ -87,6 +90,8 @@ namespace FanboxUI {
         }, `${facet.name} ${facet.count}`)) : h("span", {class: "tag-filter-empty"}, "尚無已保存的投稿標籤"))) : null;
     return h("div", {class: "creator-posts"},
       filter,
+      actions.onOrder ? h("div", {class: "list-toolbar"},
+        sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序")) : null,
       h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, "沒有符合條件的投稿。")),
       renderPagination(data, actions.onPage, "創作者投稿分頁"));
   }

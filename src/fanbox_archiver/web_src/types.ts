@@ -16,6 +16,13 @@ namespace FanboxUI {
     count: number;
   }
 
+  export type SortOrder = "desc" | "asc";
+
+  export interface JobPage extends Page<WebJob> {
+    /** The job currently running anywhere, independent of the page's filters. */
+    active: WebJob | null;
+  }
+
   export interface PostPage extends Page<PostSummary> {
     tag_facets: TagFacet[];
     creator_total: number;

@@ -32,6 +32,7 @@ class ArchiveReader:
     def __init__(self, config: AppConfig):
         self.root = config.storage.output_dir.resolve()
         self.db = Database(config.storage.database)
+        self._tag_cache: dict[tuple[str, int], tuple[str, ...]] = {}
 
     def status(self) -> dict[str, Any]:
         counts = self.db.statistics()
@@ -41,157 +42,92 @@ class ArchiveReader:
             "latest_run": dict(latest) if latest else None,
         }
 
+    _LATEST_VERSION_SQL = """
+        COALESCE(
+          (SELECT pointed.version_number FROM post_versions pointed
+           WHERE pointed.version_id=p.latest_version_id
+             AND pointed.post_id=p.post_id AND pointed.status='completed'),
+          (SELECT MAX(v.version_number) FROM post_versions v
+           WHERE v.post_id=p.post_id AND v.status='completed')
+        )"""
+
     def list_posts(
-        self, *, page: int = 1, page_size: int = 50, query: str = "",
-        creator: str = "", status: str = "", tag: str = "",
+        self, *, page: int = 1, page_size: int = 20, query: str = "",
+        creator: str = "", status: str = "", tag: str = "", ascending: bool = False,
     ) -> dict[str, Any]:
         page = max(1, page)
         page_size = min(max(1, page_size), 100)
         where, values = self._post_filter(query=query, creator=creator, status=status)
-        pin_order = "p.is_pinned DESC," if creator else ""
-        with self.db.connect() as db:
-            total = int(db.execute(
-                f"SELECT COUNT(*) FROM posts p JOIN creators c ON c.creator_id=p.creator_id {where}", values
-            ).fetchone()[0])
-            pages = max(1, (total + page_size - 1) // page_size)
-            page = min(page, pages)
-            rows = list(db.execute(
-                f"""
-                SELECT p.*,c.name AS creator_name,
-                       (SELECT COUNT(*) FROM post_versions v
-                        WHERE v.post_id=p.post_id) AS version_count,
-                       COALESCE(
-                         (SELECT pointed.version_number FROM post_versions pointed
-                          WHERE pointed.version_id=p.latest_version_id
-                            AND pointed.post_id=p.post_id AND pointed.status='completed'),
-                         (SELECT MAX(v.version_number) FROM post_versions v
-                          WHERE v.post_id=p.post_id AND v.status='completed')
-                       ) AS latest_version
-                FROM posts p
-                JOIN creators c ON c.creator_id=p.creator_id
-                {where}
-                ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
-                LIMIT ? OFFSET ?
-                """,
-                [*values, page_size, (page - 1) * page_size],
-            ))
-        items = [self._post_summary(row) for row in rows]
+        order = self._post_order(creator=creator, ascending=ascending)
         tag_facets: list[dict[str, Any]] = []
-        creator_total = total
-        if creator:
-            facet_where, facet_values = self._post_filter(creator=creator)
-            with self.db.connect() as db:
-                facet_rows = list(db.execute(
-                    f"""
-                    SELECT p.*,c.name AS creator_name,
-                           (SELECT COUNT(*) FROM post_versions v
-                            WHERE v.post_id=p.post_id) AS version_count,
-                           COALESCE(
-                             (SELECT pointed.version_number FROM post_versions pointed
-                              WHERE pointed.version_id=p.latest_version_id
-                                AND pointed.post_id=p.post_id AND pointed.status='completed'),
-                             (SELECT MAX(v.version_number) FROM post_versions v
-                              WHERE v.post_id=p.post_id AND v.status='completed')
-                           ) AS latest_version
-                    FROM posts p
-                    JOIN creators c ON c.creator_id=p.creator_id
-                    {facet_where}
-                    ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
-                    """,
-                    facet_values,
-                ))
-            facet_items = [self._post_summary(row) for row in facet_rows]
-            facet_by_id = {item["post_id"]: item for item in facet_items}
-            items = [facet_by_id[str(row["post_id"])] for row in rows]
-            creator_total = len(facet_items)
-            counts: dict[str, int] = {}
-            for item in facet_items:
-                for item_tag in filter(None, dict.fromkeys(item["tags"])):
-                    counts[item_tag] = counts.get(item_tag, 0) + 1
-            tag_facets = [
-                {"name": name, "count": count}
-                for name, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0].casefold()))
-            ]
-            if tag:
-                items = [item for item in items if tag in item["tags"]]
-                # The SQL page was selected before tag filtering. Rebuild the complete
-                # filtered result so counts and page boundaries remain deterministic.
-                filtered_where, filtered_values = self._post_filter(
-                    query=query, creator=creator, status=status,
-                )
-                with self.db.connect() as db:
-                    filtered_rows = list(db.execute(
-                        f"""
-                        SELECT p.*,c.name AS creator_name,
-                               (SELECT COUNT(*) FROM post_versions v
-                                WHERE v.post_id=p.post_id) AS version_count,
-                               COALESCE(
-                                 (SELECT pointed.version_number FROM post_versions pointed
-                                  WHERE pointed.version_id=p.latest_version_id
-                                    AND pointed.post_id=p.post_id AND pointed.status='completed'),
-                                 (SELECT MAX(v.version_number) FROM post_versions v
-                                  WHERE v.post_id=p.post_id AND v.status='completed')
-                               ) AS latest_version
-                        FROM posts p
-                        JOIN creators c ON c.creator_id=p.creator_id
-                        {filtered_where}
-                        ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
-                        """,
-                        filtered_values,
-                    ))
-                filtered_items = [
-                    facet_by_id[str(row["post_id"])] for row in filtered_rows
-                    if tag in facet_by_id[str(row["post_id"])]["tags"]
+        creator_total: int | None = None
+        with self.db.connect() as db:
+            if creator:
+                facet_where, facet_values = self._post_filter(creator=creator)
+                facet_rows = self._ordered_ids(db, facet_where, facet_values, order)
+                creator_total = len(facet_rows)
+                counts: dict[str, int] = {}
+                for row in facet_rows:
+                    for item_tag in dict.fromkeys(self._post_tags(row)):
+                        counts[item_tag] = counts.get(item_tag, 0) + 1
+                tag_facets = [
+                    {"name": name, "count": count}
+                    for name, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0].casefold()))
                 ]
-                total = len(filtered_items)
+            if creator and tag:
+                # Tags live in each version's post.json; the cached tag set picks the
+                # matching ids, then only the visible page is loaded in full.
+                matching = [
+                    str(row["post_id"]) for row in self._ordered_ids(db, where, values, order)
+                    if tag in self._post_tags(row)
+                ]
+                total = len(matching)
                 pages = max(1, (total + page_size - 1) // page_size)
                 page = min(page, pages)
-                start = (page - 1) * page_size
-                items = filtered_items[start:start + page_size]
+                page_ids = matching[(page - 1) * page_size:page * page_size]
+                rows = self._summary_rows(
+                    db, f"WHERE p.post_id IN ({','.join('?' * len(page_ids))})" if page_ids else "WHERE 0",
+                    page_ids, order,
+                )
+            else:
+                total = int(db.execute(
+                    f"SELECT COUNT(*) FROM posts p JOIN creators c ON c.creator_id=p.creator_id {where}", values
+                ).fetchone()[0])
+                pages = max(1, (total + page_size - 1) // page_size)
+                page = min(page, pages)
+                rows = self._summary_rows(
+                    db, where, values, order, limit=page_size, offset=(page - 1) * page_size,
+                )
         return {
-            "items": items,
+            "items": [self._post_summary(row) for row in rows],
             "page": page,
             "page_size": page_size,
             "total": total,
-            "pages": max(1, (total + page_size - 1) // page_size),
+            "pages": pages,
             "tag_facets": tag_facets,
-            "creator_total": creator_total,
+            "creator_total": creator_total if creator_total is not None else total,
         }
 
     def post_navigation(
         self, post_id: str, *, creator: str = "", query: str = "", tag: str = "",
+        ascending: bool = False,
     ) -> dict[str, Any]:
         where, values = self._post_filter(query=query, creator=creator)
-        pin_order = "p.is_pinned DESC," if creator else ""
+        order = self._post_order(creator=creator, ascending=ascending)
         with self.db.connect() as db:
             rows = list(db.execute(
                 f"""
                 SELECT p.post_id,p.creator_id,c.name AS creator_name,p.title,
-                       p.published_at,p.is_pinned,
-                       COALESCE(
-                         (SELECT pointed.version_number FROM post_versions pointed
-                          WHERE pointed.version_id=p.latest_version_id
-                            AND pointed.post_id=p.post_id AND pointed.status='completed'),
-                         (SELECT MAX(v.version_number) FROM post_versions v
-                          WHERE v.post_id=p.post_id AND v.status='completed')
-                       ) AS latest_version
+                       p.published_at,p.is_pinned,{self._LATEST_VERSION_SQL} AS latest_version
                 FROM posts p
                 JOIN creators c ON c.creator_id=p.creator_id
                 {where}
-                ORDER BY {pin_order}p.published_at DESC,p.post_id DESC
+                ORDER BY {order}
                 """,
                 values,
             ))
         if tag:
-            def has_tag(row: Any) -> bool:
-                version = row["latest_version"]
-                if version is None:
-                    return False
-                try:
-                    return tag in self._load_post(str(row["post_id"]), int(version))[1].tags
-                except ReaderNotFound:
-                    return False
-            rows = [row for row in rows if has_tag(row)]
+            rows = [row for row in rows if tag in self._post_tags(row)]
         index = next(
             (position for position, row in enumerate(rows) if str(row["post_id"]) == post_id),
             None,
@@ -218,6 +154,54 @@ class ArchiveReader:
             "position": index + 1,
             "total": len(rows),
         }
+
+    @staticmethod
+    def _post_order(*, creator: str, ascending: bool) -> str:
+        direction = "ASC" if ascending else "DESC"
+        # Creator pages keep pinned posts on top whichever way time is sorted.
+        pinned = "p.is_pinned DESC," if creator else ""
+        return f"{pinned}p.published_at {direction},p.post_id {direction}"
+
+    def _ordered_ids(self, db: Any, where: str, values: list[object], order: str) -> list[Any]:
+        return list(db.execute(
+            f"SELECT p.post_id,{self._LATEST_VERSION_SQL} AS latest_version "
+            f"FROM posts p JOIN creators c ON c.creator_id=p.creator_id {where} ORDER BY {order}",
+            values,
+        ))
+
+    def _summary_rows(
+        self, db: Any, where: str, values: list[object], order: str,
+        *, limit: int | None = None, offset: int = 0,
+    ) -> list[Any]:
+        paging = "LIMIT ? OFFSET ?" if limit is not None else ""
+        return list(db.execute(
+            f"""
+            SELECT p.*,c.name AS creator_name,
+                   (SELECT COUNT(*) FROM post_versions v WHERE v.post_id=p.post_id) AS version_count,
+                   {self._LATEST_VERSION_SQL} AS latest_version
+            FROM posts p
+            JOIN creators c ON c.creator_id=p.creator_id
+            {where}
+            ORDER BY {order}
+            {paging}
+            """,
+            [*values, *((limit, offset) if limit is not None else ())],
+        ))
+
+    def _post_tags(self, row: Any) -> tuple[str, ...]:
+        """Tags of the post's latest completed version; versions never change once written."""
+        version = row["latest_version"]
+        if version is None:
+            return ()
+        key = (str(row["post_id"]), int(version))
+        cached = self._tag_cache.get(key)
+        if cached is None:
+            try:
+                cached = tuple(self._load_post(key[0], key[1])[1].tags)
+            except ReaderNotFound:
+                cached = ()
+            self._tag_cache[key] = cached
+        return cached
 
     def list_creators(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

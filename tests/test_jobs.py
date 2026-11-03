@@ -117,7 +117,7 @@ def test_completed_job_and_events_survive_manager_restart(tmp_path: Path):
         assert [event["kind"] for event in restored["events"]] == [
             "plan_ready", "job_finished",
         ]
-        summary = restored_manager.list()[0]
+        summary = restored_manager.page()["items"][0]
         assert summary["job_id"] == completed["job_id"]
         assert summary["event_count"] == 2
         assert "events" not in summary
@@ -234,7 +234,7 @@ def test_verify_job_uses_same_persistent_queue(tmp_path: Path):
             "phase": "scan", "current": 0, "total": 0, "percent": 100.0,
             "item": "封存中沒有需要驗證的項目", "issue_count": 0,
         }
-        assert manager.list()[0]["kind"] == "verify"
+        assert manager.page(kind="verify")["items"][0]["kind"] == "verify"
     finally:
         manager.close()
 
@@ -285,3 +285,65 @@ def test_failed_verify_restores_exact_last_progress(monkeypatch, tmp_path: Path)
         assert progress[0]["data"]["item"] == "Post 456 資源"
     finally:
         restored_manager.close()
+
+
+def seed_jobs(app_config, count: int) -> list[str]:
+    database = Database(app_config.storage.database)
+    ids = []
+    for index in range(count):
+        job_id = f"job-{index:04d}"
+        created = f"2026-01-{1 + index // 24:02d}T{index % 24:02d}:00:00+00:00"
+        database.create_web_job(
+            job_id, json.dumps({"creators": [], "dry_run": True, "max_posts": 5, "mode": "full"}),
+            created, created, kind="verify" if index % 4 == 0 else "backup",
+        )
+        database.update_web_job(
+            job_id, status="failed" if index % 5 == 0 else "completed", updated_at=created,
+            started_at=created, finished_at=created, error=None, result_json=None,
+        )
+        database.record_web_job_event(job_id, "plan_ready", created, "{}")
+        ids.append(job_id)
+    return ids
+
+
+def test_job_history_pages_from_database_beyond_one_hundred_after_restart(tmp_path: Path):
+    app_config = config(tmp_path)
+    ids = seed_jobs(app_config, 130)
+    manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        first = manager.page(page_size=20)
+        assert (first["total"], first["pages"], first["page"]) == (130, 7, 1)
+        assert [item["job_id"] for item in first["items"]] == ids[::-1][:20]
+        assert "events" not in first["items"][0] and first["items"][0]["event_count"] == 1
+        assert first["active"] is None
+
+        oldest = manager.page(page_size=20, ascending=True)
+        assert oldest["items"][0]["job_id"] == "job-0000"
+        last = manager.page(page=7, page_size=20)
+        assert [item["job_id"] for item in last["items"]] == ids[::-1][120:]
+        assert manager.page(page=99, page_size=20)["page"] == 7
+
+        backups = manager.page(kind="backup", page_size=100)
+        assert backups["total"] == 97 and {item["kind"] for item in backups["items"]} == {"backup"}
+        failed = manager.page(kind="backup", status="failed", page_size=100)
+        assert {item["status"] for item in failed["items"]} == {"failed"}
+
+        detail = manager.get("job-0001")
+        assert detail is not None and [event["kind"] for event in detail["events"]] == ["plan_ready"]
+        assert manager.cancel("job-0001")["status"] == "completed"
+    finally:
+        manager.close()
+
+
+def test_retry_of_a_job_known_only_from_database(tmp_path: Path):
+    app_config = config(tmp_path)
+    seed_jobs(app_config, 3)
+    manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        retried = manager.retry("job-0001")
+        assert retried["request"]["max_posts"] == 5
+        assert manager.wait(retried["job_id"])["status"] == "completed"
+        assert manager.page()["items"][0]["job_id"] == retried["job_id"]
+        assert manager.retry("missing") is None
+    finally:
+        manager.close()

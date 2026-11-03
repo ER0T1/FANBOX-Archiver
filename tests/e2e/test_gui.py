@@ -38,6 +38,7 @@ class PollingJobFixture:
         self.hold_backup = True
         self.submitted: list = []
         self.created_at = "2026-10-29T00:00:00+00:00"
+        self.history: list[dict] = []
 
     def _snapshot(self, *, include_events: bool = True) -> dict:
         completed = not self.hold_backup
@@ -107,7 +108,18 @@ class PollingJobFixture:
             items.insert(0, self._submitted_snapshot(include_events=False))
         if self.verify_submitted:
             items.insert(0, self._verify_snapshot(include_events=False))
-        return items
+        return items + self.history
+
+    def page(self, *, kind=None, status=None, ascending=False, page=1, page_size=20) -> dict:
+        everything = self.list()
+        items = [item for item in everything
+                 if (kind is None or item["kind"] == kind) and (status is None or item["status"] == status)]
+        items.sort(key=lambda item: (item["created_at"], item["job_id"]), reverse=not ascending)
+        pages = max(1, -(-len(items) // page_size))
+        page = min(max(1, page), pages)
+        active = next((item for item in everything if item["status"] in {"queued", "running", "cancelling"}), None)
+        return {"items": items[(page - 1) * page_size:page * page_size], "page": page, "pages": pages,
+                "page_size": page_size, "total": len(items), "active": active}
 
     def get(self, job_id: str) -> dict | None:
         if job_id == "e2e-verify":
@@ -260,6 +272,19 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
     expect(page.locator(".post-card").first).to_contain_text("奇數")
     page.go_back()
     expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
+    static_cards = page.locator(".post-card")
+    expect(static_cards).to_have_count(20)
+    expect(page.locator(".pagination")).to_contain_text("第 1 / 3 頁")
+    expect(static_cards.first).to_contain_text("投稿 00")  # pinned
+    expect(static_cards.nth(1)).to_contain_text("投稿 54")
+    page.get_by_role("button", name="時間排序：新到舊，按下切換").click()
+    expect(static_cards.first).to_contain_text("投稿 00")
+    expect(static_cards.nth(1)).to_contain_text("投稿 01")
+    assert "order=asc" in page.url
+    page.get_by_role("combobox", name="排序方式").select_option("title")
+    expect(page.get_by_role("button", name="時間排序只適用於發布或更新時間")).to_be_disabled()
+    page.goto(f"{index_url}#view=posts&sort=published-desc")
+    expect(static_cards.first).to_contain_text("投稿 54")
     page.goto(f"{index_url}#view=creators")
     expect(page.get_by_role("link", name="Creator Profile")).to_be_visible()
     page.get_by_role("link", name="Creator Profile").click()
@@ -383,11 +408,23 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("heading", name="投稿", exact=True)).to_be_visible()
     expect(page.get_by_text("55 篇備份", exact=True)).to_be_visible()
     expect(page.locator(".post-card").first).to_contain_text("共同")
-    expect(page.locator('summary[aria-label="目前第 1 頁，共 2 頁"]')).to_be_visible()
+    expect(page.locator('summary[aria-label="目前第 1 頁，共 3 頁"]')).to_be_visible()
+    expect(page.locator(".post-card")).to_have_count(20)
+    expect(page.locator(".post-card").first).to_contain_text("投稿 54")
 
     page.get_by_role("button", name="下一頁 →").click()
-    expect(page.locator('summary[aria-label="目前第 2 頁，共 2 頁"]')).to_be_visible()
+    expect(page.locator('summary[aria-label="目前第 2 頁，共 3 頁"]')).to_be_visible()
+    page.get_by_role("button", name="下一頁 →").click()
+    expect(page.locator('summary[aria-label="目前第 3 頁，共 3 頁"]')).to_be_visible()
     expect(page.get_by_text("投稿 00", exact=True)).to_be_visible()
+
+    order = page.get_by_role("button", name="投稿時間排序：新到舊，按下切換")
+    order.click()
+    expect(page.locator('summary[aria-label="目前第 1 頁，共 3 頁"]')).to_be_visible()
+    expect(page.locator(".post-card").first).to_contain_text("投稿 00")
+    expect(page.get_by_role("button", name="投稿時間排序：舊到新，按下切換")).to_be_visible()
+    page.get_by_role("button", name="投稿時間排序：舊到新，按下切換").click()
+    expect(page.locator(".post-card").first).to_contain_text("投稿 54")
 
     search = page.get_by_role("searchbox", name="搜尋文章")
     search.fill("稀有關鍵字")
@@ -533,16 +570,26 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(first_creator_post).to_contain_text("置頂")
     expect(first_creator_post).to_contain_text("共同")
     expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
+    creator_cards = page.locator(".creator-posts .post-card")
+    expect(creator_cards).to_have_count(20)
+    expect(creator_cards.nth(1)).to_contain_text("投稿 54")
+    page.get_by_role("button", name="投稿時間排序：新到舊，按下切換").click()
+    expect(creator_cards.first).to_contain_text("投稿 00")  # pinned stays first in both orders
+    expect(creator_cards.nth(1)).to_contain_text("投稿 01")
+    page.get_by_role("button", name="投稿時間排序：舊到新，按下切換").click()
+    expect(creator_cards.nth(1)).to_contain_text("投稿 54")
     expect(page.get_by_role("button", name="奇數 27", exact=True)).to_be_visible()
     page.get_by_role("button", name="奇數 27", exact=True).click()
-    expect(page.locator(".creator-posts .post-card")).to_have_count(27)
-    expect(page.locator(".creator-posts .pagination")).to_have_count(0)
-    expect(page.locator(".creator-posts .post-card").first).to_contain_text("奇數")
+    expect(creator_cards).to_have_count(20)
+    expect(page.locator('.creator-posts summary[aria-label="目前第 1 頁，共 2 頁"]')).to_be_visible()
+    expect(creator_cards.first).to_contain_text("奇數")
+    page.get_by_role("button", name="下一頁 →").click()
+    expect(creator_cards).to_have_count(7)
     search = page.get_by_role("searchbox", name="搜尋文章")
     search.fill("稀有關鍵字")
-    expect(page.locator(".creator-posts .post-card")).to_have_count(1)
+    expect(creator_cards).to_have_count(1)
     search.fill("")
-    expect(page.locator(".creator-posts .post-card")).to_have_count(27)
+    expect(creator_cards).to_have_count(20)
     page.go_back()
     expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
     page.set_viewport_size({"width": 390, "height": 844})
@@ -577,3 +624,38 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("heading", name="驗證投稿", exact=True)).to_be_visible(timeout=5_000)
     expect(page.locator(".verification-summary strong")).to_have_text("驗證通過", timeout=5_000)
     assert jobs.verify_get_calls >= 2
+
+
+def test_job_history_pages_sorts_and_filters_on_the_server(page: Page, live_gui) -> None:
+    base_url, _, jobs = live_gui
+    jobs.hold_backup = False
+    for index in range(25):
+        created = f"2026-09-{1 + index:02d}T00:00:00+00:00"
+        jobs.history.append({
+            "job_id": f"old-{index:02d}", "kind": "backup",
+            "status": "failed" if index % 5 == 0 else "completed",
+            "created_at": created, "started_at": created, "finished_at": created, "updated_at": created,
+            "error": None, "request": {"creators": [], "dry_run": False, "mode": "full"},
+            "result": {"success": index, "failure": 0}, "event_count": 0,
+        })
+    page.goto(base_url, wait_until="networkidle")
+    page.get_by_role("button", name="備份", exact=True).click()
+    page.get_by_role("button", name="工作歷史", exact=True).click()
+    rows = page.locator(".job-history .history-row")
+    expect(rows).to_have_count(20)
+    expect(page.locator('.job-history summary[aria-label="目前第 1 頁，共 2 頁"]')).to_be_visible()
+    expect(rows.first).to_contain_text("2026年10月29日")
+    page.get_by_role("button", name="下一頁 →").click()
+    expect(rows).to_have_count(6)
+
+    page.get_by_role("button", name="工作時間排序：新到舊，按下切換").click()
+    expect(page.locator('.job-history summary[aria-label="目前第 1 頁，共 2 頁"]')).to_be_visible()
+    expect(rows.first).to_contain_text("2026年09月01日")
+
+    page.get_by_role("combobox", name="篩選工作狀態").click()
+    page.get_by_role("option", name="失敗").click()
+    expect(rows).to_have_count(5)
+    expect(page.locator(".job-history .pagination")).to_have_count(0)
+    expect(page.get_by_role("button", name="工作時間排序：舊到新，按下切換")).to_be_visible()
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

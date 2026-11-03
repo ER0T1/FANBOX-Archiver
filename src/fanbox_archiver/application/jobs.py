@@ -46,7 +46,14 @@ class _JobEventSink(EventSink):
 
 
 class BackupJobManager:
-    """Run at most one archive mutation at a time in a background worker."""
+    """Run at most one archive mutation at a time in a background worker.
+
+    History lives in SQLite and is paged from there; memory only holds jobs run by
+    this process, so the active job's live state wins over its persisted row.
+    """
+
+    _FINISHED_IN_MEMORY = 10
+    _ACTIVE = frozenset({"queued", "running", "cancelling"})
 
     def __init__(
         self, config: AppConfig, *,
@@ -61,7 +68,6 @@ class BackupJobManager:
         self._futures: dict[str, Future] = {}
         self._progress_persisted_at: dict[str, float] = {}
         self.db.recover_interrupted_web_jobs(_now())
-        self._restore_jobs()
 
     def submit(self, request: BackupRequest) -> dict[str, Any]:
         return self._submit("backup", request)
@@ -71,35 +77,61 @@ class BackupJobManager:
 
     def _submit(self, kind: str, request: Any) -> dict[str, Any]:
         with self._lock:
-            if any(job.status in {"queued", "running", "cancelling"} for job in self._jobs.values()):
-                raise RuntimeError("已有備份工作正在執行")
-            job_id = uuid.uuid4().hex
-            job = BackupJob(job_id, request, CancellationToken(), kind=kind)
-            self._jobs[job_id] = job
-            self.db.create_web_job(
-                job.job_id, json.dumps(self._request_data(job.request), ensure_ascii=False, sort_keys=True),
-                job.created_at, job.updated_at, kind=kind,
-            )
-            self._futures[job_id] = self._executor.submit(self._run, job_id)
-            return self._snapshot(job)
+            return self._submit_locked(kind, request)
 
-    def list(self) -> list[dict[str, Any]]:
+    def _submit_locked(self, kind: str, request: Any) -> dict[str, Any]:
+        if any(job.status in self._ACTIVE for job in self._jobs.values()):
+            raise RuntimeError("已有備份工作正在執行")
+        job_id = uuid.uuid4().hex
+        job = BackupJob(job_id, request, CancellationToken(), kind=kind)
+        self._jobs[job_id] = job
+        self.db.create_web_job(
+            job.job_id, json.dumps(self._request_data(job.request), ensure_ascii=False, sort_keys=True),
+            job.created_at, job.updated_at, kind=kind,
+        )
+        self._futures[job_id] = self._executor.submit(self._run, job_id)
+        return self._snapshot(job)
+
+    def page(
+        self, *, kind: str | None = None, status: str | None = None, ascending: bool = False,
+        page: int = 1, page_size: int = 20,
+    ) -> dict[str, Any]:
+        page_size = min(max(1, page_size), 100)
+        total = self.db.web_job_count(kind=kind, status=status)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(max(1, page), pages)
+        rows = self.db.web_job_page(
+            kind=kind, status=status, ascending=ascending,
+            limit=page_size, offset=(page - 1) * page_size,
+        )
         with self._lock:
-            return [
-                self._snapshot(job, include_events=False)
-                for job in reversed(list(self._jobs.values()))
+            items = [
+                self._snapshot(self._jobs[str(row["job_id"])], include_events=False)
+                if str(row["job_id"]) in self._jobs else self._row_snapshot(row)
+                for row in rows
             ]
+            active = next((job for job in self._jobs.values() if job.status in self._ACTIVE), None)
+            active_value = self._snapshot(active, include_events=False) if active else None
+        return {
+            "items": items, "page": page, "pages": pages, "page_size": page_size,
+            "total": total, "active": active_value,
+        }
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
-            return self._snapshot(job) if job else None
+            if job is not None:
+                return self._snapshot(job)
+        row = self.db.web_job_row(job_id)
+        return self._row_snapshot(row, include_events=True) if row is not None else None
 
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
-                return None
+                # Only jobs run by this process can still be active; older ones are final.
+                row = self.db.web_job_row(job_id)
+                return self._row_snapshot(row, include_events=True) if row is not None else None
             if job.kind != "backup" and job.status in {"queued", "running", "cancelling"}:
                 raise RuntimeError("此類工作不支援中途取消")
             if job.status in {"queued", "running"}:
@@ -112,25 +144,27 @@ class BackupJobManager:
     def retry(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None:
-                return None
-            if job.status in {"queued", "running", "cancelling"}:
-                raise RuntimeError("工作仍在執行，無法重試")
-            request = job.request
-            kind = job.kind
+            if job is not None:
+                if job.status in self._ACTIVE:
+                    raise RuntimeError("工作仍在執行，無法重試")
+                return self._submit_locked(job.kind, job.request)
+        row = self.db.web_job_row(job_id)
+        if row is None:
+            return None
+        kind = str(row["kind"])
+        request_data = json.loads(str(row["request_json"]))
+        request = self._restore_backup_request(request_data) if kind == "backup" else request_data
         return self._submit(kind, request)
 
     def has_active(self) -> bool:
         with self._lock:
-            return any(
-                job.status in {"queued", "running", "cancelling"}
-                for job in self._jobs.values()
-            )
+            return any(job.status in self._ACTIVE for job in self._jobs.values())
 
     def wait(self, job_id: str, timeout: float = 10.0) -> dict[str, Any]:
         with self._lock:
-            future = self._futures[job_id]
-        future.result(timeout=timeout)
+            future = self._futures.get(job_id)
+        if future is not None:
+            future.result(timeout=timeout)
         result = self.get(job_id)
         if result is None:
             raise KeyError(job_id)
@@ -212,6 +246,13 @@ class BackupJobManager:
                         )
                 job.finished_at = job.updated_at = _now()
                 self._persist_job(job)
+                self._forget_finished()
+
+    def _forget_finished(self) -> None:
+        finished = [key for key, value in self._jobs.items() if value.status not in self._ACTIVE]
+        for key in finished[:-self._FINISHED_IN_MEMORY]:
+            del self._jobs[key]
+            self._futures.pop(key, None)
 
     def _record_event(self, job_id: str, event: BackupEvent) -> None:
         value = event.model_dump()
@@ -264,33 +305,30 @@ class BackupJobManager:
             )
             self._persist_job(job)
 
-    def _restore_jobs(self) -> None:
-        for row in reversed(self.db.web_job_rows()):
-            request_data = json.loads(str(row["request_json"]))
-            kind = str(row["kind"])
-            result = json.loads(str(row["result_json"])) if row["result_json"] else None
-            events = [
+    def _row_snapshot(self, row: Any, *, include_events: bool = False) -> dict[str, Any]:
+        value = {
+            "job_id": str(row["job_id"]),
+            "kind": str(row["kind"]),
+            "status": str(row["status"]),
+            "request": json.loads(str(row["request_json"])),
+            "created_at": str(row["created_at"]),
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "updated_at": str(row["updated_at"]),
+            "error": row["error"],
+            "result": json.loads(str(row["result_json"])) if row["result_json"] else None,
+            "event_count": int(row["event_count"]),
+        }
+        if include_events:
+            value["events"] = [
                 {
                     "kind": str(event["kind"]),
                     "timestamp": str(event["timestamp"]),
                     "data": json.loads(str(event["data_json"])),
                 }
-                for event in self.db.web_job_event_rows(str(row["job_id"]))
+                for event in self.db.web_job_event_rows(value["job_id"])
             ]
-            self._jobs[str(row["job_id"])] = BackupJob(
-                job_id=str(row["job_id"]),
-                request=(self._restore_backup_request(request_data) if kind == "backup" else request_data),
-                cancellation=CancellationToken(),
-                kind=kind,
-                status=str(row["status"]),
-                created_at=str(row["created_at"]),
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                updated_at=str(row["updated_at"]),
-                error=row["error"],
-                result=result,
-                events=events,
-            )
+        return value
 
     def _persist_job(self, job: BackupJob) -> None:
         self.db.update_web_job(

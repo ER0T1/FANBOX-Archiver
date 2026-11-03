@@ -98,8 +98,8 @@ namespace FanboxUI {
     });
   }
 
-  export function getJobs(): Promise<{items: WebJob[]}> {
-    return requestJson<{items: WebJob[]}>("/api/jobs");
+  export function getJobs(params: URLSearchParams = new URLSearchParams({page_size: "1"})): Promise<JobPage> {
+    return requestJson<JobPage>(`/api/jobs?${params}`);
   }
 
   export function getJob(jobId: string): Promise<WebJob> {

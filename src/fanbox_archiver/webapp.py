@@ -258,8 +258,16 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
         return {"editable": updated.editable_dict(), "saved": True}
 
     @app.get("/api/jobs")
-    async def list_jobs():
-        return {"items": app.state.jobs.list()}
+    async def list_jobs(
+        page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+        kind: Literal["backup", "verify"] | None = None,
+        status: Literal["queued", "running", "cancelling", "completed", "failed", "cancelled", "interrupted"] | None = None,
+        order: Literal["desc", "asc"] = "desc",
+    ):
+        return await run_in_threadpool(
+            app.state.jobs.page, kind=kind, status=status, ascending=order == "asc",
+            page=page, page_size=page_size,
+        )
 
     @app.get("/api/jobs/{job_id}")
     async def get_job(job_id: str):
@@ -423,25 +431,28 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
 
     @app.get("/api/posts")
     async def posts(
-        page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100),
+        page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
         q: str = Query("", max_length=200), creator: str = Query("", max_length=200),
         status: str = Query("", max_length=40), tag: str = Query("", max_length=200),
+        order: Literal["desc", "asc"] = "desc",
     ):
         return reader.list_posts(
             page=page, page_size=page_size, query=q.strip(),
             creator=creator.strip(), status=status.strip(), tag=tag.strip(),
+            ascending=order == "asc",
         )
 
     @app.get("/api/posts/{post_id}")
     async def post(
         post_id: str, version: int | None = Query(None, ge=1),
         creator: str = Query("", max_length=200), q: str = Query("", max_length=200),
-        tag: str = Query("", max_length=200),
+        tag: str = Query("", max_length=200), order: Literal["desc", "asc"] = "desc",
     ):
         try:
             item = reader.post(post_id, version=version)
             item["navigation"] = reader.post_navigation(
                 post_id, creator=creator.strip(), query=q.strip(), tag=tag.strip(),
+                ascending=order == "asc",
             )
             return item
         except ReaderNotFound as exc:

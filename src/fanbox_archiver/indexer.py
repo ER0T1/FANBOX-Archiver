@@ -21,7 +21,7 @@ from .storage import BackupStorage
 from .timestamps import format_taipei
 
 
-TEMPLATE_VERSION = 13
+TEMPLATE_VERSION = 14
 
 
 @dataclass(slots=True)
@@ -282,6 +282,7 @@ class IndexBuilder:
             "published_at": row["published_at"],
             "updated_at": row["updated_at"],
             "status": str(row["status"]),
+            "is_pinned": bool(row["is_pinned"]),
             "tags": [],
             "fee_required": None,
             "version_count": len(versions),

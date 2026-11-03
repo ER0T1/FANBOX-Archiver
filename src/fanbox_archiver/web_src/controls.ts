@@ -108,6 +108,15 @@ namespace FanboxUI {
     return root;
   }
 
+  export function sortToggle(
+    order: SortOrder, onChange: (order: SortOrder) => void, label = "時間排序",
+  ): HTMLButtonElement {
+    const text = order === "desc" ? "新到舊 ↓" : "舊到新 ↑";
+    return h("button", {type: "button", class: "sort-toggle", "data-order": order,
+      "aria-label": `${label}：${order === "desc" ? "新到舊" : "舊到新"}，按下切換`,
+      onclick: () => onChange(order === "desc" ? "asc" : "desc")}, text) as HTMLButtonElement;
+  }
+
   export function closeDropdownsOutside(target: EventTarget | null): void {
     for (const dropdown of document.querySelectorAll<HTMLDetailsElement>(".custom-select[open], .page-jump[open]")) {
       if (!(target instanceof Node) || !dropdown.contains(target)) dropdown.open = false;

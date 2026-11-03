@@ -426,3 +426,22 @@ async def test_auth_status_reports_locked_not_error_while_a_job_runs(tmp_path: P
         recovered = (await client.get("/api/auth/status", headers=token)).json()
         assert recovered["state"] == "authenticated"
         assert len(checks) == 2
+
+
+@pytest.mark.anyio
+async def test_list_endpoints_page_and_sort_with_validated_parameters(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        jobs = (await client.get("/api/jobs?kind=backup&order=asc&page=3")).json()
+        assert set(jobs) == {"items", "page", "pages", "page_size", "total", "active"}
+        assert (jobs["page"], jobs["page_size"], jobs["active"]) == (1, 20, None)
+        for bad in ("kind=other", "order=sideways", "status=unknown", "page_size=101", "page=0"):
+            assert (await client.get(f"/api/jobs?{bad}")).status_code == 422
+        posts = (await client.get("/api/posts")).json()
+        assert posts["page_size"] == 20
+        assert (await client.get("/api/posts?order=asc")).status_code == 200
+        assert (await client.get("/api/posts?order=up")).status_code == 422
+        assert (await client.get("/api/posts/123?order=asc")).status_code == 200
+    app.state.jobs.close()

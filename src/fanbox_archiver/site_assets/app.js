@@ -2,7 +2,11 @@
   "use strict";
   const data = window.__FANBOX_ARCHIVE_DATA__ || {stats:{}, creators:[], posts:[], fancards:[], warnings:[]};
   const root = document.getElementById("app");
-  const state = {view:"overview", q:"", creator:"", tag:"", status:"", year:"", versioned:"", sort:"published-desc", page:1};
+  const state = {view:"overview", q:"", creator:"", tag:"", status:"", year:"", versioned:"", sort:"published", order:"desc", page:1};
+  const PAGE_SIZE = 20;
+  const TIME_SORTS = new Set(["published", "updated"]);
+  // Hashes written before v1.3.31 combined key and direction, e.g. "published-desc".
+  const LEGACY_SORTS = {"published-desc":["published"], "updated-desc":["updated"], "title-asc":["title"], "versions-desc":["versions"]};
 
   function node(tag, attrs = {}, ...children) {
     const element = document.createElement(tag);
@@ -44,7 +48,9 @@
     state.status = params.get("status") || "";
     state.year = params.get("year") || "";
     state.versioned = params.get("versioned") || "";
-    state.sort = params.get("sort") || "published-desc";
+    const legacySort = LEGACY_SORTS[params.get("sort")]?.[0];
+    state.sort = legacySort || (["published","updated","title","versions"].includes(params.get("sort")) ? params.get("sort") : "published");
+    state.order = params.get("order") === "asc" ? "asc" : "desc";
     state.page = Math.max(1, Number.parseInt(params.get("page") || "1", 10) || 1);
   }
   function writeHash(push = false) {
@@ -56,7 +62,8 @@
     if (state.status) params.set("status", state.status);
     if (state.year) params.set("year", state.year);
     if (state.versioned) params.set("versioned", state.versioned);
-    if (state.sort !== "published-desc") params.set("sort", state.sort);
+    if (state.sort !== "published") params.set("sort", state.sort);
+    if (state.order !== "desc" && TIME_SORTS.has(state.sort)) params.set("order", state.order);
     if (state.page > 1) params.set("page", state.page);
     const url = params.size ? `${location.pathname}${location.search}#${params}` : `${location.pathname}${location.search}`;
     history[push ? "pushState" : "replaceState"](null, "", url);
@@ -124,24 +131,34 @@
       node("option", {value:""}, "全部版本"), node("option", {value:"yes"}, "多版本文章"));
     versionSelect.value = state.versioned;
     const sortSelect = node("select", {"aria-label":"排序方式", onchange:event => {state.sort=event.target.value; resetPage();}},
-      node("option", {value:"published-desc"}, "發布時間（新到舊）"), node("option", {value:"updated-desc"}, "更新時間（新到舊）"),
-      node("option", {value:"title-asc"}, "標題（A–Z）"), node("option", {value:"versions-desc"}, "版本數（多到少）"));
+      node("option", {value:"published"}, "發布時間"), node("option", {value:"updated"}, "更新時間"),
+      node("option", {value:"title"}, "標題（A–Z）"), node("option", {value:"versions"}, "版本數（多到少）"));
     sortSelect.value = state.sort;
-    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.tag=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published-desc"; state.page=1; writeHash(); render();}}, "清除篩選");
-    return node("div", {class:"controls"}, creatorSelect, statusSelect, yearSelect, versionSelect, sortSelect, clear);
+    const timeSort = TIME_SORTS.has(state.sort);
+    const orderLabel = state.order === "desc" ? "新到舊" : "舊到新";
+    const orderToggle = node("button", {class:"sort-toggle", type:"button", "data-order":state.order,
+      disabled:timeSort ? null : "", "aria-label":timeSort ? `時間排序：${orderLabel}，按下切換` : "時間排序只適用於發布或更新時間",
+      onclick:() => {state.order = state.order === "desc" ? "asc" : "desc"; resetPage();}}, state.order === "desc" ? "新到舊 ↓" : "舊到新 ↑");
+    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.tag=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published"; state.order="desc"; state.page=1; writeHash(); render();}}, "清除篩選");
+    return node("div", {class:"controls"}, creatorSelect, statusSelect, yearSelect, versionSelect, sortSelect, orderToggle, clear);
   }
 
   function sortedPosts(items) {
     const result = [...items];
-    const newest = key => (a, b) => String(b[key] || "").localeCompare(String(a[key] || ""));
-    if (state.sort === "updated-desc") result.sort(newest("updated_at"));
-    else if (state.sort === "title-asc") result.sort((a,b) => a.title.localeCompare(b.title));
-    else if (state.sort === "versions-desc") result.sort((a,b) => b.version_count - a.version_count || newest("published_at")(a,b));
-    else result.sort(newest("published_at"));
+    const byTime = key => (a, b) => {
+      const value = String(a[key] || "").localeCompare(String(b[key] || "")) || a.post_id.localeCompare(b.post_id);
+      return state.order === "asc" ? value : -value;
+    };
+    if (state.sort === "updated") result.sort(byTime("updated_at"));
+    else if (state.sort === "title") result.sort((a,b) => a.title.localeCompare(b.title));
+    else if (state.sort === "versions") result.sort((a,b) => b.version_count - a.version_count || byTime("published_at")(a,b));
+    else result.sort(byTime("published_at"));
+    // A creator's pinned posts stay on top whichever way the list is sorted.
+    if (state.creator) result.sort((a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)));
     return result;
   }
 
-  function pagination(total, pageSize=50) {
+  function pagination(total, pageSize=PAGE_SIZE) {
     const pages = Math.max(1, Math.ceil(total / pageSize));
     state.page = Math.min(state.page, pages);
     if (pages === 1) return null;
@@ -174,7 +191,7 @@
 
   function postsView() {
     const items = sortedPosts(data.posts.filter(matchesPost));
-    const pageSize = 50;
+    const pageSize = PAGE_SIZE;
     const pageItems = items.slice((state.page - 1) * pageSize, state.page * pageSize);
     const creatorPosts = state.creator ? data.posts.filter(post => post.creator_id === state.creator) : [];
     const counts = new Map();

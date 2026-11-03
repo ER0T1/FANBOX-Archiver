@@ -144,6 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_post_versions_post ON post_versions(post_id,versi
 CREATE INDEX IF NOT EXISTS idx_fancard_versions_creator ON fancard_versions(creator_id,target_month,version_number);
 CREATE INDEX IF NOT EXISTS idx_profile_versions_creator ON creator_profile_versions(creator_id,version_number);
 CREATE INDEX IF NOT EXISTS idx_web_jobs_updated ON web_jobs(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_web_jobs_kind_created ON web_jobs(kind,created_at,job_id);
 CREATE INDEX IF NOT EXISTS idx_web_job_events_job ON web_job_events(job_id,event_id);
 """
 
@@ -771,11 +772,43 @@ class Database:
                 )
             return [str(row["job_id"]) for row in rows]
 
-    def web_job_rows(self, limit: int = 100) -> list[sqlite3.Row]:
+    @staticmethod
+    def _web_job_filter(kind: str | None, status: str | None) -> tuple[str, list[object]]:
+        clauses: list[str] = []
+        values: list[object] = []
+        if kind:
+            clauses.append("kind=?")
+            values.append(kind)
+        if status:
+            clauses.append("status=?")
+            values.append(status)
+        return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), values
+
+    def web_job_count(self, *, kind: str | None = None, status: str | None = None) -> int:
+        where, values = self._web_job_filter(kind, status)
+        with self.connect() as db:
+            return int(db.execute(f"SELECT COUNT(*) FROM web_jobs {where}", values).fetchone()[0])
+
+    def web_job_page(
+        self, *, kind: str | None = None, status: str | None = None, ascending: bool = False,
+        limit: int = 20, offset: int = 0,
+    ) -> list[sqlite3.Row]:
+        where, values = self._web_job_filter(kind, status)
+        direction = "ASC" if ascending else "DESC"
         with self.connect() as db:
             return list(db.execute(
-                "SELECT * FROM web_jobs ORDER BY created_at DESC,job_id DESC LIMIT ?", (limit,)
+                f"SELECT j.*,(SELECT COUNT(*) FROM web_job_events e WHERE e.job_id=j.job_id) AS event_count "
+                f"FROM web_jobs j {where} ORDER BY j.created_at {direction},j.job_id {direction} "
+                "LIMIT ? OFFSET ?",
+                [*values, limit, offset],
             ))
+
+    def web_job_row(self, job_id: str) -> sqlite3.Row | None:
+        with self.connect() as db:
+            return db.execute(
+                "SELECT j.*,(SELECT COUNT(*) FROM web_job_events e WHERE e.job_id=j.job_id) AS event_count "
+                "FROM web_jobs j WHERE j.job_id=?", (job_id,),
+            ).fetchone()
 
     def web_job_event_rows(self, job_id: str) -> list[sqlite3.Row]:
         with self.connect() as db:

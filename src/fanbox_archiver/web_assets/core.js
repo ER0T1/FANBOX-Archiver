@@ -5,6 +5,7 @@ var FanboxUI;
         return {
             view: "posts",
             page: 1,
+            postOrder: "desc",
             q: "",
             tag: "",
             current: null,
@@ -14,6 +15,11 @@ var FanboxUI;
             creator: null,
             creatorProfile: null,
             jobFilter: "all",
+            jobPage: 1,
+            jobOrder: "desc",
+            verifyPage: 1,
+            verifyOrder: "desc",
+            verifyJobId: null,
             activeJob: null,
             backupScreen: "form",
             backupJobId: null,
@@ -188,6 +194,13 @@ var FanboxUI;
         return root;
     }
     FanboxUI.customSelect = customSelect;
+    function sortToggle(order, onChange, label = "時間排序") {
+        const text = order === "desc" ? "新到舊 ↓" : "舊到新 ↑";
+        return FanboxUI.h("button", { type: "button", class: "sort-toggle", "data-order": order,
+            "aria-label": `${label}：${order === "desc" ? "新到舊" : "舊到新"}，按下切換`,
+            onclick: () => onChange(order === "desc" ? "asc" : "desc") }, text);
+    }
+    FanboxUI.sortToggle = sortToggle;
     function closeDropdownsOutside(target) {
         for (const dropdown of document.querySelectorAll(".custom-select[open], .page-jump[open]")) {
             if (!(target instanceof Node) || !dropdown.contains(target))
@@ -321,8 +334,8 @@ var FanboxUI;
         });
     }
     FanboxUI.logoutAuth = logoutAuth;
-    function getJobs() {
-        return requestJson("/api/jobs");
+    function getJobs(params = new URLSearchParams({ page_size: "1" })) {
+        return requestJson(`/api/jobs?${params}`);
     }
     FanboxUI.getJobs = getJobs;
     function getJob(jobId) {
@@ -393,7 +406,7 @@ var FanboxUI;
     FanboxUI.renderPagination = renderPagination;
     function renderPostListPage(data, actions) {
         const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
-        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "POSTS"), FanboxUI.h("h1", {}, "投稿"), FanboxUI.h("p", {}, `${data.total} 篇備份`))), FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage));
+        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "POSTS"), FanboxUI.h("h1", {}, "投稿"), FanboxUI.h("p", {}, `${data.total} 篇備份`)), actions.onOrder ? FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序") : null), FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage));
     }
     FanboxUI.renderPostListPage = renderPostListPage;
     function renderCreatorPostList(data, actions) {
@@ -404,7 +417,7 @@ var FanboxUI;
             "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
             onclick: () => actions.onTag?.(facet.name),
         }, `${facet.name} ${facet.count}`)) : FanboxUI.h("span", { class: "tag-filter-empty" }, "尚無已保存的投稿標籤"))) : null;
-        return FanboxUI.h("div", { class: "creator-posts" }, filter, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage, "創作者投稿分頁"));
+        return FanboxUI.h("div", { class: "creator-posts" }, filter, actions.onOrder ? FanboxUI.h("div", { class: "list-toolbar" }, FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序")) : null, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage, "創作者投稿分頁"));
     }
     FanboxUI.renderCreatorPostList = renderCreatorPostList;
     function richText(block) {
@@ -870,19 +883,18 @@ var FanboxUI;
         return ({ profile: "只拉取 Profile", fancard: "只拉取 Fan Card" })[job.request.mode ?? ""]
             || (job.request.dry_run ? "完整備份預覽" : "完整備份");
     }
-    function jobHistory(jobs, selectedId, creators, filterValue, actions) {
-        const active = jobs.find(isActiveJob);
+    function jobHistory(data, selectedId, creators, filterValue, order, actions) {
+        const active = data.active;
         const filter = FanboxUI.customSelect({ id: "job-history-filter", label: "篩選工作狀態", value: filterValue, options: [
                 { value: "all", label: "全部狀態" }, { value: "completed", label: "已完成" }, { value: "failed", label: "失敗" },
                 { value: "interrupted", label: "已中斷" }, { value: "cancelled", label: "已取消" },
             ], onChange: actions.onFilter });
-        const filtered = jobs.filter(item => filterValue === "all" || item.status === filterValue);
-        const rows = filtered.map(item => FanboxUI.h("button", { type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
+        const rows = data.items.map(item => FanboxUI.h("button", { type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
             disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => actions.onShow(item.job_id) }, FanboxUI.h("span", { class: `history-status status-${item.status}` }, statusText(item.status)), FanboxUI.h("span", { class: "history-main" }, FanboxUI.h("strong", {}, jobModeLabel(item)), FanboxUI.h("small", {}, `${jobCreatorLabel(item, creators)} · ${FanboxUI.formatDate(item.created_at)}`)), FanboxUI.h("span", { class: "history-result" }, item.result
             ? `成功 ${item.result.success ?? 0} · 失敗 ${item.result.failure ?? 0}` : item.error ? "查看錯誤" : "查看詳情")));
-        return FanboxUI.h("section", { class: "job-history" }, FanboxUI.h("div", { class: "history-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "JOB HISTORY"), FanboxUI.h("h2", {}, "備份紀錄")), filter), active ? FanboxUI.h("p", { class: "history-notice" }, "工作執行期間會鎖定其他歷史項目，避免離開目前進度畫面。") : null, FanboxUI.h("div", { class: "history-list" }, rows.length ? rows : FanboxUI.h("p", { class: "empty compact" }, "沒有符合條件的工作紀錄。")));
+        return FanboxUI.h("section", { class: "job-history" }, FanboxUI.h("div", { class: "history-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "JOB HISTORY"), FanboxUI.h("h2", {}, "備份紀錄")), FanboxUI.h("div", { class: "history-controls" }, filter, FanboxUI.sortToggle(order, actions.onOrder, "工作時間排序"))), active ? FanboxUI.h("p", { class: "history-notice" }, "工作執行期間會鎖定其他歷史項目，避免離開目前進度畫面。") : null, FanboxUI.h("div", { class: "history-list" }, rows.length ? rows : FanboxUI.h("p", { class: "empty compact" }, "沒有符合條件的工作紀錄。")), FanboxUI.renderPagination(data, actions.onPage, "工作歷史分頁"));
     }
-    function renderBackupJobPage(job, creators, jobs, filterValue, activeJob, actions) {
+    function renderBackupJobPage(job, creators, activeJob, actions) {
         const active = isActiveJob(job);
         const blocked = Boolean(activeJob && activeJob.job_id !== job.job_id);
         const plan = (job.events ?? []).find(item => item.kind === "plan_ready");
@@ -994,23 +1006,23 @@ var FanboxUI;
             onclick: () => start("profile", false) }, "拉取個人資料"), FanboxUI.h("button", { type: "button", disabled: blocked, onclick: () => start("fancard", false) }, "拉取粉絲卡")))), FanboxUI.h("p", { class: "notice" }, "同一時間只允許一個備份工作；安全停止會在目前投稿處理完成後生效。"));
     }
     FanboxUI.renderBackupFormPage = renderBackupFormPage;
-    function renderBackupHistoryPage(jobs, creators, filterValue, actions) {
-        return FanboxUI.h("section", { class: "page backup-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "JOB HISTORY"), FanboxUI.h("h1", {}, "工作歷史"), FanboxUI.h("p", {}, "選擇一筆工作查看進度、結果與完整執行紀錄。")), FanboxUI.h("button", { type: "button", class: "primary", onclick: actions.onNew }, "建立新工作")), jobHistory(jobs, null, creators, filterValue, actions));
+    function renderBackupHistoryPage(data, creators, filterValue, order, actions) {
+        return FanboxUI.h("section", { class: "page backup-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "JOB HISTORY"), FanboxUI.h("h1", {}, "工作歷史"), FanboxUI.h("p", {}, "選擇一筆工作查看進度、結果與完整執行紀錄。")), FanboxUI.h("button", { type: "button", class: "primary", onclick: actions.onNew }, "建立新工作")), jobHistory(data, null, creators, filterValue, order, actions));
     }
     FanboxUI.renderBackupHistoryPage = renderBackupHistoryPage;
-    function verificationHistory(jobs, selectedId, onShow) {
-        const active = jobs.find(isActiveJob);
-        const rows = jobs.map(item => FanboxUI.h("button", { type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
-            disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => onShow(item.job_id) }, FanboxUI.h("span", { class: `history-status status-${item.status}` }, statusText(item.status)), FanboxUI.h("span", { class: "history-main" }, FanboxUI.h("strong", {}, "封存完整性驗證"), FanboxUI.h("small", {}, FanboxUI.formatDate(item.created_at))), FanboxUI.h("span", { class: "history-result" }, item.result
+    function verificationHistory(data, selectedId, order, actions) {
+        const active = data.active;
+        const rows = data.items.map(item => FanboxUI.h("button", { type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
+            disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => actions.onShow(item.job_id) }, FanboxUI.h("span", { class: `history-status status-${item.status}` }, statusText(item.status)), FanboxUI.h("span", { class: "history-main" }, FanboxUI.h("strong", {}, "封存完整性驗證"), FanboxUI.h("small", {}, FanboxUI.formatDate(item.created_at))), FanboxUI.h("span", { class: "history-result" }, item.result
             ? item.result.passed ? "驗證通過" : `${item.result.issue_count ?? 0} 個問題` : item.error ? "查看錯誤" : "查看進度")));
-        return FanboxUI.h("section", { class: "job-history" }, FanboxUI.h("div", { class: "history-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "VERIFY HISTORY"), FanboxUI.h("h2", {}, "驗證歷史"))), active ? FanboxUI.h("p", { class: "history-notice" }, "驗證執行期間會鎖定其他歷史項目。") : null, FanboxUI.h("div", { class: "history-list" }, rows.length ? rows : FanboxUI.h("p", { class: "empty compact" }, "尚無驗證紀錄。")));
+        return FanboxUI.h("section", { class: "job-history" }, FanboxUI.h("div", { class: "history-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "VERIFY HISTORY"), FanboxUI.h("h2", {}, "驗證歷史")), FanboxUI.sortToggle(order, actions.onOrder, "驗證時間排序")), active ? FanboxUI.h("p", { class: "history-notice" }, "驗證執行期間會鎖定其他歷史項目。") : null, FanboxUI.h("div", { class: "history-list" }, rows.length ? rows : FanboxUI.h("p", { class: "empty compact" }, "尚無驗證紀錄。")), FanboxUI.renderPagination(data, actions.onPage, "驗證歷史分頁"));
     }
-    function renderMaintenancePage(job, jobs, activeJob, actions) {
+    function renderMaintenancePage(job, history, order, activeJob, actions) {
         const active = Boolean(activeJob);
         const result = job?.result;
         const issues = result?.issues ?? [];
         const issueRows = issues.map(item => FanboxUI.h("li", {}, FanboxUI.h("strong", {}, item.reason), FanboxUI.h("code", {}, item.path), item.post_id ? FanboxUI.h("small", {}, `Post ${item.post_id}`) : null));
-        return FanboxUI.h("section", { class: "page maintenance-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE MAINTENANCE"), FanboxUI.h("h1", {}, "封存驗證"), FanboxUI.h("p", {}, "檢查投稿、Profile、粉絲卡、歷史版本與資源的檔案大小及 SHA-256。")), job ? FanboxUI.h("span", { class: `job-status status-${job.status}` }, statusText(job.status)) : null), activeJobNotice(activeJob), FanboxUI.h("section", { class: "maintenance-action" }, FanboxUI.h("div", {}, FanboxUI.h("h2", {}, activeJob?.kind === "verify" ? "正在驗證封存…" : activeJob ? "其他工作執行中" : "完整性檢查"), FanboxUI.h("p", {}, "驗證可能需要一段時間；執行期間不能同時開始備份或修改設定。")), FanboxUI.h("button", { type: "button", class: "primary", disabled: active, onclick: actions.onStart }, activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")), job?.error ? FanboxUI.h("p", { class: "job-error" }, FanboxUI.h("strong", {}, "錯誤："), job.error) : null, verificationProgress(job), result ? FanboxUI.h("section", { class: `verification-result ${result.passed ? "passed" : "issues"}` }, FanboxUI.h("div", { class: "verification-summary" }, FanboxUI.h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`), FanboxUI.h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")), issueRows.length ? FanboxUI.h("ul", { class: "verification-issues" }, issueRows) : null, result.truncated ? FanboxUI.h("p", { class: "notice" }, "問題數量過多，目前只顯示前 500 項。") : null) : null, verificationHistory(jobs, job?.job_id ?? null, actions.onShow));
+        return FanboxUI.h("section", { class: "page maintenance-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE MAINTENANCE"), FanboxUI.h("h1", {}, "封存驗證"), FanboxUI.h("p", {}, "檢查投稿、Profile、粉絲卡、歷史版本與資源的檔案大小及 SHA-256。")), job ? FanboxUI.h("span", { class: `job-status status-${job.status}` }, statusText(job.status)) : null), activeJobNotice(activeJob), FanboxUI.h("section", { class: "maintenance-action" }, FanboxUI.h("div", {}, FanboxUI.h("h2", {}, activeJob?.kind === "verify" ? "正在驗證封存…" : activeJob ? "其他工作執行中" : "完整性檢查"), FanboxUI.h("p", {}, "驗證可能需要一段時間；執行期間不能同時開始備份或修改設定。")), FanboxUI.h("button", { type: "button", class: "primary", disabled: active, onclick: actions.onStart }, activeJob?.kind === "verify" ? "驗證中…" : activeJob ? "目前無法驗證" : "開始驗證")), job?.error ? FanboxUI.h("p", { class: "job-error" }, FanboxUI.h("strong", {}, "錯誤："), job.error) : null, verificationProgress(job), result ? FanboxUI.h("section", { class: `verification-result ${result.passed ? "passed" : "issues"}` }, FanboxUI.h("div", { class: "verification-summary" }, FanboxUI.h("strong", {}, result.passed ? "驗證通過" : `${result.issue_count ?? 0} 個問題`), FanboxUI.h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")), issueRows.length ? FanboxUI.h("ul", { class: "verification-issues" }, issueRows) : null, result.truncated ? FanboxUI.h("p", { class: "notice" }, "問題數量過多，目前只顯示前 500 項。") : null) : null, verificationHistory(history, job?.job_id ?? null, order, actions));
     }
     FanboxUI.renderMaintenancePage = renderMaintenancePage;
 })(FanboxUI || (FanboxUI = {}));
@@ -1073,9 +1085,15 @@ var FanboxUI;
                 return loadCreator(state.creatorId, state.creatorTab);
             return loadPosts();
         }
-        function updateActiveJob(jobs) {
-            state.activeJob = jobs.find(FanboxUI.isActiveJob) ?? null;
+        function updateActiveJob(data) {
+            state.activeJob = data.active;
             return state.activeJob;
+        }
+        function historyParams(kind, page, order, status = "all") {
+            const params = new URLSearchParams({ kind, page: String(page), page_size: "20", order });
+            if (status !== "all")
+                params.set("status", status);
+            return params;
         }
         function scheduleJobRefresh() {
             if (jobTimer !== undefined)
@@ -1089,13 +1107,16 @@ var FanboxUI;
             state.current = null;
             app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取投稿…"));
             try {
-                const params = new URLSearchParams({ page: String(state.page), page_size: "50" });
+                const params = new URLSearchParams({ page: String(state.page), page_size: "20", order: state.postOrder });
                 if (state.q)
                     params.set("q", state.q);
                 const data = await FanboxUI.getPosts(params);
+                state.page = data.page;
                 app.replaceChildren(FanboxUI.renderPostListPage(data, {
                     onOpen: postId => void loadPost(postId),
                     onPage: page => { state.page = page; void loadPosts(); },
+                    order: state.postOrder,
+                    onOrder: order => { state.postOrder = order; state.page = 1; void loadPosts(); },
                 }));
             }
             catch (error) {
@@ -1112,7 +1133,7 @@ var FanboxUI;
             state.postNavigation = null;
             target.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取投稿…"));
             try {
-                const params = new URLSearchParams();
+                const params = new URLSearchParams({ order: state.postOrder });
                 if (version !== null)
                     params.set("version", String(version));
                 if (creatorContent && creatorId)
@@ -1213,7 +1234,8 @@ var FanboxUI;
                 contentRoot.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取內容…"));
                 let content;
                 if (tab === "posts") {
-                    const params = new URLSearchParams({ creator: creatorId, page: String(state.page), page_size: "50" });
+                    const params = new URLSearchParams({ creator: creatorId, page: String(state.page), page_size: "20",
+                        order: state.postOrder });
                     if (state.q)
                         params.set("q", state.q);
                     if (state.tag)
@@ -1223,6 +1245,8 @@ var FanboxUI;
                     content = FanboxUI.renderCreatorPostList(data, {
                         onOpen: postId => void loadPost(postId),
                         onPage: page => { state.page = page; void loadCreator(creatorId, "posts"); },
+                        order: state.postOrder,
+                        onOrder: order => { state.postOrder = order; state.page = 1; void loadCreator(creatorId, "posts"); },
                         activeTag: state.tag,
                         onTag: tag => {
                             state.tag = tag;
@@ -1280,30 +1304,25 @@ var FanboxUI;
                 errorView(error);
             }
         }
-        async function showJob(jobId, creators, jobs) {
+        async function showJob(jobId, creators) {
             try {
                 state.backupScreen = "job";
                 state.backupJobId = jobId;
-                renderJob(await FanboxUI.getJob(jobId), creators, jobs);
+                renderJob(await FanboxUI.getJob(jobId), creators);
             }
             catch (error) {
                 errorView(error);
             }
         }
-        function renderJob(job, creators, jobs = [job]) {
+        function renderJob(job, creators) {
             if (jobTimer !== undefined)
                 clearTimeout(jobTimer);
             const active = FanboxUI.isActiveJob(job);
-            const page = FanboxUI.renderBackupJobPage(job, creators, jobs, state.jobFilter, state.activeJob, {
+            const page = FanboxUI.renderBackupJobPage(job, creators, state.activeJob, {
                 onCancel: jobId => void cancelBackupJob(jobId),
                 onRetry: jobId => void retryBackupJob(jobId),
                 onNew: () => { state.backupScreen = "form"; state.backupJobId = null; void loadBackup(false); },
                 onHistory: () => { state.backupScreen = "history"; state.backupJobId = null; void loadBackup(false); },
-                onShow: jobId => void showJob(jobId, creators, jobs),
-                onFilter: value => {
-                    state.jobFilter = value;
-                    void showJob(job.job_id, creators, jobs);
-                },
             });
             const currentPage = app.querySelector(".backup-page[data-job-id]");
             if (currentPage?.dataset.jobId === job.job_id)
@@ -1326,11 +1345,14 @@ var FanboxUI;
             }));
             scheduleJobRefresh();
         }
-        function renderBackupHistory(creators, jobs) {
-            app.replaceChildren(FanboxUI.renderBackupHistoryPage(jobs, creators, state.jobFilter, {
+        function renderBackupHistory(creators, history) {
+            state.jobPage = history.page;
+            app.replaceChildren(FanboxUI.renderBackupHistoryPage(history, creators, state.jobFilter, state.jobOrder, {
                 onNew: () => { state.backupScreen = "form"; void loadBackup(false); },
-                onShow: jobId => void showJob(jobId, creators, jobs),
-                onFilter: value => { state.jobFilter = value; renderBackupHistory(creators, jobs); },
+                onShow: jobId => void showJob(jobId, creators),
+                onFilter: value => { state.jobFilter = value; state.jobPage = 1; void loadBackup(false); },
+                onOrder: order => { state.jobOrder = order; state.jobPage = 1; void loadBackup(false); },
+                onPage: page => { state.jobPage = page; void loadBackup(false); },
             }));
         }
         async function loadBackup(showLoading = true) {
@@ -1339,20 +1361,20 @@ var FanboxUI;
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取工作狀態…"));
             try {
                 const [creatorData, jobData, settings, auth] = await Promise.all([
-                    FanboxUI.getCreators(), FanboxUI.getJobs(), FanboxUI.getSettings(), FanboxUI.getAuthStatus(sessionToken),
+                    FanboxUI.getCreators(), FanboxUI.getJobs(historyParams("backup", state.jobPage, state.jobOrder, state.jobFilter)),
+                    FanboxUI.getSettings(), FanboxUI.getAuthStatus(sessionToken),
                 ]);
-                updateActiveJob(jobData.items);
-                const backupJobs = jobData.items.filter(item => item.kind === "backup");
-                const active = backupJobs.find(FanboxUI.isActiveJob);
+                updateActiveJob(jobData);
+                const active = jobData.active?.kind === "backup" ? jobData.active : null;
                 if (active) {
                     state.backupScreen = "job";
                     state.backupJobId = active.job_id;
-                    renderJob(await FanboxUI.getJob(active.job_id), creatorData.items, backupJobs);
+                    renderJob(await FanboxUI.getJob(active.job_id), creatorData.items);
                 }
                 else if (state.backupScreen === "job" && state.backupJobId) {
-                    const selected = backupJobs.find(item => item.job_id === state.backupJobId);
+                    const selected = await FanboxUI.getJob(state.backupJobId).catch(() => null);
                     if (selected)
-                        renderJob(await FanboxUI.getJob(selected.job_id), creatorData.items, backupJobs);
+                        renderJob(selected, creatorData.items);
                     else {
                         state.backupScreen = "form";
                         state.backupJobId = null;
@@ -1360,7 +1382,7 @@ var FanboxUI;
                     }
                 }
                 else if (state.backupScreen === "history")
-                    renderBackupHistory(creatorData.items, backupJobs);
+                    renderBackupHistory(creatorData.items, jobData);
                 else
                     renderBackupForm(creatorData.items, settings, auth);
             }
@@ -1374,20 +1396,20 @@ var FanboxUI;
                     include_profile: includeProfile, include_fancard: includeFancard }, sessionToken);
                 state.backupScreen = "job";
                 state.backupJobId = job.job_id;
-                const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
-                updateActiveJob(jobData.items);
-                renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
+                await renderJobWithActive(job);
             }
             catch (error) {
                 errorView(error);
             }
         }
+        async function renderJobWithActive(job) {
+            const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
+            updateActiveJob(jobData);
+            renderJob(job, creatorData.items);
+        }
         async function cancelBackupJob(jobId) {
             try {
-                const job = await FanboxUI.cancelJob(jobId, sessionToken);
-                const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
-                updateActiveJob(jobData.items);
-                renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
+                await renderJobWithActive(await FanboxUI.cancelJob(jobId, sessionToken));
             }
             catch (error) {
                 errorView(error);
@@ -1395,21 +1417,21 @@ var FanboxUI;
         }
         async function retryBackupJob(jobId) {
             try {
-                const job = await FanboxUI.retryJob(jobId, sessionToken);
-                const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
-                updateActiveJob(jobData.items);
-                renderJob(job, creatorData.items, jobData.items.filter(item => item.kind === "backup"));
+                await renderJobWithActive(await FanboxUI.retryJob(jobId, sessionToken));
             }
             catch (error) {
                 errorView(error);
             }
         }
-        function renderMaintenance(job = null, jobs = []) {
+        function renderMaintenance(job, history) {
             if (jobTimer !== undefined)
                 clearTimeout(jobTimer);
-            app.replaceChildren(FanboxUI.renderMaintenancePage(job, jobs, state.activeJob, {
+            state.verifyPage = history.page;
+            app.replaceChildren(FanboxUI.renderMaintenancePage(job, history, state.verifyOrder, state.activeJob, {
                 onStart: () => void startVerification(),
-                onShow: jobId => void showVerification(jobId, jobs),
+                onShow: jobId => { state.verifyJobId = jobId; void loadMaintenance(false); },
+                onOrder: order => { state.verifyOrder = order; state.verifyPage = 1; void loadMaintenance(false); },
+                onPage: page => { state.verifyPage = page; void loadMaintenance(false); },
             }));
             scheduleJobRefresh();
         }
@@ -1418,11 +1440,15 @@ var FanboxUI;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取驗證狀態…"));
             try {
-                const data = await FanboxUI.getJobs();
-                updateActiveJob(data.items);
-                const jobs = data.items.filter(item => item.kind === "verify");
-                const selected = jobs.find(FanboxUI.isActiveJob) ?? jobs[0];
-                renderMaintenance(selected ? await FanboxUI.getJob(selected.job_id) : null, jobs);
+                const [history, newest] = await Promise.all([
+                    FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder)),
+                    FanboxUI.getJobs(historyParams("verify", 1, "desc")),
+                ]);
+                updateActiveJob(history);
+                const selectedId = (history.active?.kind === "verify" ? history.active.job_id : null)
+                    ?? state.verifyJobId ?? newest.items[0]?.job_id ?? null;
+                const selected = selectedId ? await FanboxUI.getJob(selectedId).catch(() => null) : null;
+                renderMaintenance(selected, history);
             }
             catch (error) {
                 errorView(error);
@@ -1431,17 +1457,10 @@ var FanboxUI;
         async function startVerification() {
             try {
                 const job = await FanboxUI.startVerificationJob(sessionToken);
-                const data = await FanboxUI.getJobs();
-                updateActiveJob(data.items);
-                renderMaintenance(job, data.items.filter(item => item.kind === "verify"));
-            }
-            catch (error) {
-                errorView(error);
-            }
-        }
-        async function showVerification(jobId, jobs) {
-            try {
-                renderMaintenance(await FanboxUI.getJob(jobId), jobs);
+                state.verifyJobId = job.job_id;
+                const history = await FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder));
+                updateActiveJob(history);
+                renderMaintenance(job, history);
             }
             catch (error) {
                 errorView(error);
@@ -1453,7 +1472,7 @@ var FanboxUI;
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
             try {
                 const [data, jobData, auth] = await Promise.all([FanboxUI.getSettings(), FanboxUI.getJobs(), FanboxUI.getAuthStatus(sessionToken)]);
-                updateActiveJob(jobData.items);
+                updateActiveJob(jobData);
                 app.replaceChildren(FanboxUI.renderSettingsPage(data, auth, message, state.activeJob, patch => saveSettingsForm(patch), () => void loadSettings("", false), () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"), jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"), () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。")));
                 scheduleJobRefresh();
             }

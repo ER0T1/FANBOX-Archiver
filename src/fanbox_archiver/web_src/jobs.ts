@@ -6,7 +6,16 @@ namespace FanboxUI {
     onRetry(jobId: string): void;
     onNew(): void;
     onHistory(): void;
+  }
+
+  export interface HistoryActions {
     onShow(jobId: string): void;
+    onOrder(order: SortOrder): void;
+    onPage(page: number): void;
+  }
+
+  export interface BackupHistoryActions extends HistoryActions {
+    onNew(): void;
     onFilter(value: string): void;
   }
 
@@ -26,9 +35,8 @@ namespace FanboxUI {
     maxPosts: number;
   }
 
-  export interface MaintenanceActions {
+  export interface MaintenanceActions extends HistoryActions {
     onStart(): void;
-    onShow(jobId: string): void;
   }
 
   export function jobLabel(job: WebJob): string {
@@ -274,16 +282,15 @@ namespace FanboxUI {
   }
 
   function jobHistory(
-    jobs: WebJob[], selectedId: string | null, creators: CreatorSummary[], filterValue: string,
-    actions: Pick<BackupViewActions, "onShow" | "onFilter">,
+    data: JobPage, selectedId: string | null, creators: CreatorSummary[], filterValue: string,
+    order: SortOrder, actions: BackupHistoryActions,
   ): HTMLElement {
-    const active = jobs.find(isActiveJob);
+    const active = data.active;
     const filter = customSelect({id: "job-history-filter", label: "篩選工作狀態", value: filterValue, options: [
       {value: "all", label: "全部狀態"}, {value: "completed", label: "已完成"}, {value: "failed", label: "失敗"},
       {value: "interrupted", label: "已中斷"}, {value: "cancelled", label: "已取消"},
     ], onChange: actions.onFilter});
-    const filtered = jobs.filter(item => filterValue === "all" || item.status === filterValue);
-    const rows = filtered.map(item => h("button", {type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
+    const rows = data.items.map(item => h("button", {type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
       disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => actions.onShow(item.job_id)},
     h("span", {class: `history-status status-${item.status}`}, statusText(item.status)),
     h("span", {class: "history-main"}, h("strong", {}, jobModeLabel(item)),
@@ -291,14 +298,15 @@ namespace FanboxUI {
     h("span", {class: "history-result"}, item.result
       ? `成功 ${item.result.success ?? 0} · 失敗 ${item.result.failure ?? 0}` : item.error ? "查看錯誤" : "查看詳情")));
     return h("section", {class: "job-history"}, h("div", {class: "history-heading"},
-      h("div", {}, h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h2", {}, "備份紀錄")), filter),
+      h("div", {}, h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h2", {}, "備份紀錄")),
+      h("div", {class: "history-controls"}, filter, sortToggle(order, actions.onOrder, "工作時間排序"))),
       active ? h("p", {class: "history-notice"}, "工作執行期間會鎖定其他歷史項目，避免離開目前進度畫面。") : null,
-      h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "沒有符合條件的工作紀錄。")));
+      h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "沒有符合條件的工作紀錄。")),
+      renderPagination(data, actions.onPage, "工作歷史分頁"));
   }
 
   export function renderBackupJobPage(
-    job: WebJob, creators: CreatorSummary[], jobs: WebJob[], filterValue: string,
-    activeJob: WebJob | null, actions: BackupViewActions,
+    job: WebJob, creators: CreatorSummary[], activeJob: WebJob | null, actions: BackupViewActions,
   ): HTMLElement {
     const active = isActiveJob(job);
     const blocked = Boolean(activeJob && activeJob.job_id !== job.job_id);
@@ -435,32 +443,37 @@ namespace FanboxUI {
   }
 
   export function renderBackupHistoryPage(
-    jobs: WebJob[], creators: CreatorSummary[], filterValue: string,
-    actions: Pick<BackupViewActions, "onShow" | "onFilter" | "onNew">,
+    data: JobPage, creators: CreatorSummary[], filterValue: string, order: SortOrder,
+    actions: BackupHistoryActions,
   ): HTMLElement {
     return h("section", {class: "page backup-page"}, h("header", {class: "heading"}, h("div", {},
       h("p", {class: "eyebrow"}, "JOB HISTORY"), h("h1", {}, "工作歷史"),
       h("p", {}, "選擇一筆工作查看進度、結果與完整執行紀錄。")),
       h("button", {type: "button", class: "primary", onclick: actions.onNew}, "建立新工作")),
-    jobHistory(jobs, null, creators, filterValue, actions));
+    jobHistory(data, null, creators, filterValue, order, actions));
   }
 
-  function verificationHistory(jobs: WebJob[], selectedId: string | null, onShow: (jobId: string) => void): HTMLElement {
-    const active = jobs.find(isActiveJob);
-    const rows = jobs.map(item => h("button", {type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
-      disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => onShow(item.job_id)},
+  function verificationHistory(
+    data: JobPage, selectedId: string | null, order: SortOrder, actions: HistoryActions,
+  ): HTMLElement {
+    const active = data.active;
+    const rows = data.items.map(item => h("button", {type: "button", class: `history-row${item.job_id === selectedId ? " selected" : ""}`,
+      disabled: Boolean(active && item.job_id !== active.job_id), onclick: () => actions.onShow(item.job_id)},
     h("span", {class: `history-status status-${item.status}`}, statusText(item.status)),
     h("span", {class: "history-main"}, h("strong", {}, "封存完整性驗證"), h("small", {}, formatDate(item.created_at))),
     h("span", {class: "history-result"}, item.result
       ? item.result.passed ? "驗證通過" : `${item.result.issue_count ?? 0} 個問題` : item.error ? "查看錯誤" : "查看進度")));
     return h("section", {class: "job-history"}, h("div", {class: "history-heading"},
-      h("div", {}, h("p", {class: "eyebrow"}, "VERIFY HISTORY"), h("h2", {}, "驗證歷史"))),
+      h("div", {}, h("p", {class: "eyebrow"}, "VERIFY HISTORY"), h("h2", {}, "驗證歷史")),
+      sortToggle(order, actions.onOrder, "驗證時間排序")),
       active ? h("p", {class: "history-notice"}, "驗證執行期間會鎖定其他歷史項目。") : null,
-      h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "尚無驗證紀錄。")));
+      h("div", {class: "history-list"}, rows.length ? rows : h("p", {class: "empty compact"}, "尚無驗證紀錄。")),
+      renderPagination(data, actions.onPage, "驗證歷史分頁"));
   }
 
   export function renderMaintenancePage(
-    job: WebJob | null, jobs: WebJob[], activeJob: WebJob | null, actions: MaintenanceActions,
+    job: WebJob | null, history: JobPage, order: SortOrder, activeJob: WebJob | null,
+    actions: MaintenanceActions,
   ): HTMLElement {
     const active = Boolean(activeJob);
     const result = job?.result;
@@ -484,6 +497,6 @@ namespace FanboxUI {
         h("span", {}, result.passed ? "目前封存未發現完整性問題。" : "請檢查下列缺失或損毀項目。")),
       issueRows.length ? h("ul", {class: "verification-issues"}, issueRows) : null,
       result.truncated ? h("p", {class: "notice"}, "問題數量過多，目前只顯示前 500 項。") : null) : null,
-    verificationHistory(jobs, job?.job_id ?? null, actions.onShow));
+    verificationHistory(history, job?.job_id ?? null, order, actions));
   }
 }

@@ -227,3 +227,54 @@ def test_reader_lists_creators(tmp_path: Path):
 
     with pytest.raises(ReaderNotFound):
         reader.creator("missing")
+
+
+def save_alice_posts(config: AppConfig, count: int, *, pinned: str | None = None) -> None:
+    archive = ArchiveService(config)
+    for index in range(count):
+        post_id = str(200 + index)
+        archive.save(Post(
+            post_id=post_id, creator_id="alice", creator_name="Alice", title=f"排序 {index}",
+            published_at=datetime(2026, 11, 1 + index), updated_at=datetime(2026, 11, 1 + index),
+            url=f"https://www.fanbox.cc/@alice/posts/{post_id}",
+            tags=["偶數" if index % 2 == 0 else "奇數"],
+            blocks=[ContentBlock(type="paragraph", text=str(index))],
+            raw={"isPinned": post_id == pinned}, content_fingerprint=f"order-{post_id}",
+        ), download_assets=False)
+
+
+def test_reader_orders_posts_both_ways_with_pinned_first_on_creator_pages(tmp_path: Path):
+    config, reader = dynamic_archive(tmp_path)
+    save_alice_posts(config, 5, pinned="202")
+
+    newest = [item["post_id"] for item in reader.list_posts(creator="alice")["items"]]
+    oldest = [item["post_id"] for item in reader.list_posts(creator="alice", ascending=True)["items"]]
+    assert newest == ["202", "204", "203", "201", "200", "123"]
+    assert oldest == ["202", "123", "200", "201", "203", "204"]
+    home = [item["post_id"] for item in reader.list_posts(ascending=True)["items"]]
+    assert home == ["123", "200", "201", "202", "203", "204"]
+    assert reader.list_posts()["page_size"] == 20
+
+    odd = reader.list_posts(creator="alice", tag="奇數", ascending=True, page=2, page_size=1)
+    assert (odd["total"], odd["pages"], odd["items"][0]["post_id"]) == (2, 2, "203")
+
+    navigation = reader.post_navigation("200", creator="alice", ascending=True)
+    assert navigation["previous"]["post_id"] == "123"
+    assert navigation["next"]["post_id"] == "201"
+
+
+def test_reader_reads_each_version_tags_once_across_creator_pages(tmp_path: Path, monkeypatch):
+    config, reader = dynamic_archive(tmp_path)
+    save_alice_posts(config, 6)
+    loads: list[tuple[str, int | None]] = []
+    original = reader._load_post
+    monkeypatch.setattr(reader, "_load_post", lambda post_id, version: (
+        loads.append((post_id, version)) or original(post_id, version)))
+
+    reader.list_posts(creator="alice", page=1, page_size=2)
+    first = len(loads)
+    reader.list_posts(creator="alice", page=2, page_size=2)
+    reader.list_posts(creator="alice", tag="偶數", page=2, page_size=2)
+    # After the first page only the visible page's summaries load a post again.
+    assert first == 7 + 2
+    assert len(loads) - first == 2 + 1
