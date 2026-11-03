@@ -766,6 +766,7 @@ var FanboxUI;
         const labels = {
             scan: "掃描驗證項目", posts: "驗證投稿", versions: "驗證歷史版本",
             fancards: "驗證粉絲卡", profiles: "驗證個人資料", consistency: "檢查資料庫一致性",
+            history: "稽核版本與時間",
         };
         return labels[phase] || "驗證封存";
     }

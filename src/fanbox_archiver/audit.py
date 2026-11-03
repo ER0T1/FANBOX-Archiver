@@ -68,6 +68,9 @@ class RepairCopyResult(BaseModel):
     applied_actions: int
     remaining_findings: int
     database_backup: str
+    report: str = "repair-report.json"
+    unrecoverable_findings: int = 0
+    verify_issue_count: int = 0
 
 
 @dataclass(slots=True)
@@ -83,7 +86,7 @@ class RebuildPlan:
     kind: str
     table: str
     row_id_column: str
-    creator_id: str
+    owner_id: str  # post_id for posts, creator_id for profiles and Fan Cards
     target_month: str | None
     entries: list[RebuildEntry]
 
@@ -185,6 +188,11 @@ class ArchiveAuditor:
             findings=self.findings, repair_plan=actions,
         )
 
+    def _read_schema_version(self) -> int | None:
+        with closing(sqlite3.connect(self.database.as_uri() + "?mode=ro", uri=True)) as db:
+            db.row_factory = sqlite3.Row
+            return self._schema_version(db)
+
     def _schema_version(self, db: sqlite3.Connection) -> int | None:
         if not self._table_exists(db, "schema_migrations"):
             return None
@@ -212,11 +220,10 @@ class ArchiveAuditor:
         for key, versions in groups.items():
             subject_id = "/".join(key)
             creator_id = creator_by_post.get(key[0]) if kind == "post" else key[0]
-            if kind in ("profile", "fancard"):
-                plan = self._rebuild_plan(spec, key, versions)
-                if plan is not None:
-                    self._add_rebuild(plan, subject_id, versions)
-                    continue
+            plan = self._rebuild_plan(spec, key, versions)
+            if plan is not None:
+                self._add_rebuild(plan, subject_id, creator_id, versions)
+                continue
             numbers = [int(row["version_number"]) for row in versions]
             expected = list(range(1, max(numbers) + 1)) if numbers else []
             if numbers != expected:
@@ -583,6 +590,10 @@ class ArchiveAuditor:
         rows_by_path = dict(zip(row_paths, versions))
         if not set(rows_by_path) <= set(disk):
             return None
+        if len(rows_by_path) == len(disk) and all(
+            path.name == f"v{int(row['version_number']):04d}" for path, row in rows_by_path.items()
+        ):
+            return None  # rows already match the directories; nothing to rebuild, skip hashing
 
         entries: list[RebuildEntry] = []
         previous: datetime | None = None
@@ -599,8 +610,7 @@ class ArchiveAuditor:
             status = manifest.get("status", "completed" if kind == "fancard" else None)
             if (
                 manifest.get("version") != number or status != "completed"
-                or manifest.get("creator_id") != key[0]
-                or (kind == "fancard" and manifest.get("target_month") != key[1])
+                or not self._rebuild_identity_matches(kind, key, path, manifest)
                 or not isinstance(fingerprint, str) or not fingerprint
                 or captured is None or (previous is not None and captured <= previous)
                 or not self._files_verified(path, manifest)
@@ -623,10 +633,30 @@ class ArchiveAuditor:
             return None
         return RebuildPlan(
             kind=kind, table=str(spec["table"]), row_id_column=str(spec["row_id"]),
-            creator_id=key[0], target_month=key[1] if kind == "fancard" else None, entries=entries,
+            owner_id=key[0], target_month=key[1] if kind == "fancard" else None, entries=entries,
         )
 
-    def _add_rebuild(self, plan: RebuildPlan, subject_id: str, versions: list[sqlite3.Row]) -> None:
+    @staticmethod
+    def _rebuild_identity_matches(
+        kind: str, key: tuple[str, ...], path: Path, manifest: dict[str, object],
+    ) -> bool:
+        if kind == "post":
+            # Post manifests carry no identity; the hash-verified post.json of that version does.
+            files = manifest.get("files")
+            if not isinstance(files, dict) or "post.json" not in files:
+                return False
+            try:
+                post = json.loads((path / "post.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                return False
+            return isinstance(post, dict) and str(post.get("post_id")) == key[0]
+        if manifest.get("creator_id") != key[0]:
+            return False
+        return kind != "fancard" or manifest.get("target_month") == key[1]
+
+    def _add_rebuild(
+        self, plan: RebuildPlan, subject_id: str, creator_id: str | None, versions: list[sqlite3.Row],
+    ) -> None:
         self._known_version_dirs.update(entry.path for entry in plan.entries)
         self.rebuild_plans[f"version_rebuild:{plan.kind}:{subject_id}"] = plan
         mapping = ", ".join(
@@ -635,7 +665,7 @@ class ArchiveAuditor:
         )
         self._add(
             code="version_rebuild", severity="error", subject_type=plan.kind,
-            subject_id=subject_id, creator_id=plan.creator_id,
+            subject_id=subject_id, creator_id=creator_id,
             issue="資料庫版本列與磁碟上完整的 manifest 歷史不一致，可依 manifest 確定性重建。",
             evidence=f"database: {mapping}; disk manifests: v0001–v{len(plan.entries):04d}",
             repairability="automatic",
@@ -774,16 +804,23 @@ class ArchiveRepairer:
 
             database_backup = copied_database.with_name(f"{copied_database.name}.pre-repair.bak")
             shutil.copy2(copied_database, database_backup)
+            source_schema = ArchiveAuditor(copied_config)._read_schema_version()
             self._migrate_copy(copied_database)
 
-            applied = 0
+            applied: list[dict[str, object]] = []
             for _ in range(self._MAX_REPAIR_ROUNDS):
                 auditor = ArchiveAuditor(copied_config)
                 actions = auditor.run().repair_plan
                 if not actions:
                     break
+                before = {item.action_id: self._subject_state(copied_config, item) for item in actions}
                 self._apply(copied_config, actions, auditor.rebuild_plans)
-                applied += len(actions)
+                applied.extend({
+                    "action_id": item.action_id, "finding_code": item.finding_code,
+                    "subject_type": item.subject_type, "subject_id": item.subject_id,
+                    "description": item.description,
+                    "before": before[item.action_id], "after": self._subject_state(copied_config, item),
+                } for item in actions)
             indexer = IndexBuilder(copied_config)
             indexer.build(force=True)
             index_issues = indexer.check()
@@ -793,17 +830,127 @@ class ArchiveRepairer:
             if any(item.repairability == "automatic" for item in remaining.findings):
                 raise RuntimeError("確定性修復後仍存在可自動修復問題。")
 
+            from .service import ArchiveService  # service depends on this module's peers
+
+            verify_issues = ArchiveService(copied_config).verify()
+            report = self._write_report(
+                staging, source_schema, remaining, applied, verify_issues, database_backup,
+            )
+
             self._remap_paths(copied_database, staging, destination)
             self._remap_paths(database_backup, staging, destination)
             BackupStorage._replace_with_retry(staging, destination)
             return RepairCopyResult(
-                applied_actions=applied,
+                applied_actions=len(applied),
                 remaining_findings=remaining.blocking_count,
                 database_backup=database_backup.relative_to(staging).as_posix(),
+                report=report.relative_to(staging).as_posix(),
+                unrecoverable_findings=sum(
+                    item.repairability == "unrecoverable" for item in remaining.findings
+                ),
+                verify_issue_count=len(verify_issues),
             )
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
+
+    @staticmethod
+    def _write_report(
+        staging: Path, source_schema: int | None, remaining: AuditReport,
+        applied: list[dict[str, object]], verify_issues: list, database_backup: Path,
+    ) -> Path:
+        """Difference summary kept inside the repaired copy; never contains absolute paths."""
+
+        def relative(value: str) -> str:
+            try:
+                return Path(value).resolve().relative_to(staging.resolve()).as_posix()
+            except ValueError:
+                return "[outside archive]" if Path(value).is_absolute() else value
+
+        report = staging / "repair-report.json"
+        payload = {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "source_schema_version": source_schema,
+            "result_schema_version": remaining.schema_version,
+            "database_backup": database_backup.relative_to(staging).as_posix(),
+            "applied": applied,
+            "remaining": [
+                {
+                    **item.model_dump(include={
+                        "code", "severity", "subject_type", "subject_id", "creator_id", "version",
+                        "issue", "evidence", "repairability", "suggested_action",
+                    }),
+                    "marking": (
+                        "unknown/unrecoverable" if item.repairability == "unrecoverable"
+                        else "needs manual review"
+                    ),
+                }
+                for item in remaining.findings if item.severity != "info"
+            ],
+            "info_count": remaining.finding_count - remaining.blocking_count,
+            "verify": {
+                "issue_count": len(verify_issues),
+                "issues": [
+                    {"path": relative(issue.path), "reason": issue.reason}
+                    for issue in verify_issues[:200]
+                ],
+            },
+        }
+        report.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return report
+
+    _STATE_QUERIES = {
+        "post": ("post_versions", "version_id", "post_id=?",
+                 "SELECT latest_version_id FROM posts WHERE post_id=?", "post.json"),
+        "profile": ("creator_profile_versions", "profile_version_id", "creator_id=?",
+                    "SELECT latest_profile_version_id FROM creators WHERE creator_id=?", "profile.json"),
+        "fancard": ("fancard_versions", "fancard_version_id", "creator_id=? AND target_month=?",
+                    None, "fancard.json"),
+    }
+
+    @classmethod
+    def _subject_state(cls, config: AppConfig, action: AuditRepairAction) -> dict[str, object]:
+        """Version → directory → fingerprint mapping, latest pointer and alias state of one subject."""
+        table, row_id, key_sql, pointer_sql, alias = cls._STATE_QUERIES[action.subject_type]
+        params = (
+            tuple(action.subject_id.rsplit("/", 1)) if action.subject_type == "fancard"
+            else (action.subject_id,)
+        )
+        uri = config.storage.database.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as db:
+            db.row_factory = sqlite3.Row
+            rows = list(db.execute(
+                f"SELECT {row_id} AS id,version_number,status,content_fingerprint,captured_at,local_path "
+                f"FROM {table} WHERE {key_sql} ORDER BY version_number", params,
+            ))
+            pointer = db.execute(pointer_sql, params).fetchone() if pointer_sql else None
+        completed = [row for row in rows if str(row["status"]) == "completed"]
+        if pointer_sql:
+            latest = next((row for row in rows if pointer and row["id"] == pointer[0]), None)
+        else:
+            latest = completed[-1] if completed else None
+        alias_matches = None
+        if completed:
+            canonical = Path(str(completed[-1]["local_path"]))
+            try:
+                alias_matches = ArchiveAuditor._sha256(canonical.parent.parent / alias) == (
+                    ArchiveAuditor._sha256(canonical / alias)
+                )
+            except OSError:
+                alias_matches = False
+        return {
+            "versions": [
+                {
+                    "version": int(row["version_number"]),
+                    "directory": Path(str(row["local_path"])).name,
+                    "fingerprint": str(row["content_fingerprint"])[:12],
+                    "captured_at": row["captured_at"],
+                }
+                for row in rows
+            ],
+            "latest": f"v{int(latest['version_number']):04d}" if latest else None,
+            "alias_matches_latest": alias_matches,
+        }
 
     @staticmethod
     def _migrate_copy(copied_database: Path) -> None:
@@ -896,6 +1043,18 @@ class ArchiveRepairer:
                 latest_id = entry.row_id
                 continue
             files = {str(name): str(digest) for name, digest in dict(entry.manifest["files"]).items()}
+            if plan.kind == "post":
+                cursor = db.execute(
+                    "INSERT INTO post_versions(post_id,version_number,remote_updated_at,captured_at,"
+                    "content_fingerprint,status,local_path,markdown_path,json_path) "
+                    "VALUES(?,?,?,?,?,'completed',?,?,?)",
+                    (plan.owner_id, entry.number, entry.manifest.get("remote_updated_at"),
+                     entry.manifest["captured_at"], entry.manifest["content_fingerprint"],
+                     str(entry.path), str(entry.path / "post.md") if "post.md" in files else None,
+                     str(entry.path / "post.json")),
+                )
+                latest_id = int(cursor.lastrowid)
+                continue
             media = next((name for name in files if name.startswith("cover." if plan.kind == "profile" else "card.")), None)
             media_path = str(entry.path / media) if media else None
             media_hash = files[media] if media else None
@@ -904,7 +1063,7 @@ class ArchiveRepairer:
                     "INSERT INTO creator_profile_versions(creator_id,version_number,captured_at,"
                     "content_fingerprint,status,local_path,json_path,cover_path,cover_sha256) "
                     "VALUES(?,?,?,?,'completed',?,?,?,?)",
-                    (plan.creator_id, entry.number, entry.manifest["captured_at"],
+                    (plan.owner_id, entry.number, entry.manifest["captured_at"],
                      entry.manifest["content_fingerprint"], str(entry.path),
                      str(entry.path / "profile.json"), media_path, media_hash),
                 )
@@ -913,15 +1072,17 @@ class ArchiveRepairer:
                     "INSERT INTO fancard_versions(creator_id,target_month,version_number,captured_at,"
                     "content_fingerprint,status,local_path,image_path,image_sha256) "
                     "VALUES(?,?,?,?,?,'completed',?,?,?)",
-                    (plan.creator_id, plan.target_month, entry.number, entry.manifest["captured_at"],
+                    (plan.owner_id, plan.target_month, entry.number, entry.manifest["captured_at"],
                      entry.manifest["content_fingerprint"], str(entry.path), media_path, media_hash),
                 )
             latest_id = int(cursor.lastrowid)
         if plan.kind == "profile":
             db.execute(
                 "UPDATE creators SET latest_profile_version_id=? WHERE creator_id=?",
-                (latest_id, plan.creator_id),
+                (latest_id, plan.owner_id),
             )
+        elif plan.kind == "post":
+            db.execute("UPDATE posts SET latest_version_id=? WHERE post_id=?", (latest_id, plan.owner_id))
 
     @staticmethod
     def _canonical_row(

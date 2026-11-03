@@ -626,7 +626,7 @@ class ArchiveService:
             "version": number,
             "captured_at": captured_at,
             "remote_updated_at": post.updated_at.isoformat() if post.updated_at else None,
-            "content_fingerprint": post.content_fingerprint,
+            "content_fingerprint": post.content_fingerprint or "",
             "status": status.value,
             "previous_version": int(previous["version_number"]) if previous else None,
             "files": files,
@@ -799,6 +799,7 @@ class ArchiveService:
             + sum(1 + len(files) for *_, files in manifest_snapshots)
             + len(incomplete_versions) + len(missing_versions)
         )
+        total += 1 if total else 0  # the version/time audit step
         publish("scan", total, f"已建立 {total} 個驗證項目")
 
         for metadata, post, parse_error in post_snapshots:
@@ -882,6 +883,24 @@ class ArchiveService:
                 post_id=str(row["post_id"]),
             ))
             advance("consistency", total, f"Post {row['post_id']} 一致性")
+        issues.extend(self._history_issues())
         if total == 0:
             publish("scan", 0, "封存中沒有需要驗證的項目")
+        else:
+            advance("history", total, "版本與時間稽核")
         return issues
+
+    def _history_issues(self) -> list[VerificationIssue]:
+        """Read-only version/time audit; only error-level findings fail verification (warnings stay in `audit`)."""
+        from .audit import ArchiveAuditor
+
+        report = ArchiveAuditor(self.config).run()
+        return [
+            VerificationIssue(
+                path=f"{finding.subject_type}/{finding.subject_id}",
+                reason=f"版本／時間稽核（{finding.code}）：{finding.issue}"
+                + ("可執行 repair-copy 在副本修復。" if finding.repairability == "automatic" else ""),
+                post_id=finding.subject_id if finding.subject_type == "post" else None,
+            )
+            for finding in report.findings if finding.severity == "error"
+        ]

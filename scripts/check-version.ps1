@@ -49,3 +49,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Configuration example contract check failed."
 }
 
+
+& $Python (Join-Path $ProjectRoot "scripts\check-time-contract.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Asia/Taipei time contract check failed."
+}

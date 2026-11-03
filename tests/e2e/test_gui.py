@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import os
 import socket
 import threading
@@ -34,6 +36,7 @@ class PollingJobFixture:
         self.verify_submitted = False
         self.hold_backup = True
         self.submitted: list = []
+        self.created_at = "2026-10-29T00:00:00+00:00"
 
     def _snapshot(self, *, include_events: bool = True) -> dict:
         completed = not self.hold_backup
@@ -84,7 +87,7 @@ class PollingJobFixture:
             "job_id": "e2e-job",
             "kind": "backup",
             "status": "completed" if completed else "running",
-            "created_at": "2026-10-29T00:00:00+00:00",
+            "created_at": self.created_at,
             "started_at": "2026-10-29T00:00:00+00:00",
             "finished_at": "2026-10-29T00:00:03+00:00" if completed else None,
             "updated_at": "2026-10-29T00:00:03+00:00" if completed else "2026-10-29T00:00:02+00:00",
@@ -320,8 +323,8 @@ def live_gui(tmp_path: Path):
         jobs.close()
 
 
-@pytest.fixture
-def page():
+@contextmanager
+def _browser_page(timezone_id: str):
     with sync_playwright() as playwright:
         browser_name = os.environ.get("FANBOX_E2E_BROWSER", "chrome")
         try:
@@ -332,13 +335,42 @@ def page():
             if os.environ.get("CI"):
                 pytest.fail(message)
             pytest.skip(message)
-        context = browser.new_context(locale="zh-TW", timezone_id="Asia/Taipei")
+        context = browser.new_context(locale="zh-TW", timezone_id=timezone_id)
         current_page = context.new_page()
         try:
             yield current_page
         finally:
             context.close()
             browser.close()
+
+
+@pytest.fixture
+def page():
+    with _browser_page("Asia/Taipei") as current_page:
+        yield current_page
+
+
+@pytest.fixture
+def la_page():
+    # A browser on another continent must still show Asia/Taipei dates.
+    with _browser_page("America/Los_Angeles") as current_page:
+        yield current_page
+
+
+def test_job_history_shows_taipei_date_across_midnight_in_foreign_browser_timezone(
+    la_page: Page, live_gui,
+) -> None:
+    base_url, _, jobs = live_gui
+    jobs.created_at = "2026-11-02T16:00:00+00:00"  # 2026-11-03 00:00 in Taipei, 11-02 08:00 in LA
+    jobs.hold_backup = False
+    assert la_page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone") == "America/Los_Angeles"
+    la_page.goto(base_url, wait_until="networkidle")
+    la_page.get_by_role("button", name="備份", exact=True).click()
+    la_page.get_by_role("button", name="工作歷史", exact=True).click()
+    expect(la_page.get_by_role("heading", name="工作歷史", exact=True)).to_be_visible()
+    history = la_page.locator(".job-history")
+    expect(history.get_by_text("2026年11月03日 00:00").first).to_be_visible()
+    expect(history.get_by_text("2026年11月02日 08:00")).to_have_count(0)
 
 
 def test_gui_navigation_search_pagination_settings_and_job_polling(

@@ -69,9 +69,13 @@ def test_verify_reports_indeterminate_scan_then_monotonic_safe_progress(tmp_path
 
     assert len(issues) == 1
     assert progress[0]["phase"] == "scan" and progress[0]["total"] is None
-    assert progress[-1] == {
-        "phase": "posts", "current": 1, "total": 1, "percent": 100.0,
+    assert progress[-2] == {
+        "phase": "posts", "current": 1, "total": 2, "percent": 50.0,
         "item": "Post 123", "issue_count": 1,
+    }
+    assert progress[-1] == {
+        "phase": "history", "current": 2, "total": 2, "percent": 100.0,
+        "item": "版本與時間稽核", "issue_count": 1,
     }
     assert [int(item["current"]) for item in progress] == sorted(
         int(item["current"]) for item in progress

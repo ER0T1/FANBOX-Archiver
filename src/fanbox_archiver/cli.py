@@ -411,9 +411,11 @@ def repair_copy(
         raise typer.Exit(1) from exc
     console.print(
         f"[green]修復副本已建立。[/green]套用 {result.applied_actions} 項確定性修復，"
-        f"仍有 {result.remaining_findings} 項需人工判讀。"
+        f"仍有 {result.remaining_findings} 項需人工判讀"
+        f"（其中 {result.unrecoverable_findings} 項標記為無法恢復）。"
     )
     console.print(f"副本內資料庫備份：{result.database_backup}")
+    console.print(f"修復前後差異與完整驗證報告：{result.report}（驗證問題 {result.verify_issue_count} 項）")
 
 
 @app.command("index")

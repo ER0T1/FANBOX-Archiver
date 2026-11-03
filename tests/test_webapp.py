@@ -310,3 +310,81 @@ async def test_verify_job_endpoint_requires_token(tmp_path: Path):
         assert accepted.status_code == 202
         assert accepted.json()["kind"] == "verify"
         app.state.jobs.wait(accepted.json()["job_id"])
+
+
+@pytest.mark.anyio
+async def test_every_api_time_point_carries_an_explicit_offset(tmp_path: Path):
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    from fanbox_archiver.config import AppConfig, StorageConfig
+    from fanbox_archiver.models import ContentBlock, CreatorProfile, Post
+    from fanbox_archiver.service import ArchiveService
+
+    jst = timezone(timedelta(hours=9))
+    config = AppConfig(storage=StorageConfig(
+        output_dir=tmp_path / "FANBOX", database=tmp_path / "FANBOX" / "backup.db",
+    ))
+    archive = ArchiveService(config)
+    for number in (1, 2):
+        archive.save(Post(
+            post_id="123", creator_id="alice", creator_name="Alice", title=f"v{number}",
+            published_at=datetime(2026, 11, 3, 0, 30, tzinfo=jst),
+            updated_at=datetime(2026, 11, 3, number, tzinfo=jst),
+            url="https://www.fanbox.cc/@alice/posts/123",
+            blocks=[ContentBlock(type="paragraph", text=f"v{number}")], content_fingerprint=f"f{number}",
+        ))
+    profile = CreatorProfile(creator_id="alice", name="Alice", fanbox_url="https://www.fanbox.cc/@alice")
+    profile.content_fingerprint = profile.calculate_fingerprint()
+    archive.save_profile(profile)
+    archive.db.record_supporting_creators([("alice", "Alice")])
+    archive.save_fancard({"body": {
+        "plan": {"creatorId": "alice", "title": "Gold", "fee": 100, "user": {"name": "Alice"}},
+        "supportStartDatetime": "2026-09-01T00:00:00+09:00",
+        "supportTransactions": [{"targetMonth": "2026-10"}],
+    }}, b"jpeg", "image/jpeg")
+
+    app = create_app(config)
+    instant = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+    offset = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
+    naive: list[str] = []
+    seen: list[str] = []
+
+    def walk(value, where: str) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                walk(item, f"{where}.{key}")
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, f"{where}[{index}]")
+        elif isinstance(value, str) and instant.match(value):
+            seen.append(where)
+            if not offset.search(value):
+                naive.append(where)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        submitted = await client.post(
+            "/api/jobs/verify", headers={"X-Fanbox-Token": app.state.session_token},
+        )
+        assert submitted.status_code == 202
+        job_id = submitted.json()["job_id"]
+        app.state.jobs.wait(job_id)
+        routes = [
+            "/api/status", "/api/config", "/api/creators", "/api/creators/alice",
+            "/api/creators/alice/profile", "/api/creators/alice/profile/versions",
+            "/api/fancards", "/api/fancards/alice/2026-10", "/api/posts", "/api/posts/123",
+            "/api/posts/123?version=1", "/api/jobs", f"/api/jobs/{job_id}",
+        ]
+        checked = 0
+        for route in routes:
+            response = await client.get(route)
+            assert response.status_code == 200, route
+            before = len(naive)
+            walk(response.json(), route)
+            checked += 1
+            assert len(naive) == before, naive
+    app.state.jobs.close()
+    assert checked == len(routes) and naive == []
+    assert len(seen) >= 20 and any(".events[" in where for where in seen)
+    assert any("captured_at" in where for where in seen)

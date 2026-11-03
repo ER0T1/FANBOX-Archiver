@@ -143,6 +143,12 @@ def test_audit_reports_version_gap_and_orphan_directory_once(tmp_path: Path):
         db.execute("UPDATE posts SET latest_version_id=? WHERE post_id='42'", (rows[1]["version_id"],))
         db.execute("DELETE FROM post_versions WHERE version_id=?", (rows[0]["version_id"],))
 
+    # With v0001's manifest evidence intact the missing row is recoverable ...
+    intact = ArchiveAuditor(config).run()
+    assert [(item.code, item.repairability) for item in intact.findings] == [("version_rebuild", "automatic")]
+
+    # ... once that evidence is broken it is only reported, never rebuilt.
+    (Path(str(rows[0]["local_path"])) / "post.json").write_text("{}", encoding="utf-8")
     report = ArchiveAuditor(config).run()
 
     assert any(item.code == "version_sequence" for item in report.findings)
@@ -346,6 +352,21 @@ def test_repair_copy_rebuilds_profile_history_from_manifests(tmp_path: Path):
     with sqlite3.connect(destination / result.database_backup) as backup:
         assert backup.execute("SELECT COUNT(*) FROM creator_profile_versions").fetchone()[0] == 2
 
+    report = json.loads((destination / result.report).read_text(encoding="utf-8"))
+    assert result.verify_issue_count == 0 and report["verify"]["issue_count"] == 0
+    assert report["source_schema_version"] == 9  # fixture is current schema plus a legacy index
+    assert report["result_schema_version"] == 9 and report["remaining"] == []
+    [change] = report["applied"]
+    assert change["finding_code"] == "version_rebuild"
+    assert [(item["version"], item["directory"]) for item in change["before"]["versions"]] == [
+        (1, "v0003"), (2, "v0002"),
+    ]
+    assert [(item["version"], item["directory"]) for item in change["after"]["versions"]] == [
+        (1, "v0001"), (2, "v0002"), (3, "v0003"),
+    ]
+    assert change["before"]["latest"] == "v0001" and change["after"]["latest"] == "v0003"
+    assert str(tmp_path) not in json.dumps(report, ensure_ascii=False)
+
 
 def test_rebuild_is_refused_when_manifest_evidence_is_broken(tmp_path: Path):
     config = make_legacy_profile_history(tmp_path)
@@ -388,3 +409,68 @@ def test_repair_copy_rebuilds_fancard_history(tmp_path: Path):
         ).fetchall()
     assert [(row[0], Path(row[1]).name) for row in rows] == [(1, "v0001"), (2, "v0002"), (3, "v0003")]
     assert Path(rows[0][2]).is_file() and rows[0][3]
+
+
+def test_verify_reports_broken_history_but_not_informational_drift(tmp_path: Path):
+    config = make_legacy_profile_history(tmp_path / "broken")
+    issues = ArchiveService(config).verify()
+    assert [issue.path for issue in issues] == ["profile/alice"]
+    assert "version_rebuild" in issues[0].reason and "repair-copy" in issues[0].reason
+
+    clean = configured(tmp_path / "drift")
+    service = ArchiveService(clean)
+    service.save(make_post("A"))
+    shift_captured_at(clean.storage.database, "post_versions", 3)
+    assert service.verify() == []
+
+
+def test_repair_copy_rebuilds_post_history_from_manifests(tmp_path: Path):
+    config = configured(tmp_path)
+    service = ArchiveService(config)
+    for title in ("A", "B", "A"):
+        service.save(make_post(title))
+    first, _, third = service.db.version_rows("42")
+    with service.db.connect() as db:
+        db.execute("DELETE FROM post_versions WHERE version_id=?", (first["version_id"],))
+        db.execute("UPDATE post_versions SET version_number=1 WHERE version_id=?", (third["version_id"],))
+        db.execute("UPDATE posts SET latest_version_id=? WHERE post_id='42'", (third["version_id"],))
+    report = ArchiveAuditor(config).run()
+    assert [(item.code, item.creator_id) for item in report.findings] == [("version_rebuild", "alice")]
+    destination = tmp_path / "repaired"
+
+    ArchiveRepairer(config).repair_copy(destination)
+
+    copied = AppConfig(storage=StorageConfig(output_dir=destination, database=destination / "backup.db"))
+    assert ArchiveAuditor(copied).run().blocking_count == 0
+    assert ArchiveService(copied).verify() == []
+    with sqlite3.connect(destination / "backup.db") as db:
+        rows = db.execute(
+            "SELECT version_id,version_number,content_fingerprint,local_path,markdown_path,json_path,"
+            "remote_updated_at FROM post_versions WHERE post_id='42' ORDER BY version_number"
+        ).fetchall()
+        latest = db.execute("SELECT latest_version_id FROM posts WHERE post_id='42'").fetchone()[0]
+    assert [(row[1], Path(row[3]).name) for row in rows] == [(1, "v0001"), (2, "v0002"), (3, "v0003")]
+    assert rows[0][2] == rows[2][2] != rows[1][2]
+    assert latest == rows[2][0] == third["version_id"]
+    assert Path(rows[0][4]).name == "post.md" and Path(rows[0][5]).name == "post.json" and rows[0][6]
+
+
+def test_repair_report_marks_unrecoverable_history(tmp_path: Path):
+    config = make_legacy_profile_history(tmp_path)
+    # A second, independent subject whose capture order is broken without manifest evidence.
+    service = ArchiveService(config)
+    service.save(make_post("A"))
+    service.save(make_post("B"))
+    rows = service.db.version_rows("42")
+    with service.db.connect() as db:
+        db.execute("UPDATE post_versions SET captured_at=? WHERE version_id=?",
+                   ("2020-01-01T00:00:00+00:00", rows[1]["version_id"]))
+
+    result = ArchiveRepairer(config).repair_copy(tmp_path / "repaired")
+
+    report = json.loads((tmp_path / "repaired" / result.report).read_text(encoding="utf-8"))
+    assert result.unrecoverable_findings >= 1
+    marked = {(item["code"], item["marking"]) for item in report["remaining"]}
+    assert ("capture_order", "unknown/unrecoverable") in marked
+    assert all(item["marking"] in {"unknown/unrecoverable", "needs manual review"} for item in report["remaining"])
+    assert result.remaining_findings == len(report["remaining"])

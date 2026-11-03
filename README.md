@@ -1,6 +1,6 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.28-alpha（2026-11-03）**
+**內部測試版本：v1.3.29-alpha（2026-11-03）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
 
@@ -24,6 +24,15 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 不將帳號密碼或 Cookie 寫入設定檔、資料庫或日誌。
 
 目前所有 `v1.x.x-alpha` 均為內部測試版本；同一版本線完成正式發布驗收後，才會移除 `-alpha`（例如 `v1.5.0-alpha` → `v1.5.0`）。
+
+## v1.3.29-alpha 更新重點
+
+- `verify`（CLI 與 GUI 驗證工作）最後新增「稽核版本與時間」階段：以唯讀方式執行與 `audit` 相同的版本／時間稽核，任何 error 等級問題（例如版本歷史錯置、latest pointer／alias 不一致、manifest 不符）都會讓驗證失敗；可自動修復的項目會提示改用 `repair-copy`。舊版取時差距等資訊、缺少 offset 的舊時間等警告仍只在 `audit` 中列出。
+- 依 manifest 重建版本資料列的範圍擴及投稿：投稿身分由各版本經雜湊驗證的 `post.json` 判定，重建後同步更新投稿的 latest pointer；任何版本若為 partial／failed 仍維持人工判讀。資料列已與版本目錄一一對應時直接略過，不額外重算雜湊。
+- `repair-copy` 會在修復副本寫入 `repair-report.json`：每項修復的前後版本／目錄／fingerprint 對照、latest 與 alias 狀態、修復前 schema 版本、副本內完整 `verify` 結果，以及所有剩餘問題（標記為 `unknown/unrecoverable` 或 `needs manual review`）。報告不含封存絕對路徑。
+- 新增 API 時間契約測試：所有 API 回應中的時間點都必須帶明確 offset；GUI 工作歷史新增在 America/Los_Angeles 瀏覽器時區下仍顯示台北跨午夜日期的 E2E。
+- `npm run release:check` 新增 Asia/Taipei 時間契約靜態檢查（禁止 naive `datetime.now()`／`utcnow()`、無參數 `astimezone()`、未帶 offset 防護的 `new Date()` 與未指定 `Asia/Taipei` 的 `Intl.DateTimeFormat`），並移除已不被引用的舊版 `web_assets/app.js`。
+- 投稿 manifest 在缺少內容指紋時與資料庫一致寫入空字串。
 
 ## v1.3.28-alpha 更新重點
 
