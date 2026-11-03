@@ -10,10 +10,12 @@ namespace FanboxUI {
     value?: string | number | null;
     options: SelectOption[];
     onChange?: (value: string) => void;
+    disabled?: boolean;
   }
 
   export interface CustomSelectElement extends HTMLDetailsElement {
     value: string;
+    disabled: boolean;
   }
 
   export function customSelect(options: CustomSelectOptions): CustomSelectElement {
@@ -25,6 +27,20 @@ namespace FanboxUI {
     const root = h("details", {class: "custom-select", id: options.id}) as CustomSelectElement;
     const summary = h("summary", {role: "combobox", "aria-label": options.label, "aria-controls": menuId,
       "aria-expanded": "false", "aria-haspopup": "listbox"}, summaryText);
+    let disabledFlag = false;
+    // <summary> ignores fieldset[disabled], so honour an enclosing disabled fieldset at interaction time too.
+    const isDisabled = (): boolean => disabledFlag || Boolean(root.closest("fieldset")?.disabled);
+    const setDisabled = (value: boolean): void => {
+      disabledFlag = value;
+      if (value) {
+        root.setAttribute("aria-disabled", "true");
+        root.open = false;
+      } else {
+        root.removeAttribute("aria-disabled");
+      }
+      summary.tabIndex = value ? -1 : 0;
+      summary.setAttribute("aria-disabled", value ? "true" : "false");
+    };
 
     const update = (nextValue: string | number): void => {
       selectedValue = String(nextValue);
@@ -46,7 +62,14 @@ namespace FanboxUI {
         if (changed) options.onChange?.(option.value);
       }}, option.label));
     }
+    summary.addEventListener("click", event => {
+      if (isDisabled()) event.preventDefault();
+    });
     summary.addEventListener("keydown", event => {
+      if (isDisabled()) {
+        if (["ArrowDown", "ArrowUp", "Home", "End", "Enter", " "].includes(event.key)) event.preventDefault();
+        return;
+      }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
       root.open = true;
@@ -73,12 +96,15 @@ namespace FanboxUI {
       choices[targetIndex]?.focus();
     });
     root.addEventListener("toggle", () => {
+      if (root.open && isDisabled()) { root.open = false; return; }
       summary.setAttribute("aria-expanded", root.open ? "true" : "false");
       if (root.open) menu.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({block: "nearest"});
     });
     Object.defineProperty(root, "value", {get: () => selectedValue, set: update});
+    Object.defineProperty(root, "disabled", {get: () => disabledFlag, set: setDisabled});
     root.append(summary, menu);
     update(selectedValue);
+    setDisabled(Boolean(options.disabled));
     return root;
   }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import os
+import re
 import socket
 import threading
 import time
@@ -428,11 +429,28 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_text("目前工作：完整備份", exact=True)).to_be_visible()
     save_button = page.get_by_role("button", name="儲存設定", exact=True)
     expect(save_button).to_be_disabled()
+    expect(page.locator(".auth-badge")).to_have_text("工作中")
+    expect(page.locator(".account-card")).not_to_have_class(re.compile(r"tone-error"))
+    expect(page.get_by_text("檢查失敗", exact=True)).not_to_be_visible()
+    for name in ("登入 FANBOX", "重新檢查", "登出"):
+        expect(page.get_by_role("button", name=name, exact=True)).to_be_disabled()
+    log_level = page.get_by_role("combobox", name="日誌等級")
+    expect(log_level).to_have_attribute("aria-disabled", "true")
+    log_level.click(force=True)
+    log_level.press("ArrowDown")
+    log_level.press("Enter")
+    expect(page.locator("#log-level")).not_to_have_attribute("open", "")
+    expect(page.get_by_role("option", name="DEBUG")).not_to_be_visible()
     jobs.hold_backup = False
     expect(save_button).to_be_enabled(timeout=5_000)
     expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
     expect(page.get_by_role("heading", name="帳號／登入", exact=True)).to_be_visible()
     expect(page.get_by_text("未登入", exact=True)).to_be_visible()
+    log_level = page.get_by_role("combobox", name="日誌等級")
+    expect(log_level).to_have_attribute("aria-disabled", "false")
+    log_level.click()
+    expect(page.get_by_role("option", name="DEBUG")).to_be_visible()
+    page.keyboard.press("Escape")
     expect(page.get_by_role("button", name="登入 FANBOX", exact=True)).to_be_enabled()
     expect(page.get_by_role("button", name="登出", exact=True)).to_be_disabled()
     expect(page.get_by_role("heading", name="備份", exact=True)).to_be_visible()

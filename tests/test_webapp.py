@@ -388,3 +388,41 @@ async def test_every_api_time_point_carries_an_explicit_offset(tmp_path: Path):
     assert checked == len(routes) and naive == []
     assert len(seen) >= 20 and any(".events[" in where for where in seen)
     assert any("captured_at" in where for where in seen)
+
+
+@pytest.mark.anyio
+async def test_auth_status_reports_locked_not_error_while_a_job_runs(tmp_path: Path, monkeypatch):
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config)
+    checks = []
+
+    class AuthService:
+        def check(self):
+            from fanbox_archiver.application import AuthStatus
+            checks.append(1)
+            return AuthStatus("authenticated", "profile", "工作階段有效。", True, True)
+
+    app.state.auth_service = AuthService()
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.get("/api/auth/status", headers=token)
+        assert first.json()["state"] == "authenticated"
+        assert first.json()["last_known"] is None
+
+        monkeypatch.setattr(app.state.jobs, "has_active", lambda: True)
+        locked = (await client.get("/api/auth/status", headers=token)).json()
+        assert locked["state"] == "locked"
+        assert locked["can_login"] is False and locked["can_logout"] is False
+        assert locked["last_known"]["state"] == "authenticated"
+        assert locked["last_known"]["checked_at"].endswith("+00:00")
+        assert set(locked["last_known"]) == {"state", "checked_at"}
+        assert len(checks) == 1  # the profile is never opened while a job holds it
+        login = await client.post("/api/auth/login", json={"timeout_seconds": 60}, headers=token)
+        logout = await client.post("/api/auth/logout", headers=token)
+        assert login.status_code == 409 and logout.status_code == 409
+
+        monkeypatch.setattr(app.state.jobs, "has_active", lambda: False)
+        recovered = (await client.get("/api/auth/status", headers=token)).json()
+        assert recovered["state"] == "authenticated"
+        assert len(checks) == 2

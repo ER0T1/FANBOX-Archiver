@@ -56,14 +56,18 @@ namespace FanboxUI {
     const preserveOrder = settingCheckbox("保留原始內容順序", value.markdown.preserve_original_order);
     const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
     const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
-    const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level,
-      options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const blocked = Boolean(activeJob);
+    const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
+      options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const authBusy = auth.state === "checking";
+    const authLocked = auth.state === "locked";
     const authTone = auth.state === "authenticated" ? "success"
       : auth.state === "expired" || auth.state === "error" ? "error" : "neutral";
-    const authLabel = ({checking: "檢查中", authenticated: "已登入", signed_out: "未登入",
-      expired: "已失效", error: "檢查失敗"} as Record<AuthState, string>)[auth.state];
+    const authLabels: Record<AuthState, string> = {checking: "檢查中", locked: "工作中", authenticated: "已登入",
+      signed_out: "未登入", expired: "已失效", error: "檢查失敗"};
+    const authLabel = authLabels[auth.state];
+    const lastKnown = authLocked && auth.last_known
+      ? `上次檢查：${authLabels[auth.last_known.state]}（${formatDate(auth.last_known.checked_at)}）` : null;
     const authFeedback = h("p", {class: "settings-error", role: "alert", hidden: true});
     const runAuth = async (action: () => Promise<string | null>): Promise<void> => {
       authFeedback.hidden = true;
@@ -116,7 +120,7 @@ namespace FanboxUI {
       h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
         h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),
       h("section", {class: "settings-section"}, h("h3", {}, "日誌"),
-        h("div", {class: "settings-grid two-columns"}, h("label", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
+        h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel), keepDays.node),
         h("div", {class: "setting-toggles"}, fileLogs.node))),
     h("div", {class: "settings-actions"}, h("button", {type: "submit", class: "primary",
       disabled: !data.writable || blocked}, "儲存設定"),
@@ -132,6 +136,7 @@ namespace FanboxUI {
         h("div", {class: "account-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "ACCOUNT & SIGN-IN"),
           h("h2", {}, "帳號／登入")), h("span", {class: `auth-badge ${authTone}`}, authLabel)),
         h("p", {class: "account-message", role: "status", "aria-live": "polite"}, auth.message),
+        lastKnown ? h("p", {class: "account-last-known"}, lastKnown) : null,
         h("p", {class: "settings-section-description"}, auth.source === "profile"
           ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
           : auth.source === "environment" ? "認證來源：外部環境 FANBOX_COOKIE"
@@ -139,13 +144,13 @@ namespace FanboxUI {
         auth.externally_managed ? h("p", {class: "auth-external-notice"},
           "此登入由啟動環境管理，應用程式無法撤銷；請更新或移除 FANBOX_COOKIE 後重新啟動。") : null,
         h("div", {class: "account-actions"},
-          h("button", {type: "button", class: "primary", disabled: blocked || authBusy || !auth.can_login,
+          h("button", {type: "button", class: "primary", disabled: blocked || authLocked || authBusy || !auth.can_login,
             onclick: () => void runAuth(onAuthLogin)}, "登入 FANBOX"),
-          h("button", {type: "button", disabled: blocked || authBusy, onclick: onAuthRefresh}, "重新檢查"),
+          h("button", {type: "button", disabled: blocked || authLocked || authBusy, onclick: onAuthRefresh}, "重新檢查"),
           authBusy && auth.job ? h("button", {type: "button", class: "danger-outline",
             onclick: () => void runAuth(() => onAuthCancel(auth.job!.job_id))}, "取消登入") : null,
           h("button", {type: "button", class: "danger-outline",
-            disabled: blocked || authBusy || !auth.can_logout,
+            disabled: blocked || authLocked || authBusy || !auth.can_logout,
             onclick: () => { if (window.confirm("確定要清除專用 FANBOX 工作階段嗎？封存與設定不會被刪除。")) {
               void runAuth(onAuthLogout);
             }}}, "登出"), authFeedback)),

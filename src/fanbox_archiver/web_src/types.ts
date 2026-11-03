@@ -305,7 +305,7 @@ namespace FanboxUI {
     writable: boolean;
   }
 
-  export type AuthState = "checking" | "authenticated" | "signed_out" | "expired" | "error";
+  export type AuthState = "checking" | "locked" | "authenticated" | "signed_out" | "expired" | "error";
 
   export interface AuthJob {
     job_id: string;
@@ -322,6 +322,8 @@ namespace FanboxUI {
     can_logout: boolean;
     externally_managed: boolean;
     job: AuthJob | null;
+    /** While a backup or verify job holds the profile: the last real check, if any. */
+    last_known?: {state: AuthState; checked_at: string} | null;
   }
 
   export interface SettingsPatch {

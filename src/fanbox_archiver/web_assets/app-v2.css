@@ -120,6 +120,7 @@ pre { padding:1rem; overflow:auto; border-radius:12px; background:var(--surface-
 .custom-select summary::after { content:""; flex:0 0 auto; width:7px; height:7px; margin-right:.2rem; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg) translateY(-2px); transition:transform .18s; }
 .custom-select summary:hover,.custom-select summary:focus-visible,.custom-select[open] summary { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent); }
 .custom-select[open] summary::after { transform:rotate(225deg) translate(-2px,-2px); }
+.custom-select[aria-disabled="true"] summary,fieldset:disabled .custom-select summary { opacity:.5; cursor:not-allowed; border-color:var(--line); box-shadow:none; }
 .select-value { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:650; }
 .select-menu { position:absolute; z-index:30; top:calc(100% + .45rem); left:0; right:0; display:flex; flex-direction:column; align-items:stretch; max-height:min(50vh,22rem); padding:.38rem; overflow-y:auto; overscroll-behavior:contain; background:var(--surface); border:1px solid var(--line); border-radius:11px; box-shadow:0 16px 40px rgba(0,0,0,.22); }
 .select-menu button { min-height:38px; padding:.5rem .7rem; overflow:hidden; color:var(--text); text-align:left; text-overflow:ellipsis; white-space:nowrap; background:transparent; border:0; border-radius:8px; cursor:pointer; }
@@ -331,6 +332,8 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .account-actions button { min-height:42px; padding:.62rem .9rem; border:1px solid var(--line); border-radius:10px; cursor:pointer; }
 .account-actions button:disabled { opacity:.55; cursor:not-allowed; }
 .account-actions .danger-outline { color:var(--red); background:transparent; border-color:color-mix(in srgb,var(--red) 45%,var(--line)); }
+.account-actions .danger-outline:disabled { color:var(--muted); border-color:var(--line); }
+.account-last-known { margin:.15rem 0 0; color:var(--muted); font-size:.88rem; }
 .account-actions .settings-error { width:100%; }
 .backup-auth-notice { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; padding:1rem 1.15rem; color:var(--yellow); background:color-mix(in srgb,var(--yellow) 9%,var(--surface)); border:1px solid color-mix(in srgb,var(--yellow) 32%,var(--line)); border-radius:var(--radius); }
 .backup-auth-notice p { margin:.25rem 0 0; color:var(--muted); }

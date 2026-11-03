@@ -414,7 +414,7 @@ namespace FanboxUI {
       h("p", {class: "eyebrow"}, "BACKUP CONTROL"), h("h1", {}, "開始備份"), h("p", {}, "選擇本次範圍與內容；未指定創作者時會備份全部支援中的創作者。")),
       h("button", {type: "button", class: "primary", onclick: actions.onHistory}, "工作歷史")),
     activeJobNotice(activeJob),
-    auth.state !== "authenticated" ? h("section", {class: "backup-auth-notice", role: "status"},
+    auth.state !== "authenticated" && auth.state !== "locked" ? h("section", {class: "backup-auth-notice", role: "status"},
       h("div", {}, h("strong", {}, auth.state === "expired" ? "登入已失效" : "備份前請確認登入"),
         h("p", {}, auth.message)),
       h("button", {type: "button", onclick: actions.onSignIn}, "前往設定登入")) : null,

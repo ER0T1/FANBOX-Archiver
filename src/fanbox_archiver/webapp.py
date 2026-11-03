@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -130,6 +131,8 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     app.state.jobs = jobs
     app.state.auth_service = auth_service
     app.state.auth_jobs = auth_jobs
+    # Last real check, kept as a state name and time only (never cookies or tokens).
+    app.state.last_auth = None
     app.state.session_token = session_token
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
@@ -171,6 +174,9 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
             "writable": app.state.config_path is not None,
         }
 
+    def remember_auth(state: str) -> None:
+        app.state.last_auth = {"state": state, "checked_at": datetime.now(UTC).isoformat()}
+
     @app.get("/api/auth/status", dependencies=[Depends(require_mutation_token)])
     async def auth_status():
         active = app.state.auth_jobs.active()
@@ -183,13 +189,15 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
             }
         if app.state.jobs.has_active():
             return {
-                "state": "error", "source": "profile",
-                "message": "備份或驗證工作執行期間無法開啟登入設定檔。",
+                "state": "locked", "source": "profile",
+                "message": "備份或驗證執行中，暫停登入檢查；工作結束後自動恢復。",
                 "can_login": False, "can_logout": False,
                 "externally_managed": False, "job": None,
+                "last_known": app.state.last_auth,
             }
         status = await run_in_threadpool(app.state.auth_service.check)
-        return {**status.as_dict(), "job": None}
+        remember_auth(status.state)
+        return {**status.as_dict(), "job": None, "last_known": None}
 
     @app.post(
         "/api/auth/login", status_code=202,
@@ -228,6 +236,7 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
             raise HTTPException(status_code=409, detail="工作執行期間無法登出")
         try:
             status = await run_in_threadpool(app.state.auth_service.logout)
+            remember_auth(status.state)
             return status.as_dict()
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
