@@ -32,6 +32,7 @@ from .service import ArchiveService
 from .application import AuthenticationService, BackupEvent, BackupRequest, BackupUseCase
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
+from .audit import ArchiveAuditor
 from .security import confined_path, safe_filename
 
 
@@ -367,6 +368,36 @@ def verify(
     for issue in issues:
         console.print(f"[red]{issue.reason}[/red] {issue.path}")
     raise typer.Exit(1)
+
+
+@app.command()
+def audit(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="以 JSON 輸出唯讀稽核與 dry-run 修復計畫")
+    ] = False,
+    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+) -> None:
+    """唯讀稽核版本、manifest、latest pointer、alias 與時間欄位。"""
+    try:
+        settings = AppConfig.load(config)
+    except (OSError, ValidationError) as exc:
+        console.print(f"[red]設定檔錯誤：[/red]{exc}")
+        raise typer.Exit(2) from exc
+    report = ArchiveAuditor(settings).run()
+    if json_output:
+        console.print_json(data=report.model_dump(mode="json"))
+    else:
+        console.print(
+            f"唯讀稽核完成：{report.finding_count} 個問題，"
+            f"{report.automatic_count} 個可產生確定性修復預覽。"
+        )
+        for finding in report.findings:
+            console.print(
+                f"[red]{finding.code}[/red] {finding.subject_type}/{finding.subject_id} "
+                f"{finding.issue} {finding.evidence}"
+            )
+    if report.findings:
+        raise typer.Exit(1)
 
 
 @app.command("index")

@@ -145,15 +145,15 @@ class ArchiveService:
                     self._update_previous_navigation(latest, version_number)
             self.db.finish_version(
                 version_id, status=status, markdown_path=str(version_dir / "post.md"),
-                json_path=str(version_dir / "post.json"), error=error,
+                json_path=str(version_dir / "post.json"), captured_at=captured_at, error=error,
                 make_latest=status == PostStatus.COMPLETED,
             )
             self.db.set_post_status(post.post_id, status, error)
             return status
         except BaseException as exc:
+            failed_at = now_iso()
             if temp_dir.exists():
                 try:
-                    failed_at = now_iso()
                     self._write_json(temp_dir / "post.json", post.model_dump(mode="json"))
                     if self.config.markdown.enabled:
                         self.storage.atomic_write_text(
@@ -175,7 +175,7 @@ class ArchiveService:
             self.db.finish_version(
                 version_id, status=PostStatus.FAILED,
                 markdown_path=str(version_dir / "post.md"), json_path=str(version_dir / "post.json"),
-                error=str(exc),
+                captured_at=failed_at, error=str(exc),
             )
             self.db.set_post_status(post.post_id, PostStatus.FAILED, str(exc))
             raise
@@ -341,7 +341,7 @@ class ArchiveService:
             self.db.register_profile_version(
                 profile.creator_id, profile.name, number, profile.content_fingerprint,
                 str(final), str(final / "profile.json"),
-                str(final / cover_name) if cover_name else None, cover_sha,
+                str(final / cover_name) if cover_name else None, cover_sha, captured_at,
             )
             if profile.icon_url:
                 self._save_profile_icon(profile)
@@ -544,7 +544,7 @@ class ArchiveService:
             self._update_fancard_aliases(creator_root, final, image_name)
             self.db.register_fancard_version(
                 creator_id, target_month, number, fingerprint, str(final),
-                str(final / image_name) if image_name else "", image_sha,
+                str(final / image_name) if image_name else "", image_sha, captured_at,
             )
             return ("updated" if latest else "new"), final
         except BaseException:
@@ -689,6 +689,7 @@ class ArchiveService:
                 self.db.register_legacy_version(
                     post.post_id, post.content_fingerprint or str(row["content_fingerprint"] or ""),
                     str(final), str(final / "post.md"), str(final / "post.json"), row["updated_at"],
+                    captured,
                 )
             except (OSError, ValueError) as exc:
                 get_logger().error(

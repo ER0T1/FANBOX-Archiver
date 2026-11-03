@@ -454,12 +454,13 @@ class Database:
 
     def finish_version(
         self, version_id: int, *, status: PostStatus, markdown_path: str,
-        json_path: str, error: str | None = None, make_latest: bool = False,
+        json_path: str, captured_at: str, error: str | None = None,
+        make_latest: bool = False,
     ) -> None:
         with self.connect() as db:
             db.execute(
                 "UPDATE post_versions SET captured_at=?,status=?,markdown_path=?,json_path=?,last_error=? WHERE version_id=?",
-                (now_iso(), status.value, markdown_path, json_path, error, version_id),
+                (captured_at, status.value, markdown_path, json_path, error, version_id),
             )
             if make_latest:
                 row = db.execute("SELECT post_id FROM post_versions WHERE version_id=?", (version_id,)).fetchone()
@@ -469,12 +470,13 @@ class Database:
     def register_legacy_version(
         self, post_id: str, fingerprint: str, local_path: str,
         markdown_path: str, json_path: str, remote_updated_at: str | None,
+        captured_at: str,
     ) -> None:
         with self.connect() as db:
             cursor = db.execute(
                 "INSERT OR IGNORE INTO post_versions(post_id,version_number,remote_updated_at,captured_at,"
                 "content_fingerprint,status,local_path,markdown_path,json_path) VALUES(?,1,?,?,?,?,?,?,?)",
-                (post_id, remote_updated_at, now_iso(), fingerprint, PostStatus.COMPLETED.value,
+                (post_id, remote_updated_at, captured_at, fingerprint, PostStatus.COMPLETED.value,
                  local_path, markdown_path, json_path),
             )
             row = db.execute(
@@ -524,6 +526,7 @@ class Database:
     def register_profile_version(
         self, creator_id: str, name: str, version_number: int, fingerprint: str,
         local_path: str, json_path: str, cover_path: str | None, cover_sha256: str | None,
+        captured_at: str,
     ) -> int:
         with self.connect() as db:
             db.execute(
@@ -536,7 +539,7 @@ class Database:
                 "INSERT INTO creator_profile_versions(creator_id,version_number,captured_at,"
                 "content_fingerprint,status,local_path,json_path,cover_path,cover_sha256) "
                 "VALUES(?,?,?,?, 'completed',?,?,?,?)",
-                (creator_id, version_number, now_iso(), fingerprint, local_path, json_path,
+                (creator_id, version_number, captured_at, fingerprint, local_path, json_path,
                  cover_path, cover_sha256),
             )
             version_id = int(cursor.lastrowid)
@@ -549,13 +552,14 @@ class Database:
     def register_fancard_version(
         self, creator_id: str, target_month: str, version_number: int,
         fingerprint: str, local_path: str, image_path: str, image_sha256: str,
+        captured_at: str,
     ) -> None:
         with self.connect() as db:
             db.execute(
                 "INSERT INTO fancard_versions(creator_id,target_month,version_number,captured_at,"
                 "content_fingerprint,status,local_path,image_path,image_sha256) "
                 "VALUES(?,?,?,?,?,'completed',?,?,?)",
-                (creator_id, target_month, version_number, now_iso(), fingerprint,
+                (creator_id, target_month, version_number, captured_at, fingerprint,
                  local_path, image_path, image_sha256),
             )
 
