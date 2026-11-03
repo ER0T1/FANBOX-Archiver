@@ -216,6 +216,7 @@ namespace FanboxUI {
       scope?: string;
       include_profile?: boolean | null;
       include_fancard?: boolean | null;
+      trigger?: "manual" | "schedule";
     };
     result?: WebJobResult | null;
     events?: WebJobEvent[];
@@ -297,10 +298,44 @@ namespace FanboxUI {
     keep_days: number;
   }
 
+  export type ScheduleFrequency = "daily" | "weekly" | "monthly";
+
+  export interface ScheduleSettings {
+    enabled: boolean;
+    frequency: ScheduleFrequency;
+    interval: number;
+    /** Monday = 0 … Sunday = 6. */
+    weekday: number;
+    month_day: number;
+    time: string;
+    start_date: string | null;
+    creators: string[];
+    timezone: "Asia/Taipei";
+  }
+
+  export type ScheduleSettingsPatch = Omit<ScheduleSettings, "start_date" | "timezone">;
+
+  export interface ScheduleStatus {
+    enabled: boolean;
+    summary: string;
+    timezone: string;
+    next_run_at: string | null;
+    last_due_at: string | null;
+    deferred_due: string | null;
+    note: string | null;
+    last_job: {job_id: string; status: JobStatus; error: string | null; created_at: string; finished_at: string | null} | null;
+  }
+
+  export interface SchedulePreview {
+    summary: string;
+    next_runs: string[];
+  }
+
   export interface EditableSettings {
     download: DownloadSettings;
     sync: SyncSettings;
     backup_defaults: BackupDefaultsSettings;
+    schedule: ScheduleSettings;
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }
@@ -337,6 +372,7 @@ namespace FanboxUI {
     download: Omit<DownloadSettings, "max_concurrent">;
     sync: Omit<SyncSettings, "supporting_only">;
     backup_defaults: BackupDefaultsSettings;
+    schedule: ScheduleSettingsPatch;
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }

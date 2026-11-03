@@ -469,7 +469,7 @@ def serve(
         console.print(f"[green]動態閱讀器已啟動：[/green]{url}")
         console.print("按 Ctrl+C 停止；下載完成後重新整理頁面即可看到新內容。")
         uvicorn.run(
-            create_app(settings, config_path=config),
+            create_app(settings, config_path=config, run_scheduler=True),
             host="127.0.0.1", port=port, log_level="info",
         )
     except KeyboardInterrupt:

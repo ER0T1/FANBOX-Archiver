@@ -72,6 +72,25 @@ namespace FanboxUI {
     });
   }
 
+  export function getScheduleStatus(): Promise<ScheduleStatus> {
+    return requestJson<ScheduleStatus>("/api/schedule");
+  }
+
+  export function previewSchedule(schedule: ScheduleSettingsPatch, sessionToken: string): Promise<SchedulePreview> {
+    return requestJson<SchedulePreview>("/api/schedule/preview", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-Fanbox-Token": sessionToken},
+      body: JSON.stringify(schedule),
+    });
+  }
+
+  export function runScheduleNow(sessionToken: string): Promise<WebJob> {
+    return requestJson<WebJob>("/api/schedule/run", {
+      method: "POST",
+      headers: {"X-Fanbox-Token": sessionToken},
+    });
+  }
+
   export function getAuthStatus(sessionToken: string): Promise<AuthStatus> {
     return requestJson<AuthStatus>("/api/auth/status", {
       headers: {"X-Fanbox-Token": sessionToken},

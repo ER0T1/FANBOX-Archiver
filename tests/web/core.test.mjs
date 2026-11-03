@@ -52,6 +52,7 @@ test("TypeScript core identifies active jobs and labels global work", () => {
   assert.equal(ui.isActiveJob(verify), false);
   assert.equal(ui.jobLabel(backup), "完整備份");
   assert.equal(ui.jobLabel(verify), "封存完整性驗證");
+  assert.equal(ui.jobLabel({kind: "backup", status: "running", request: {trigger: "schedule"}}), "排程備份");
 });
 
 test("TypeScript core formats archive values", () => {

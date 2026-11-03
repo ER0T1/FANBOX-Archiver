@@ -659,3 +659,54 @@ def test_job_history_pages_sorts_and_filters_on_the_server(page: Page, live_gui)
     expect(page.get_by_role("button", name="工作時間排序：舊到新，按下切換")).to_be_visible()
     page.set_viewport_size({"width": 390, "height": 844})
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+
+
+def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui) -> None:
+    base_url, config_path, jobs = live_gui
+    page.goto(base_url, wait_until="networkidle")
+    page.get_by_role("button", name="設定", exact=True).click()
+    section = page.locator(".schedule-settings")
+    expect(section.get_by_role("heading", name="自動備份")).to_be_visible()
+    # A running job locks the whole section, including the day grid and run button.
+    expect(section.get_by_role("checkbox", name="啟用自動備份")).to_be_disabled()
+    expect(section.get_by_role("button", name="立即執行一次")).to_be_disabled()
+    jobs.hold_backup = False
+    enable = section.get_by_role("checkbox", name="啟用自動備份")
+    expect(enable).to_be_enabled(timeout=5_000)
+    expect(section.locator("dd").first).to_have_text("未啟用")
+
+    enable.check()
+    section.get_by_role("combobox", name="週期").click()
+    section.get_by_role("option", name="每週／每 N 週").click()
+    section.get_by_role("combobox", name="星期").click()
+    section.get_by_role("option", name="週三").click()
+    section.get_by_role("spinbutton", name="間隔").fill("2")
+    section.locator('input[type="time"]').fill("21:05")
+    preview = section.locator(".schedule-preview")
+    expect(preview).to_contain_text("每 2 週的週三 21:05（Asia/Taipei）")
+    expect(preview).to_contain_text("接下來：")
+    expect(section.locator(".schedule-days")).to_be_hidden()
+
+    section.get_by_role("combobox", name="週期").click()
+    section.get_by_role("option", name="每月指定日期").click()
+    expect(section.get_by_role("spinbutton", name="間隔")).to_be_hidden()
+    section.get_by_role("button", name="31", exact=True).click()
+    expect(section.get_by_role("button", name="31", exact=True)).to_have_attribute("aria-pressed", "true")
+    expect(preview).to_contain_text("每月 31 日 21:05")
+    expect(preview).to_contain_text("月底執行")
+
+    page.get_by_role("button", name="儲存設定", exact=True).click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    saved = AppConfig.load(config_path).schedule
+    assert (saved.enabled, saved.frequency, saved.month_day, saved.time) == (True, "monthly", 31, "21:05")
+    assert saved.start_date is not None and saved.timezone == "Asia/Taipei"
+    expect(section.locator("dd").first).to_contain_text("每月 31 日 21:05")
+    expect(section.locator("dd").nth(1)).not_to_have_text("—")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1280, "height": 800})
+    section.get_by_role("button", name="立即執行一次").click()
+    expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()
+    assert jobs.submitted[-1].trigger == "schedule"
+    assert jobs.submitted[-1].dry_run is False

@@ -41,6 +41,7 @@ namespace FanboxUI {
 
   export function jobLabel(job: WebJob): string {
     if (job.kind === "verify") return "封存完整性驗證";
+    if (job.request.trigger === "schedule") return "排程備份";
     return ({profile: "個人資料拉取", fancard: "粉絲卡拉取"})[job.request.mode ?? ""]
       || (job.request.dry_run ? "完整備份預覽" : "完整備份");
   }
@@ -277,6 +278,7 @@ namespace FanboxUI {
   }
 
   function jobModeLabel(job: WebJob): string {
+    if (job.request.trigger === "schedule") return "排程備份";
     return ({profile: "只拉取 Profile", fancard: "只拉取 Fan Card"})[job.request.mode ?? ""]
       || (job.request.dry_run ? "完整備份預覽" : "完整備份");
   }

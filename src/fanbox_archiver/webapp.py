@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, datetime
+from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -13,11 +14,15 @@ from starlette.datastructures import MutableHeaders
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .config import AppConfig
+from .config import AppConfig, ScheduleConfig
 from . import __version__
 from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
+    BackupScheduler,
 )
+from .database import Database
+from .schedule import describe, upcoming
+from .timestamps import TAIPEI
 from .client import FanboxClient
 from .reader import ArchiveReader, ReaderNotFound
 
@@ -96,6 +101,18 @@ class MarkdownConfigPatch(BaseModel):
     preserve_original_order: bool | None = None
 
 
+class ScheduleConfigPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
+    frequency: Literal["daily", "weekly", "monthly"] | None = None
+    interval: int | None = Field(None, ge=1, le=30)
+    weekday: int | None = Field(None, ge=0, le=6)
+    month_day: int | None = Field(None, ge=1, le=31)
+    time: str | None = Field(None, max_length=5)
+    start_date: date | None = None
+    creators: list[Annotated[str, Field(max_length=200)]] | None = Field(None, max_length=100)
+
+
 class LoggingConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     level: str | None = None
@@ -108,6 +125,7 @@ class ConfigPatch(BaseModel):
     download: DownloadConfigPatch | None = None
     sync: SyncConfigPatch | None = None
     backup_defaults: BackupDefaultsConfigPatch | None = None
+    schedule: ScheduleConfigPatch | None = None
     markdown: MarkdownConfigPatch | None = None
     logging: LoggingConfigPatch | None = None
 
@@ -116,7 +134,9 @@ class LoginBody(BaseModel):
     timeout_seconds: int = Field(default=600, ge=60, le=1800)
 
 
-def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI:
+def create_app(
+    config: AppConfig, *, config_path: Path | None = None, run_scheduler: bool = False,
+) -> FastAPI:
     reader = ArchiveReader(config)
     jobs = BackupJobManager(config)
     auth_service = AuthenticationService(config)
@@ -126,7 +146,17 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     home_html = (assets / "index.html").read_text(encoding="utf-8").replace(
         "__FANBOX_SESSION_TOKEN__", session_token
     )
-    app = FastAPI(title="FANBOX Archiver", version=__version__)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Only a real server runs the background schedule; test clients never start it.
+        if run_scheduler:
+            app.state.scheduler.start()
+        try:
+            yield
+        finally:
+            app.state.scheduler.stop()
+
+    app = FastAPI(title="FANBOX Archiver", version=__version__, lifespan=lifespan)
     app.state.reader = reader
     app.state.jobs = jobs
     app.state.auth_service = auth_service
@@ -136,6 +166,10 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
     app.state.session_token = session_token
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
+    app.state.scheduler = BackupScheduler(
+        lambda: app.state.config, lambda: app.state.jobs, Database(config.storage.database),
+        is_busy=lambda: app.state.auth_jobs.active() is not None,
+    )
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "test"],
@@ -249,13 +283,52 @@ def create_app(config: AppConfig, *, config_path: Path | None = None) -> FastAPI
             raise HTTPException(status_code=409, detail="工作執行期間無法修改設定")
         patch = body.model_dump(exclude_none=True)
         try:
+            if "schedule" in patch:
+                patch["schedule"] = normalize_schedule_patch(patch["schedule"])
             updated = app.state.config.with_editable_patch(patch)
+            if updated.schedule.enabled and updated.schedule.start_date is None:
+                # N-day / N-week cycles count from the day the schedule is switched on.
+                patch["schedule"]["start_date"] = datetime.now(TAIPEI).date()
+                updated = app.state.config.with_editable_patch(patch)
             AppConfig.save_editable(app.state.config_path, updated, patch)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        schedule_changed = updated.schedule != app.state.config.schedule
         app.state.config = updated
         app.state.jobs.config = updated
+        if schedule_changed:
+            await run_in_threadpool(app.state.scheduler.reset)
         return {"editable": updated.editable_dict(), "saved": True}
+
+    def normalize_schedule_patch(values: dict) -> dict:
+        if "creators" in values:
+            values["creators"] = list(dict.fromkeys(
+                FanboxClient.creator_id(value) for value in values["creators"]
+            ))
+        return values
+
+    @app.get("/api/schedule")
+    async def schedule_status():
+        return await run_in_threadpool(app.state.scheduler.status)
+
+    @app.post("/api/schedule/preview", dependencies=[Depends(require_mutation_token)])
+    async def schedule_preview(body: ScheduleConfigPatch):
+        values = normalize_schedule_patch(body.model_dump(exclude_none=True))
+        try:
+            schedule = ScheduleConfig.model_validate({**app.state.config.schedule.model_dump(), **values})
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if schedule.start_date is None:
+            schedule.start_date = datetime.now(TAIPEI).date()
+        runs = upcoming(schedule, datetime.now(UTC), 3)
+        return {"summary": describe(schedule), "next_runs": [item.isoformat() for item in runs]}
+
+    @app.post("/api/schedule/run", status_code=202, dependencies=[Depends(require_mutation_token)])
+    async def schedule_run_now():
+        try:
+            return await run_in_threadpool(app.state.scheduler.run_now)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/jobs")
     async def list_jobs(

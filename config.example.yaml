@@ -31,6 +31,16 @@ backup_defaults:
   dry_run: false
   include_profile: true
   include_fancard: true
+schedule:
+  enabled: false
+  frequency: daily
+  interval: 1
+  weekday: 0
+  month_day: 1
+  time: "03:00"
+  start_date: null
+  creators: []
+  timezone: Asia/Taipei
 logging:
   level: INFO
   write_to_file: true

@@ -435,7 +435,9 @@ namespace FanboxUI {
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
-        const [data, jobData, auth] = await Promise.all([getSettings(), getJobs(), getAuthStatus(sessionToken)]);
+        const [data, jobData, auth, scheduleStatus, creatorData] = await Promise.all([
+          getSettings(), getJobs(), getAuthStatus(sessionToken), getScheduleStatus(), getCreators(),
+        ]);
         updateActiveJob(jobData);
         app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
           patch => saveSettingsForm(patch),
@@ -445,7 +447,20 @@ namespace FanboxUI {
           jobId => authAction(async () => { await cancelAuthLogin(jobId, sessionToken); },
             "正在取消登入…"),
           () => authAction(async () => { await logoutAuth(sessionToken); },
-            "已安全登出；封存與設定均未變更。")));
+            "已安全登出；封存與設定均未變更。"),
+          {status: scheduleStatus, creators: creatorData.items, actions: {
+            onPreview: schedule => previewSchedule(schedule, sessionToken),
+            onRunNow: async () => {
+              try {
+                // The backup page opens the running job, which this one now is.
+                await runScheduleNow(sessionToken);
+                setView("backup");
+                return null;
+              } catch (error) {
+                return error instanceof Error ? error.message : String(error);
+              }
+            },
+          }}));
         scheduleJobRefresh();
       } catch (error) {
         errorView(error);

@@ -308,6 +308,25 @@ var FanboxUI;
         });
     }
     FanboxUI.saveSettings = saveSettings;
+    function getScheduleStatus() {
+        return requestJson("/api/schedule");
+    }
+    FanboxUI.getScheduleStatus = getScheduleStatus;
+    function previewSchedule(schedule, sessionToken) {
+        return requestJson("/api/schedule/preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Fanbox-Token": sessionToken },
+            body: JSON.stringify(schedule),
+        });
+    }
+    FanboxUI.previewSchedule = previewSchedule;
+    function runScheduleNow(sessionToken) {
+        return requestJson("/api/schedule/run", {
+            method: "POST",
+            headers: { "X-Fanbox-Token": sessionToken },
+        });
+    }
+    FanboxUI.runScheduleNow = runScheduleNow;
     function getAuthStatus(sessionToken) {
         return requestJson("/api/auth/status", {
             headers: { "X-Fanbox-Token": sessionToken },
@@ -560,6 +579,93 @@ var FanboxUI;
 })(FanboxUI || (FanboxUI = {}));
 var FanboxUI;
 (function (FanboxUI) {
+    const WEEKDAYS = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"];
+    function lastResultText(status) {
+        const job = status.last_job;
+        if (!job)
+            return status.last_due_at ? `上次排程：${FanboxUI.formatDate(status.last_due_at)}` : "尚未執行過排程備份。";
+        const outcome = job.status === "completed" ? "完成" : job.status === "failed" ? "失敗"
+            : FanboxUI.isActiveJob(job) ? "執行中" : FanboxUI.statusText(job.status);
+        return `上次排程：${FanboxUI.formatDate(status.last_due_at ?? job.created_at)} · ${outcome}${job.error ? `（${job.error}）` : ""}`;
+    }
+    function renderScheduleSection(value, status, creators, blocked, actions) {
+        const enabled = FanboxUI.h("input", { type: "checkbox", checked: value.enabled });
+        let frequencyValue = value.frequency;
+        let monthDay = value.month_day;
+        const interval = FanboxUI.h("input", { type: "number", value: value.interval, min: 1, max: 30, step: 1 });
+        const time = FanboxUI.h("input", { type: "time", value: value.time, step: 60, required: true });
+        const intervalUnit = FanboxUI.h("small", {});
+        const preview = FanboxUI.h("p", { class: "schedule-preview", role: "status", "aria-live": "polite" });
+        const runFeedback = FanboxUI.h("p", { class: "settings-error", role: "alert", hidden: true });
+        const frequency = FanboxUI.customSelect({ id: "schedule-frequency", label: "週期", value: frequencyValue, disabled: blocked,
+            options: [{ value: "daily", label: "每天／每 N 天" }, { value: "weekly", label: "每週／每 N 週" },
+                { value: "monthly", label: "每月指定日期" }],
+            onChange: next => { frequencyValue = next; sync(); } });
+        const weekday = FanboxUI.customSelect({ id: "schedule-weekday", label: "星期", value: value.weekday, disabled: blocked,
+            options: WEEKDAYS.map((label, index) => ({ value: index, label })), onChange: () => sync() });
+        const dayButtons = Array.from({ length: 31 }, (_, index) => FanboxUI.h("button", { type: "button",
+            class: "schedule-day", "aria-pressed": index + 1 === monthDay ? "true" : "false",
+            onclick: () => { monthDay = index + 1; sync(); } }, String(index + 1)));
+        const creatorBoxes = creators.map(item => {
+            const input = FanboxUI.h("input", { type: "checkbox", value: item.creator_id,
+                checked: value.creators.includes(item.creator_id) });
+            input.addEventListener("change", () => sync());
+            return { input, node: FanboxUI.h("label", { class: "setting-toggle" }, input, FanboxUI.h("span", {}, `${item.name} @${item.creator_id}`)) };
+        });
+        const unknownCreators = value.creators.filter(id => !creators.some(item => item.creator_id === id));
+        const intervalField = FanboxUI.h("label", { class: "setting-field" }, FanboxUI.h("span", {}, "間隔"), interval, intervalUnit);
+        const weekdayField = FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "星期"), weekday);
+        const monthField = FanboxUI.h("div", { class: "setting-field schedule-month" }, FanboxUI.h("span", { id: "schedule-month-label" }, "每月日期"), FanboxUI.h("div", { class: "schedule-days", role: "group", "aria-labelledby": "schedule-month-label" }, dayButtons), FanboxUI.h("small", {}, "選 29–31 日時，沒有這一天的月份會在月底執行。"));
+        const read = () => ({
+            enabled: enabled.checked, frequency: frequencyValue,
+            interval: Math.min(30, Math.max(1, Math.round(Number(interval.value) || 1))),
+            weekday: Number(weekday.value), month_day: monthDay, time: time.value,
+            creators: [...creatorBoxes.filter(item => item.input.checked).map(item => item.input.value), ...unknownCreators],
+        });
+        let previewTimer;
+        let previewToken = 0;
+        const sync = () => {
+            intervalField.hidden = frequencyValue === "monthly";
+            weekdayField.hidden = frequencyValue !== "weekly";
+            monthField.hidden = frequencyValue !== "monthly";
+            intervalUnit.textContent = frequencyValue === "weekly" ? "1 = 每週；2 = 每兩週" : "1 = 每天；2 = 每兩天";
+            for (const [index, button] of dayButtons.entries()) {
+                button.setAttribute("aria-pressed", index + 1 === monthDay ? "true" : "false");
+            }
+            if (previewTimer !== undefined)
+                clearTimeout(previewTimer);
+            previewTimer = window.setTimeout(() => {
+                const token = ++previewToken;
+                actions.onPreview(read()).then(result => {
+                    if (token !== previewToken)
+                        return;
+                    preview.textContent = `預覽：${result.summary}｜接下來：${result.next_runs.map(FanboxUI.formatDate).join("、")}`;
+                }).catch(error => {
+                    if (token !== previewToken)
+                        return;
+                    preview.textContent = `無法預覽：${error instanceof Error ? error.message : String(error)}`;
+                });
+            }, 250);
+        };
+        for (const input of [enabled, interval, time])
+            input.addEventListener("input", sync);
+        const runNow = FanboxUI.h("button", { type: "button", class: "secondary", disabled: blocked, onclick: async () => {
+                runFeedback.hidden = true;
+                const error = await actions.onRunNow();
+                if (error) {
+                    runFeedback.textContent = error;
+                    runFeedback.hidden = false;
+                }
+            } }, "立即執行一次");
+        const node = FanboxUI.h("section", { class: "settings-section schedule-settings" }, FanboxUI.h("h3", {}, "自動備份"), FanboxUI.h("p", { class: "settings-section-description" }, "程式開著時依排程自動開始完整備份；關閉期間錯過的排程，下次開啟時只會補跑一次。時間一律以 Asia/Taipei 計算。"), FanboxUI.h("dl", { class: "schedule-status" }, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "目前排程"), FanboxUI.h("dd", {}, status.enabled ? status.summary : "未啟用")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "下一次執行"), FanboxUI.h("dd", {}, status.next_run_at ? FanboxUI.formatDate(status.next_run_at) : "—")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "上次結果"), FanboxUI.h("dd", {}, lastResultText(status)))), status.note ? FanboxUI.h("p", { class: "notice schedule-note" }, status.note) : null, FanboxUI.h("label", { class: "setting-toggle" }, enabled, FanboxUI.h("span", {}, "啟用自動備份")), FanboxUI.h("div", { class: "settings-grid" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "週期"), frequency), intervalField, weekdayField, FanboxUI.h("label", { class: "setting-field" }, FanboxUI.h("span", {}, "時間（Asia/Taipei）"), time)), monthField, FanboxUI.h("details", { class: "schedule-creators" }, FanboxUI.h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"), creatorBoxes.length ? FanboxUI.h("div", { class: "setting-toggles" }, creatorBoxes.map(item => item.node))
+            : FanboxUI.h("p", { class: "settings-section-description" }, "目前沒有已知的創作者；將備份全部支援中的創作者。")), preview, FanboxUI.h("div", { class: "schedule-actions" }, runNow, FanboxUI.h("span", { class: "settings-section-description" }, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。")), runFeedback);
+        sync();
+        return { node, read };
+    }
+    FanboxUI.renderScheduleSection = renderScheduleSection;
+})(FanboxUI || (FanboxUI = {}));
+var FanboxUI;
+(function (FanboxUI) {
     function settingCheckbox(label, checked) {
         const input = FanboxUI.h("input", { type: "checkbox", checked });
         return { input, node: FanboxUI.h("label", { class: "setting-toggle" }, input, FanboxUI.h("span", {}, label)) };
@@ -568,7 +674,7 @@ var FanboxUI;
         const input = FanboxUI.h("input", { type: "number", value, min, max, step });
         return { input, node: FanboxUI.h("label", { class: "setting-field" }, FanboxUI.h("span", {}, label), input, hint ? FanboxUI.h("small", {}, hint) : null) };
     }
-    function renderSettingsPage(data, auth, message, activeJob, onSave, onAuthRefresh, onAuthLogin, onAuthCancel, onAuthLogout) {
+    function renderSettingsPage(data, auth, message, activeJob, onSave, onAuthRefresh, onAuthLogin, onAuthCancel, onAuthLogout, schedule) {
         const value = data.editable;
         const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
         const attachments = settingCheckbox("下載附件", value.download.download_attachments);
@@ -594,6 +700,7 @@ var FanboxUI;
         const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
         const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
         const blocked = Boolean(activeJob);
+        const scheduleSection = FanboxUI.renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked, schedule.actions);
         const logLevel = FanboxUI.customSelect({ id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
             options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({ value: item, label: item })) });
         const authBusy = auth.state === "checking";
@@ -633,7 +740,7 @@ var FanboxUI;
                     }, backup_defaults: {
                         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
                         include_fancard: defaultFancard.input.checked,
-                    }, markdown: {
+                    }, schedule: scheduleSection.read(), markdown: {
                         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
                         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
                     }, logging: { level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -642,7 +749,7 @@ var FanboxUI;
                     feedback.textContent = `儲存失敗：${error}`;
                     feedback.hidden = false;
                 }
-            } }, FanboxUI.h("fieldset", { disabled: blocked }, FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node))), FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "OUTPUT & LOGGING"), FanboxUI.h("h2", {}, "輸出與紀錄"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel), keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node))), FanboxUI.h("div", { class: "settings-actions" }, FanboxUI.h("button", { type: "submit", class: "primary",
+            } }, FanboxUI.h("fieldset", { disabled: blocked }, FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), scheduleSection.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node))), FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "OUTPUT & LOGGING"), FanboxUI.h("h2", {}, "輸出與紀錄"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel), keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node))), FanboxUI.h("div", { class: "settings-actions" }, FanboxUI.h("button", { type: "submit", class: "primary",
             disabled: !data.writable || blocked }, "儲存設定"), !data.writable ? FanboxUI.h("span", { class: "notice" }, "目前伺服器未指定可寫入的設定檔。") : null, blocked ? FanboxUI.h("span", { class: "notice" }, "工作結束後即可儲存設定。") : null, feedback)));
         return FanboxUI.h("section", { class: "page settings-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "LOCAL SETTINGS"), FanboxUI.h("h1", {}, "設定"), FanboxUI.h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))), message ? FanboxUI.h("p", { class: "settings-saved", role: "status" }, message) : null, FanboxUI.activeJobNotice(activeJob), FanboxUI.h("section", { class: `settings-card account-card tone-${authTone}` }, FanboxUI.h("div", { class: "account-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ACCOUNT & SIGN-IN"), FanboxUI.h("h2", {}, "帳號／登入")), FanboxUI.h("span", { class: `auth-badge ${authTone}` }, authLabel)), FanboxUI.h("p", { class: "account-message", role: "status", "aria-live": "polite" }, auth.message), lastKnown ? FanboxUI.h("p", { class: "account-last-known" }, lastKnown) : null, FanboxUI.h("p", { class: "settings-section-description" }, auth.source === "profile"
             ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
@@ -665,6 +772,8 @@ var FanboxUI;
     function jobLabel(job) {
         if (job.kind === "verify")
             return "封存完整性驗證";
+        if (job.request.trigger === "schedule")
+            return "排程備份";
         return ({ profile: "個人資料拉取", fancard: "粉絲卡拉取" })[job.request.mode ?? ""]
             || (job.request.dry_run ? "完整備份預覽" : "完整備份");
     }
@@ -880,6 +989,8 @@ var FanboxUI;
     }
     FanboxUI.updateJobPage = updateJobPage;
     function jobModeLabel(job) {
+        if (job.request.trigger === "schedule")
+            return "排程備份";
         return ({ profile: "只拉取 Profile", fancard: "只拉取 Fan Card" })[job.request.mode ?? ""]
             || (job.request.dry_run ? "完整備份預覽" : "完整備份");
     }
@@ -1471,9 +1582,23 @@ var FanboxUI;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
             try {
-                const [data, jobData, auth] = await Promise.all([FanboxUI.getSettings(), FanboxUI.getJobs(), FanboxUI.getAuthStatus(sessionToken)]);
+                const [data, jobData, auth, scheduleStatus, creatorData] = await Promise.all([
+                    FanboxUI.getSettings(), FanboxUI.getJobs(), FanboxUI.getAuthStatus(sessionToken), FanboxUI.getScheduleStatus(), FanboxUI.getCreators(),
+                ]);
                 updateActiveJob(jobData);
-                app.replaceChildren(FanboxUI.renderSettingsPage(data, auth, message, state.activeJob, patch => saveSettingsForm(patch), () => void loadSettings("", false), () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"), jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"), () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。")));
+                app.replaceChildren(FanboxUI.renderSettingsPage(data, auth, message, state.activeJob, patch => saveSettingsForm(patch), () => void loadSettings("", false), () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"), jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"), () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。"), { status: scheduleStatus, creators: creatorData.items, actions: {
+                        onPreview: schedule => FanboxUI.previewSchedule(schedule, sessionToken),
+                        onRunNow: async () => {
+                            try {
+                                await FanboxUI.runScheduleNow(sessionToken);
+                                setView("backup");
+                                return null;
+                            }
+                            catch (error) {
+                                return error instanceof Error ? error.message : String(error);
+                            }
+                        },
+                    } }));
                 scheduleJobRefresh();
             }
             catch (error) {

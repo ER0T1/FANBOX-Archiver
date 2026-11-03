@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import os
+import re
 import tempfile
 
 import yaml
@@ -54,6 +56,28 @@ class BackupDefaultsConfig(BaseModel):
     include_fancard: bool = True
 
 
+class ScheduleConfig(BaseModel):
+    """Automatic backup schedule; times are always Asia/Taipei (no DST, host independent)."""
+
+    enabled: bool = False
+    frequency: Literal["daily", "weekly", "monthly"] = "daily"
+    interval: int = Field(default=1, ge=1, le=30)
+    weekday: int = Field(default=0, ge=0, le=6)
+    month_day: int = Field(default=1, ge=1, le=31)
+    time: str = "03:00"
+    start_date: date | None = None
+    creators: list[str] = Field(default_factory=list, max_length=100)
+    timezone: Literal["Asia/Taipei"] = "Asia/Taipei"
+
+    @field_validator("time")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", value.strip())
+        if not match:
+            raise ValueError("排程時間必須是 HH:MM（24 小時制）")
+        return match.group(0)
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     write_to_file: bool = True
@@ -75,6 +99,7 @@ class AppConfig(BaseModel):
     markdown: MarkdownConfig = MarkdownConfig()
     sync: SyncConfig = SyncConfig()
     backup_defaults: BackupDefaultsConfig = BackupDefaultsConfig()
+    schedule: ScheduleConfig = ScheduleConfig()
     logging: LoggingConfig = LoggingConfig()
 
     @classmethod
@@ -99,6 +124,7 @@ class AppConfig(BaseModel):
             "download": value["download"],
             "sync": value["sync"],
             "backup_defaults": value["backup_defaults"],
+            "schedule": value["schedule"],
             "markdown": value["markdown"],
             "logging": value["logging"],
         }
@@ -106,7 +132,7 @@ class AppConfig(BaseModel):
     def with_editable_patch(self, patch: dict[str, Any]) -> "AppConfig":
         merged = self.model_dump(mode="python")
         for section, values in patch.items():
-            if section not in {"download", "sync", "backup_defaults", "markdown", "logging"}:
+            if section not in {"download", "sync", "backup_defaults", "schedule", "markdown", "logging"}:
                 raise ValueError(f"不允許修改設定區段：{section}")
             merged[section] = {**merged[section], **values}
         return type(self).model_validate(merged)

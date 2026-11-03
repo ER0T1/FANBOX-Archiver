@@ -27,6 +27,7 @@ class BackupRequest:
     mode: Literal["full", "profile", "fancard"] = "full"
     include_profile: bool | None = None
     include_fancard: bool | None = None
+    trigger: Literal["manual", "schedule"] = "manual"
 
 
 @dataclass(frozen=True, slots=True)

@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS web_job_events (
   data_json TEXT NOT NULL,
   coalesce_key TEXT
 );
+CREATE TABLE IF NOT EXISTS backup_schedule_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  handled_through TEXT,
+  last_due_at TEXT,
+  last_job_id TEXT,
+  deferred_due TEXT,
+  note TEXT,
+  updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_posts_creator ON posts(creator_id);
 CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at DESC,post_id DESC);
 CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status);
@@ -802,6 +811,24 @@ class Database:
                 "LIMIT ? OFFSET ?",
                 [*values, limit, offset],
             ))
+
+    def schedule_state(self) -> sqlite3.Row | None:
+        with self.connect() as db:
+            return db.execute("SELECT * FROM backup_schedule_state WHERE id=1").fetchone()
+
+    def set_schedule_state(self, **values: str | None) -> None:
+        allowed = {"handled_through", "last_due_at", "last_job_id", "deferred_due", "note"}
+        if not values or set(values) - allowed:
+            raise ValueError("unknown schedule state field")
+        columns = ",".join(values)
+        updates = ",".join(f"{name}=excluded.{name}" for name in values)
+        with self.connect() as db:
+            db.execute(
+                f"INSERT INTO backup_schedule_state(id,{columns},updated_at) "
+                f"VALUES(1,{','.join('?' * len(values))},?) "
+                f"ON CONFLICT(id) DO UPDATE SET {updates},updated_at=excluded.updated_at",
+                [*values.values(), now_iso()],
+            )
 
     def web_job_row(self, job_id: str) -> sqlite3.Row | None:
         with self.connect() as db:

@@ -19,6 +19,7 @@
     "src/fanbox_archiver/web_src/api.ts",
     "src/fanbox_archiver/web_src/posts.ts",
     "src/fanbox_archiver/web_src/creators.ts",
+    "src/fanbox_archiver/web_src/schedule.ts",
     "src/fanbox_archiver/web_src/settings.ts",
     "src/fanbox_archiver/web_src/jobs.ts",
     "src/fanbox_archiver/web_src/app.ts",

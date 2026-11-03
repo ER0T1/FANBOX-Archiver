@@ -24,6 +24,7 @@ namespace FanboxUI {
     onAuthLogin: () => Promise<string | null>,
     onAuthCancel: (jobId: string) => Promise<string | null>,
     onAuthLogout: () => Promise<string | null>,
+    schedule: {status: ScheduleStatus; creators: CreatorSummary[]; actions: ScheduleSectionActions},
   ): HTMLElement {
     const value = data.editable;
     const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
@@ -57,6 +58,8 @@ namespace FanboxUI {
     const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
     const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
     const blocked = Boolean(activeJob);
+    const scheduleSection = renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked,
+      schedule.actions);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const authBusy = auth.state === "checking";
@@ -92,7 +95,7 @@ namespace FanboxUI {
       }, backup_defaults: {
         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
         include_fancard: defaultFancard.input.checked,
-      }, markdown: {
+      }, schedule: scheduleSection.read(), markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -110,6 +113,7 @@ namespace FanboxUI {
       h("section", {class: "settings-section"}, h("h3", {}, "新工作預設"),
         h("p", {class: "settings-section-description"}, "每次進入新工作表單時套用；重試仍沿用原工作設定。"),
         h("div", {class: "setting-toggles"}, defaultDryRun.node, defaultProfile.node, defaultFancard.node)),
+      scheduleSection.node,
       h("section", {class: "settings-section"}, h("h3", {}, "內容與保存"),
         h("div", {class: "setting-toggles"}, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)),
       h("section", {class: "settings-section"}, h("h3", {}, "更新判定與處理順序"),
