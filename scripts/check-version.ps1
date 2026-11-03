@@ -52,5 +52,10 @@ if ($LASTEXITCODE -ne 0) {
 
 & $Python (Join-Path $ProjectRoot "scripts\check-time-contract.py")
 if ($LASTEXITCODE -ne 0) {
-    throw "Asia/Taipei time contract check failed."
+    throw "Display timezone contract check failed."
+}
+
+& $Python (Join-Path $ProjectRoot "scripts\check-changelog.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "README / CHANGELOG contract check failed."
 }
