@@ -133,12 +133,13 @@ var FanboxUI;
             return "—";
         const text = String(value).trim();
         if (!explicitOffset.test(text))
-            return `${text}（時區未標示）`;
+            return FanboxUI.t("common.timezone_unknown", { value: text });
         const date = new Date(text);
         if (Number.isNaN(date.valueOf()))
             return text;
         const parts = Object.fromEntries(dateTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
-        return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;
+        return FanboxUI.t("common.datetime", { year: parts.year ?? "", month: parts.month ?? "", day: parts.day ?? "",
+            hour: parts.hour ?? "", minute: parts.minute ?? "" });
     }
     FanboxUI.formatDate = formatDate;
     function humanBytes(value) {
@@ -315,7 +316,7 @@ var FanboxUI;
     FanboxUI.closeDropdownsAndFocus = closeDropdownsAndFocus;
     function renderError(error, onRetry) {
         const message = error instanceof Error ? error.message : String(error);
-        return FanboxUI.h("section", { class: "panel error" }, FanboxUI.h("p", { class: "eyebrow" }, "ERROR"), FanboxUI.h("h1", {}, "無法讀取封存"), FanboxUI.h("p", {}, message), FanboxUI.h("button", { type: "button", onclick: onRetry }, "重試"));
+        return FanboxUI.h("section", { class: "panel error" }, FanboxUI.h("p", { class: "eyebrow" }, "ERROR"), FanboxUI.h("h1", {}, FanboxUI.t("common.error_title")), FanboxUI.h("p", {}, message), FanboxUI.h("button", { type: "button", onclick: onRetry }, FanboxUI.t("common.retry")));
     }
     FanboxUI.renderError = renderError;
     function setActiveNavigation(nav, view) {
@@ -387,7 +388,7 @@ var FanboxUI;
                 field.node.classList.toggle("is-dirty", changed);
                 let badge = field.node.querySelector(":scope > .dirty-badge");
                 if (changed && !badge) {
-                    badge = FanboxUI.h("span", { class: "dirty-badge" }, "已變更");
+                    badge = FanboxUI.h("span", { class: "dirty-badge" }, FanboxUI.t("common.changed"));
                     field.node.append(badge);
                 }
                 else if (!changed && badge) {
@@ -615,13 +616,13 @@ var FanboxUI;
     FanboxUI.renderPostListPage = renderPostListPage;
     function renderCreatorPostList(data, actions) {
         const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
-        const filter = actions.onTag ? FanboxUI.h("section", { class: "tag-filter", "aria-label": "依標籤篩選投稿" }, FanboxUI.h("div", { class: "tag-filter-heading" }, FanboxUI.h("strong", {}, "標籤篩選"), FanboxUI.h("span", {}, actions.activeTag ? `目前：${actions.activeTag}` : "顯示全部投稿")), FanboxUI.h("div", { class: "tag-filter-options" }, FanboxUI.h("button", { type: "button", class: actions.activeTag ? "" : "active",
-            "aria-pressed": actions.activeTag ? "false" : "true", onclick: () => actions.onTag?.("") }, `全部 ${data.creator_total}`), data.tag_facets.length ? data.tag_facets.map(facet => FanboxUI.h("button", {
+        const filter = actions.onTag ? FanboxUI.h("section", { class: "tag-filter", "aria-label": FanboxUI.t("posts.tag_filter_label") }, FanboxUI.h("div", { class: "tag-filter-heading" }, FanboxUI.h("strong", {}, FanboxUI.t("posts.tag_filter_title")), FanboxUI.h("span", {}, actions.activeTag ? FanboxUI.t("posts.tag_current", { tag: actions.activeTag }) : FanboxUI.t("posts.tag_all_posts"))), FanboxUI.h("div", { class: "tag-filter-options" }, FanboxUI.h("button", { type: "button", class: actions.activeTag ? "" : "active",
+            "aria-pressed": actions.activeTag ? "false" : "true", onclick: () => actions.onTag?.("") }, FanboxUI.t("posts.tag_all", { count: data.creator_total })), data.tag_facets.length ? data.tag_facets.map(facet => FanboxUI.h("button", {
             type: "button", class: actions.activeTag === facet.name ? "active" : "",
             "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
             onclick: () => actions.onTag?.(facet.name),
-        }, `${facet.name} ${facet.count}`)) : FanboxUI.h("span", { class: "tag-filter-empty" }, "尚無已保存的投稿標籤"))) : null;
-        return FanboxUI.h("div", { class: "creator-posts" }, filter, actions.onOrder ? FanboxUI.h("div", { class: "list-toolbar" }, FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, FanboxUI.t("posts.sort_label"))) : null, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("posts.empty"))), renderPagination(data, actions.onPage, "創作者投稿分頁"));
+        }, `${facet.name} ${facet.count}`)) : FanboxUI.h("span", { class: "tag-filter-empty" }, FanboxUI.t("posts.tag_none")))) : null;
+        return FanboxUI.h("div", { class: "creator-posts" }, filter, actions.onOrder ? FanboxUI.h("div", { class: "list-toolbar" }, FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, FanboxUI.t("posts.sort_label"))) : null, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("posts.empty"))), renderPagination(data, actions.onPage, FanboxUI.t("posts.creator_pagination")));
     }
     FanboxUI.renderCreatorPostList = renderCreatorPostList;
     function richText(block) {
@@ -662,15 +663,15 @@ var FanboxUI;
                     onOpenPost(preview.post_id);
                 } }
             : { href: preview.fanbox_url || "#", target: "_blank", rel: "noreferrer noopener" };
-        return FanboxUI.h("a", { class: "embed-card", ...attributes }, FanboxUI.h("span", { class: "embed-content" }, FanboxUI.h("span", { class: "embed-source" }, preview.local_available ? "FANBOX 投稿 · 本機備份" : "FANBOX 投稿"), FanboxUI.h("strong", {}, preview.title || `Post ${preview.post_id}`), preview.excerpt ? FanboxUI.h("span", { class: "embed-excerpt" }, preview.excerpt) : null, FanboxUI.h("span", { class: "embed-meta" }, meta)), preview.cover_url
+        return FanboxUI.h("a", { class: "embed-card", ...attributes }, FanboxUI.h("span", { class: "embed-content" }, FanboxUI.h("span", { class: "embed-source" }, preview.local_available ? FanboxUI.t("reader.embed_local") : FanboxUI.t("reader.embed_remote")), FanboxUI.h("strong", {}, preview.title || `Post ${preview.post_id}`), preview.excerpt ? FanboxUI.h("span", { class: "embed-excerpt" }, preview.excerpt) : null, FanboxUI.h("span", { class: "embed-meta" }, meta)), preview.cover_url
             ? FanboxUI.h("img", { class: "embed-cover", src: preview.cover_url, alt: "", loading: "lazy" })
             : FanboxUI.h("span", { class: "embed-cover placeholder", "aria-hidden": "true" }, "FANBOX"));
     }
     function blockView(block, onOpenPost) {
         if (block.type === "image" && block.media_url)
-            return FanboxUI.h("figure", {}, FanboxUI.h("a", { href: block.media_url, target: "_blank" }, FanboxUI.h("img", { src: block.media_url, loading: "lazy", alt: block.name || "投稿圖片" })));
+            return FanboxUI.h("figure", {}, FanboxUI.h("a", { href: block.media_url, target: "_blank" }, FanboxUI.h("img", { src: block.media_url, loading: "lazy", alt: block.name || FanboxUI.t("reader.image_alt") })));
         if (block.type === "file" && block.media_url)
-            return FanboxUI.h("p", { class: "attachment" }, FanboxUI.h("a", { href: block.media_url }, block.name || block.filename || "下載附件"));
+            return FanboxUI.h("p", { class: "attachment" }, FanboxUI.h("a", { href: block.media_url }, block.name || block.filename || FanboxUI.t("reader.download_attachment")));
         if (block.type === "separator")
             return FanboxUI.h("hr");
         if (block.type === "quote")
@@ -687,18 +688,18 @@ var FanboxUI;
         const control = (item, direction) => FanboxUI.h("button", {
             type: "button", class: `post-nav-button ${direction}`, disabled: !item,
             onclick: () => item && onOpenPost(item.post_id),
-            title: item?.title || (direction === "previous" ? "已是第一篇" : "已是最後一篇"),
-        }, FanboxUI.h("span", {}, direction === "previous" ? "← 上一篇" : "下一篇 →"), FanboxUI.h("strong", {}, item?.title || (direction === "previous" ? "沒有更前面的投稿" : "沒有更後面的投稿")));
+            title: item?.title || (direction === "previous" ? FanboxUI.t("reader.first_post") : FanboxUI.t("reader.last_post")),
+        }, FanboxUI.h("span", {}, direction === "previous" ? FanboxUI.t("reader.previous") : FanboxUI.t("reader.next")), FanboxUI.h("strong", {}, item?.title || (direction === "previous" ? FanboxUI.t("reader.no_previous") : FanboxUI.t("reader.no_next"))));
         return FanboxUI.h("nav", {
             class: `post-navigation ${placement}`,
-            "aria-label": placement === "top" ? "文章頂端導覽" : "文章底部導覽",
+            "aria-label": placement === "top" ? FanboxUI.t("reader.nav_top") : FanboxUI.t("reader.nav_bottom"),
         }, control(navigation.previous, "previous"), FanboxUI.h("span", { class: "post-position" }, navigation.position ? `${navigation.position} / ${navigation.total}` : "—"), control(navigation.next, "next"));
     }
     function renderPostReader(post, actions) {
         const body = post.blocks
             .map(block => blockView(block, actions.onOpenPost))
             .filter((block) => block !== null);
-        return FanboxUI.h("article", { class: "reader" }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, "← 回到投稿"), navigationView(post.navigation, "top", actions.onOpenPost), post.cover_url ? FanboxUI.h("a", { href: post.cover_url, target: "_blank" }, FanboxUI.h("img", { class: "cover", src: post.cover_url, alt: "投稿封面" })) : null, FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${post.creator_name} · POST ${post.post_id}`), FanboxUI.h("h1", {}, post.title), FanboxUI.h("div", { class: "reader-meta" }, post.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, "置頂投稿") : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(post.fee_required)), FanboxUI.h("span", {}, `發布 ${FanboxUI.formatDate(post.published_at)}`), FanboxUI.h("span", {}, `更新 ${FanboxUI.formatDate(post.updated_at)}`)), actions.versionSelect), FanboxUI.h("section", { class: "content" }, body.length ? body : FanboxUI.h("p", { class: "empty" }, "此版本沒有可顯示的正文。")), navigationView(post.navigation, "bottom", actions.onOpenPost), FanboxUI.h("footer", {}, FanboxUI.h("a", { href: post.url, target: "_blank", rel: "noreferrer" }, "開啟 FANBOX 原文 ↗")));
+        return FanboxUI.h("article", { class: "reader" }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, FanboxUI.t("reader.back")), navigationView(post.navigation, "top", actions.onOpenPost), post.cover_url ? FanboxUI.h("a", { href: post.cover_url, target: "_blank" }, FanboxUI.h("img", { class: "cover", src: post.cover_url, alt: FanboxUI.t("reader.cover_alt") })) : null, FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${post.creator_name} · POST ${post.post_id}`), FanboxUI.h("h1", {}, post.title), FanboxUI.h("div", { class: "reader-meta" }, post.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, FanboxUI.t("reader.pinned")) : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(post.fee_required)), FanboxUI.h("span", {}, FanboxUI.t("reader.published", { time: FanboxUI.formatDate(post.published_at) })), FanboxUI.h("span", {}, FanboxUI.t("reader.updated", { time: FanboxUI.formatDate(post.updated_at) }))), actions.versionSelect), FanboxUI.h("section", { class: "content" }, body.length ? body : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("reader.empty_body"))), navigationView(post.navigation, "bottom", actions.onOpenPost), FanboxUI.h("footer", {}, FanboxUI.h("a", { href: post.url, target: "_blank", rel: "noreferrer" }, FanboxUI.t("reader.open_original"))));
     }
     FanboxUI.renderPostReader = renderPostReader;
 })(FanboxUI || (FanboxUI = {}));
@@ -717,18 +718,18 @@ var FanboxUI;
             type: "button", class: "creator-card", onclick: () => onOpen(item.creator_id),
         }, item.avatar_url
             ? FanboxUI.h("img", { src: item.avatar_url, alt: "", loading: "lazy" })
-            : FanboxUI.h("span", { class: "avatar" }, item.name.slice(0, 1)), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("strong", {}, item.name), FanboxUI.h("small", {}, `${item.creator_id} · ${item.post_count} 篇投稿`)), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status)));
-        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "CREATORS"), FanboxUI.h("h1", {}, "創作者"), FanboxUI.h("p", {}, `${items.length} 位符合目前條件`))), FanboxUI.h("div", { class: "creator-grid" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的創作者。")));
+            : FanboxUI.h("span", { class: "avatar" }, item.name.slice(0, 1)), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("strong", {}, item.name), FanboxUI.h("small", {}, FanboxUI.t("creators.card_meta", { creator_id: item.creator_id, count: item.post_count }))), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status)));
+        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, FanboxUI.t("creators.eyebrow")), FanboxUI.h("h1", {}, FanboxUI.t("creators.title")), FanboxUI.h("p", {}, FanboxUI.t("creators.matching", { count: items.length })))), FanboxUI.h("div", { class: "creator-grid" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("creators.empty"))));
     }
     FanboxUI.renderCreatorsPage = renderCreatorsPage;
     function renderCreatorShell(creator, tab, content, profile, actions) {
         const tabs = [
-            ["profile", "個人資料", "PROFILE"], ["posts", "投稿", "POSTS"],
-            ["fancards", "粉絲卡", "FAN CARD"],
+            ["profile", FanboxUI.t("creator.tab_profile"), "PROFILE"], ["posts", FanboxUI.t("creator.tab_posts"), "POSTS"],
+            ["fancards", FanboxUI.t("creator.tab_fancards"), "FAN CARD"],
         ];
-        return FanboxUI.h("section", { class: "page creator-page", "data-creator-id": creator.creator_id }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, "← 回到創作者"), FanboxUI.h("header", { class: `creator-hero${profile?.cover_url ? " has-cover" : ""}` }, profile?.cover_url ? FanboxUI.h("img", { class: "creator-cover", src: profile.cover_url, alt: "" }) : null, creator.avatar_url
+        return FanboxUI.h("section", { class: "page creator-page", "data-creator-id": creator.creator_id }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, FanboxUI.t("creator.back")), FanboxUI.h("header", { class: `creator-hero${profile?.cover_url ? " has-cover" : ""}` }, profile?.cover_url ? FanboxUI.h("img", { class: "creator-cover", src: profile.cover_url, alt: "" }) : null, creator.avatar_url
             ? FanboxUI.h("img", { src: creator.avatar_url, alt: "" })
-            : FanboxUI.h("span", { class: "avatar large" }, creator.name.slice(0, 1)), FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, `@${creator.creator_id}`), FanboxUI.h("h1", {}, creator.name), FanboxUI.h("p", {}, `${creator.post_count} 篇投稿 · ${creator.fancard_count} 張粉絲卡`)), FanboxUI.h("a", { class: "external-button", href: creator.fanbox_url, target: "_blank", rel: "noreferrer" }, "開啟 FANBOX ↗")), FanboxUI.h("nav", { class: "subnav", "aria-label": "創作者頁面" }, tabs.map(([key, zh, en]) => FanboxUI.h("button", {
+            : FanboxUI.h("span", { class: "avatar large" }, creator.name.slice(0, 1)), FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, `@${creator.creator_id}`), FanboxUI.h("h1", {}, creator.name), FanboxUI.h("p", {}, FanboxUI.t("creator.hero_meta", { posts: creator.post_count, cards: creator.fancard_count }))), FanboxUI.h("a", { class: "external-button", href: creator.fanbox_url, target: "_blank", rel: "noreferrer" }, FanboxUI.t("creator.open_fanbox"))), FanboxUI.h("nav", { class: "subnav", "aria-label": FanboxUI.t("creator.nav_label") }, tabs.map(([key, zh, en]) => FanboxUI.h("button", {
             type: "button", class: key === tab ? "active" : "", "data-creator-tab": key,
             onclick: () => actions.onTab(key),
         }, FanboxUI.h("strong", {}, zh), FanboxUI.h("small", {}, en)))), FanboxUI.h("div", { class: "creator-content", "aria-live": "polite" }, content));
@@ -737,28 +738,28 @@ var FanboxUI;
     function renderCreatorProfile(creator, profile, versionSelect) {
         const safeLinks = (profile?.profile_items ?? []).filter(item => item.url?.startsWith("https://"));
         const profileImages = (profile?.profile_items ?? []).filter(item => item.image_url);
-        return FanboxUI.h("div", { class: "profile-layout" }, !profile ? FanboxUI.h("section", { class: "profile-empty" }, FanboxUI.h("p", { class: "eyebrow" }, "PROFILE ARCHIVE"), FanboxUI.h("h2", {}, "尚未備份個人資料"), FanboxUI.h("p", {}, "執行新版備份後，這裡會顯示離線可讀的自我介紹、連結與歷史版本。")) : null, profile ? FanboxUI.h("section", { class: "info-panel profile-about" }, FanboxUI.h("p", { class: "eyebrow" }, "ABOUT"), FanboxUI.h("h2", {}, "關於創作者"), profileImages.length ? FanboxUI.h("div", { class: "profile-gallery", "aria-label": "創作者 Profile 圖片" }, profileImages.map((item, index) => FanboxUI.h("a", { href: item.image_url, target: "_blank" }, FanboxUI.h("img", { src: item.image_url, alt: item.label || `Profile 圖片 ${index + 1}`, loading: "lazy" })))) : null, profile.description ? FanboxUI.h("p", { class: "body-text" }, profile.description)
-            : FanboxUI.h("p", { class: "profile-about-empty" }, "這位創作者尚未提供文字或圖片形式的個人介紹。")) : null, safeLinks.length ? FanboxUI.h("section", { class: "info-panel profile-links" }, FanboxUI.h("p", { class: "eyebrow" }, "LINKS"), FanboxUI.h("h2", {}, "公開連結"), FanboxUI.h("div", { class: "link-grid" }, safeLinks.map(item => FanboxUI.h("a", {
+        return FanboxUI.h("div", { class: "profile-layout" }, !profile ? FanboxUI.h("section", { class: "profile-empty" }, FanboxUI.h("p", { class: "eyebrow" }, "PROFILE ARCHIVE"), FanboxUI.h("h2", {}, FanboxUI.t("profile.empty_title")), FanboxUI.h("p", {}, FanboxUI.t("profile.empty_body"))) : null, profile ? FanboxUI.h("section", { class: "info-panel profile-about" }, FanboxUI.h("p", { class: "eyebrow" }, "ABOUT"), FanboxUI.h("h2", {}, FanboxUI.t("profile.about_title")), profileImages.length ? FanboxUI.h("div", { class: "profile-gallery", "aria-label": FanboxUI.t("profile.gallery_label") }, profileImages.map((item, index) => FanboxUI.h("a", { href: item.image_url, target: "_blank" }, FanboxUI.h("img", { src: item.image_url, alt: item.label || FanboxUI.t("profile.image_alt", { number: index + 1 }), loading: "lazy" })))) : null, profile.description ? FanboxUI.h("p", { class: "body-text" }, profile.description)
+            : FanboxUI.h("p", { class: "profile-about-empty" }, FanboxUI.t("profile.about_empty"))) : null, safeLinks.length ? FanboxUI.h("section", { class: "info-panel profile-links" }, FanboxUI.h("p", { class: "eyebrow" }, "LINKS"), FanboxUI.h("h2", {}, FanboxUI.t("profile.links_title")), FanboxUI.h("div", { class: "link-grid" }, safeLinks.map(item => FanboxUI.h("a", {
             href: item.url, target: "_blank", rel: "noreferrer",
-        }, FanboxUI.h("strong", {}, item.label || item.type || "外部連結"), item.description ? FanboxUI.h("span", {}, item.description) : null)))) : null, profile ? FanboxUI.h("section", { class: "info-panel profile-meta" }, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE METADATA"), FanboxUI.h("h2", {}, "狀態與版本"), FanboxUI.h("div", { class: "status-list" }, profile.has_adult_content ? FanboxUI.h("span", { class: "profile-flag adult" }, "成人內容") : FanboxUI.h("span", { class: "profile-flag" }, "一般內容"), FanboxUI.h("span", { class: "profile-flag" }, profile.is_accepting_request ? "開放委託" : "未開放委託"), profile.is_stopped ? FanboxUI.h("span", { class: "profile-flag danger" }, "已停止活動") : FanboxUI.h("span", { class: "profile-flag" }, "持續活動")), FanboxUI.h("dl", {}, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "捕捉時間"), FanboxUI.h("dd", {}, FanboxUI.formatDate(profile.captured_at))), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "版本"), FanboxUI.h("dd", {}, versionSelect)))) : null, FanboxUI.h("section", { class: "profile-stats" }, FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.post_count), FanboxUI.h("span", {}, "投稿")), FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.completed_count), FanboxUI.h("span", {}, "完整備份")), FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.fancard_count), FanboxUI.h("span", {}, "粉絲卡"))));
+        }, FanboxUI.h("strong", {}, item.label || item.type || FanboxUI.t("profile.link_fallback")), item.description ? FanboxUI.h("span", {}, item.description) : null)))) : null, profile ? FanboxUI.h("section", { class: "info-panel profile-meta" }, FanboxUI.h("p", { class: "eyebrow" }, "ARCHIVE METADATA"), FanboxUI.h("h2", {}, FanboxUI.t("profile.meta_title")), FanboxUI.h("div", { class: "status-list" }, profile.has_adult_content ? FanboxUI.h("span", { class: "profile-flag adult" }, FanboxUI.t("profile.adult")) : FanboxUI.h("span", { class: "profile-flag" }, FanboxUI.t("profile.general")), FanboxUI.h("span", { class: "profile-flag" }, profile.is_accepting_request ? FanboxUI.t("profile.accepting") : FanboxUI.t("profile.not_accepting")), profile.is_stopped ? FanboxUI.h("span", { class: "profile-flag danger" }, FanboxUI.t("profile.stopped")) : FanboxUI.h("span", { class: "profile-flag" }, FanboxUI.t("profile.active"))), FanboxUI.h("dl", {}, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, FanboxUI.t("profile.captured_at")), FanboxUI.h("dd", {}, FanboxUI.formatDate(profile.captured_at))), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, FanboxUI.t("common.version")), FanboxUI.h("dd", {}, versionSelect)))) : null, FanboxUI.h("section", { class: "profile-stats" }, FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.post_count), FanboxUI.h("span", {}, FanboxUI.t("profile.stat_posts"))), FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.completed_count), FanboxUI.h("span", {}, FanboxUI.t("profile.stat_completed"))), FanboxUI.h("div", {}, FanboxUI.h("strong", {}, creator.fancard_count), FanboxUI.h("span", {}, FanboxUI.t("profile.stat_fancards")))));
     }
     FanboxUI.renderCreatorProfile = renderCreatorProfile;
     function renderFanCardList(data, actions) {
         const cards = data.items.map(item => FanboxUI.h("button", {
             type: "button", class: "fancard-card", onclick: () => actions.onOpen(item.creator_id, item.target_month),
         }, item.image_url
-            ? FanboxUI.h("img", { src: item.image_url, alt: `${item.creator_name} 粉絲卡`, loading: "lazy" })
-            : FanboxUI.h("div", { class: "card-placeholder" }, "無卡面"), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "eyebrow" }, item.target_month), FanboxUI.h("strong", {}, item.plan_title || "方案未命名"), FanboxUI.h("small", {}, `${FanboxUI.feeLabel(item.fee)}/月 · ${item.version_count} 個版本`))));
-        return FanboxUI.h("div", { class: "fancard-grid" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "尚未備份粉絲卡。"));
+            ? FanboxUI.h("img", { src: item.image_url, alt: FanboxUI.t("fancards.image_alt", { creator: item.creator_name }), loading: "lazy" })
+            : FanboxUI.h("div", { class: "card-placeholder" }, FanboxUI.t("fancards.no_image")), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "eyebrow" }, item.target_month), FanboxUI.h("strong", {}, item.plan_title || FanboxUI.t("fancards.plan_untitled")), FanboxUI.h("small", {}, FanboxUI.t("fancards.card_meta", { fee: FanboxUI.feeLabel(item.fee), count: item.version_count })))));
+        return FanboxUI.h("div", { class: "fancard-grid" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("fancards.empty")));
     }
     FanboxUI.renderFanCardList = renderFanCardList;
     function renderFanCardReader(card, actions) {
-        const perks = card.perks.length ? FanboxUI.h("section", { class: "perk-section" }, FanboxUI.h("p", { class: "eyebrow" }, "PLAN BENEFITS"), FanboxUI.h("h2", {}, "方案權益"), FanboxUI.h("div", { class: "perk-grid" }, card.perks.map(perk => FanboxUI.h("article", { class: "perk-card" }, FanboxUI.h("div", { class: "perk-card-heading" }, FanboxUI.h("h3", {}, perk.label), FanboxUI.h("span", { class: perkStatusClass(perk.status) }, perk.status_label)), FanboxUI.h("p", {}, perk.description), perk.guidance ? FanboxUI.h("p", { class: "perk-guidance" }, perk.guidance, " ", perk.settings_url ? FanboxUI.h("a", { href: perk.settings_url, target: "_blank", rel: "noreferrer" }, `${perk.settings_label || "帳號設定"} ↗`) : null) : null, perk.action_url && perk.action_label ? FanboxUI.h("a", {
+        const perks = card.perks.length ? FanboxUI.h("section", { class: "perk-section" }, FanboxUI.h("p", { class: "eyebrow" }, "PLAN BENEFITS"), FanboxUI.h("h2", {}, FanboxUI.t("fancard.perks_title")), FanboxUI.h("div", { class: "perk-grid" }, card.perks.map(perk => FanboxUI.h("article", { class: "perk-card" }, FanboxUI.h("div", { class: "perk-card-heading" }, FanboxUI.h("h3", {}, perk.label), FanboxUI.h("span", { class: perkStatusClass(perk.status) }, perk.status_label)), FanboxUI.h("p", {}, perk.description), perk.guidance ? FanboxUI.h("p", { class: "perk-guidance" }, perk.guidance, " ", perk.settings_url ? FanboxUI.h("a", { href: perk.settings_url, target: "_blank", rel: "noreferrer" }, `${perk.settings_label || FanboxUI.t("fancard.account_settings")} ↗`) : null) : null, perk.action_url && perk.action_label ? FanboxUI.h("a", {
             class: "perk-action", href: perk.action_url, target: "_blank", rel: "noreferrer",
         }, `${perk.action_label} ↗`) : null)))) : null;
-        return FanboxUI.h("article", { class: "reader fancard-reader" }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, "← 回到粉絲卡"), card.image_url
-            ? FanboxUI.h("a", { href: card.image_url, target: "_blank" }, FanboxUI.h("img", { class: "card-image", src: card.image_url, alt: `${card.creator_name} 粉絲卡` }))
-            : FanboxUI.h("div", { class: "card-placeholder large" }, "本月未提供自訂卡面"), FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${card.target_month} · ${card.creator_id}`), FanboxUI.h("h1", {}, card.creator_name), FanboxUI.h("p", {}, `${card.plan_title || "方案未命名"} · ${FanboxUI.feeLabel(card.fee)}/月`), actions.versionSelect), FanboxUI.h("section", { class: "content" }, FanboxUI.h("h2", {}, "方案資訊"), FanboxUI.h("p", { class: "body-text" }, card.description || "（無方案說明）"), card.support_start ? FanboxUI.h("p", {}, `支援開始：${FanboxUI.formatDate(card.support_start)}`) : null, card.support_months.length ? FanboxUI.h("p", {}, `保存月份：${card.support_months.join("、")}`) : null, perks));
+        return FanboxUI.h("article", { class: "reader fancard-reader" }, FanboxUI.h("button", { type: "button", class: "back", onclick: actions.onBack }, FanboxUI.t("fancard.back")), card.image_url
+            ? FanboxUI.h("a", { href: card.image_url, target: "_blank" }, FanboxUI.h("img", { class: "card-image", src: card.image_url, alt: FanboxUI.t("fancards.image_alt", { creator: card.creator_name }) }))
+            : FanboxUI.h("div", { class: "card-placeholder large" }, FanboxUI.t("fancard.no_custom_image")), FanboxUI.h("header", { class: "reader-heading" }, FanboxUI.h("p", { class: "eyebrow" }, `${card.target_month} · ${card.creator_id}`), FanboxUI.h("h1", {}, card.creator_name), FanboxUI.h("p", {}, FanboxUI.t("fancard.plan_line", { plan: card.plan_title || FanboxUI.t("fancards.plan_untitled"), fee: FanboxUI.feeLabel(card.fee) })), actions.versionSelect), FanboxUI.h("section", { class: "content" }, FanboxUI.h("h2", {}, FanboxUI.t("fancard.plan_info")), FanboxUI.h("p", { class: "body-text" }, card.description || FanboxUI.t("fancard.no_description")), card.support_start ? FanboxUI.h("p", {}, FanboxUI.t("fancard.support_start", { time: FanboxUI.formatDate(card.support_start) })) : null, card.support_months.length ? FanboxUI.h("p", {}, FanboxUI.t("fancard.saved_months", { months: card.support_months.join(FanboxUI.t("fancard.month_separator")) })) : null, perks));
     }
     FanboxUI.renderFanCardReader = renderFanCardReader;
 })(FanboxUI || (FanboxUI = {}));
@@ -1992,9 +1993,10 @@ var FanboxUI;
                     return;
                 state.current = postId;
                 state.postNavigation = post.navigation;
-                const versionSelect = FanboxUI.customSelect({ id: "post-version", label: "版本", value: post.version,
+                const versionSelect = FanboxUI.customSelect({ id: "post-version", label: FanboxUI.t("common.version"), value: post.version,
                     options: post.versions.map(item => ({ value: item.number,
-                        label: `v${String(item.number).padStart(4, "0")} · ${FanboxUI.formatDate(item.captured_at)}` })),
+                        label: FanboxUI.t("common.version_option", { number: String(item.number).padStart(4, "0"),
+                            time: FanboxUI.formatDate(item.captured_at) }) })),
                     onChange: value => void loadPost(postId, Number(value)) });
                 target.replaceChildren(FanboxUI.renderPostReader(post, {
                     onBack: back,
@@ -2009,7 +2011,7 @@ var FanboxUI;
         async function loadCreators() {
             const load = beginLoad();
             state.current = null;
-            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取創作者…"));
+            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_creators")));
             try {
                 const data = await FanboxUI.getCreators(load.signal);
                 if (!load.live())
@@ -2059,18 +2061,18 @@ var FanboxUI;
                 let creator = state.creator?.creator_id === creatorId ? state.creator : null;
                 let heroProfile = state.creatorProfile;
                 if (!creator) {
-                    app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取創作者頁面…"));
+                    app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_creator_page")));
                     creator = await FanboxUI.getCreator(creatorId, load.signal);
                     heroProfile = creator.profile_available ? await FanboxUI.getCreatorProfile(creatorId, null, load.signal) : null;
                     if (!load.live() || state.creatorId !== creatorId)
                         return;
                     state.creator = creator;
                     state.creatorProfile = heroProfile;
-                    app.replaceChildren(creatorShell(creator, tab, FanboxUI.h("p", { class: "empty" }, "正在讀取內容…"), heroProfile));
+                    app.replaceChildren(creatorShell(creator, tab, FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_content")), heroProfile));
                 }
                 let shell = app.querySelector(".creator-page");
                 if (!shell || shell.dataset.creatorId !== creatorId) {
-                    app.replaceChildren(creatorShell(creator, tab, FanboxUI.h("p", { class: "empty" }, "正在讀取內容…"), heroProfile));
+                    app.replaceChildren(creatorShell(creator, tab, FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_content")), heroProfile));
                     shell = app.querySelector(".creator-page");
                 }
                 if (!shell)
@@ -2081,7 +2083,7 @@ var FanboxUI;
                 const contentRoot = shell.querySelector(".creator-content");
                 if (!contentRoot)
                     return;
-                contentRoot.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取內容…"));
+                contentRoot.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_content")));
                 let content;
                 if (tab === "posts") {
                     const params = new URLSearchParams({ creator: creatorId, page: String(state.page), page_size: "20",
@@ -2120,9 +2122,10 @@ var FanboxUI;
                     if (creator.profile_available && profileVersion !== null) {
                         profile = await FanboxUI.getCreatorProfile(creatorId, profileVersion, load.signal);
                     }
-                    const versionSelect = profile ? FanboxUI.customSelect({ id: "profile-version", label: "Profile 版本", value: profile.version,
+                    const versionSelect = profile ? FanboxUI.customSelect({ id: "profile-version", label: FanboxUI.t("creator.profile_version"), value: profile.version,
                         options: profile.versions.map(item => ({ value: item.number,
-                            label: `v${String(item.number).padStart(4, "0")} · ${FanboxUI.formatDate(item.captured_at)}` })),
+                            label: FanboxUI.t("common.version_option", { number: String(item.number).padStart(4, "0"),
+                                time: FanboxUI.formatDate(item.captured_at) }) })),
                         onChange: value => void loadCreator(creatorId, "profile", Number(value)) }) : null;
                     content = FanboxUI.renderCreatorProfile(creator, profile, versionSelect);
                 }
@@ -2141,15 +2144,16 @@ var FanboxUI;
                 ? app.querySelector(".creator-content") : null;
             const load = beginLoad();
             const target = creatorContent ?? app;
-            target.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取粉絲卡…"));
+            target.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_fancard")));
             try {
                 const card = await FanboxUI.getFanCard(creatorId, month, version, load.signal);
                 if (!load.live())
                     return;
                 state.current = { type: "fancard", creatorId, month };
-                const versionSelect = FanboxUI.customSelect({ id: "fancard-version", label: "版本", value: card.version,
+                const versionSelect = FanboxUI.customSelect({ id: "fancard-version", label: FanboxUI.t("common.version"), value: card.version,
                     options: card.versions.map(item => ({ value: item.number,
-                        label: `v${String(item.number).padStart(4, "0")} · ${FanboxUI.formatDate(item.captured_at)}` })),
+                        label: FanboxUI.t("common.version_option", { number: String(item.number).padStart(4, "0"),
+                            time: FanboxUI.formatDate(item.captured_at) }) })),
                     onChange: value => void loadFancard(creatorId, month, Number(value)) });
                 target.replaceChildren(FanboxUI.renderFanCardReader(card, {
                     onBack: () => void loadCreator(creatorId, "fancards"), versionSelect,
@@ -2218,7 +2222,7 @@ var FanboxUI;
             const load = beginLoad();
             state.current = null;
             if (showLoading)
-                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取工作狀態…"));
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_jobs")));
             try {
                 const [creatorData, jobData, settings, auth] = await Promise.all([
                     FanboxUI.getCreators(load.signal),
@@ -2318,7 +2322,7 @@ var FanboxUI;
             const load = beginLoad();
             state.current = null;
             if (showLoading)
-                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取驗證狀態…"));
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_verify")));
             try {
                 const [history, newest] = await Promise.all([
                     FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal),
@@ -2371,9 +2375,9 @@ var FanboxUI;
             if (state.view !== "settings" || !settingsPage?.isDirty())
                 return true;
             return FanboxUI.confirmDialog({
-                title: "放棄未儲存的變更？",
-                message: "這個子頁面有尚未儲存的變更，離開後這些變更會遺失。",
-                cancelLabel: "繼續編輯", confirmLabel: "放棄變更", danger: true,
+                title: FanboxUI.t("settings.leave_title"),
+                message: FanboxUI.t("settings.leave_message"),
+                cancelLabel: FanboxUI.t("settings.leave_cancel"), confirmLabel: FanboxUI.t("settings.leave_confirm"), danger: true,
             });
         }
         async function navigate(view, tab = null) {
@@ -2408,9 +2412,9 @@ var FanboxUI;
                 auth: null,
                 account: {
                     onRefresh: () => void loadSettings(),
-                    onLogin: () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
-                    onCancel: jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"),
-                    onLogout: () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。"),
+                    onLogin: () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, FanboxUI.t("settings.login_opened")),
+                    onCancel: jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, FanboxUI.t("settings.login_cancelling")),
+                    onLogout: () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, FanboxUI.t("settings.logged_out")),
                 },
                 schedule: settingsExtras.schedule ? { ...settingsExtras.schedule, actions: {
                         onPreview: schedule => FanboxUI.previewSchedule(schedule, sessionToken),
@@ -2448,7 +2452,7 @@ var FanboxUI;
             }).catch(error => {
                 if (!load.live() || FanboxUI.isAbortError(error))
                     return;
-                settingsPage?.setAuth({ state: "error", source: "none", message: `無法檢查登入狀態：${errorText(error)}`,
+                settingsPage?.setAuth({ state: "error", source: "none", message: FanboxUI.t("settings.auth_check_failed", { error: errorText(error) }),
                     can_login: false, can_logout: false, externally_managed: false, job: null });
             });
         }
@@ -2458,7 +2462,7 @@ var FanboxUI;
             state.current = null;
             settingsPage = null;
             if (showLoading)
-                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_settings")));
             try {
                 const [data, jobData, schedule, diagnostics] = await Promise.all([
                     FanboxUI.getSettings(load.signal), FanboxUI.getJobs(undefined, load.signal),
@@ -2537,8 +2541,8 @@ var FanboxUI;
                         return null;
                 }
                 renderSettings(languageChanged
-                    ? "設定已安全寫入；介面語言會在重新整理頁面後套用。"
-                    : "設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+                    ? FanboxUI.t("settings.saved_language")
+                    : FanboxUI.t("settings.saved"));
                 return null;
             }
             catch (error) {

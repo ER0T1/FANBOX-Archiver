@@ -139,8 +139,8 @@ namespace FanboxUI {
   export function renderError(error: unknown, onRetry: () => void): HTMLElement {
     const message = error instanceof Error ? error.message : String(error);
     return h("section", {class: "panel error"}, h("p", {class: "eyebrow"}, "ERROR"),
-      h("h1", {}, "無法讀取封存"), h("p", {}, message),
-      h("button", {type: "button", onclick: onRetry}, "重試"));
+      h("h1", {}, t("common.error_title")), h("p", {}, message),
+      h("button", {type: "button", onclick: onRetry}, t("common.retry")));
   }
 
   export function setActiveNavigation(nav: HTMLElement, view: View): void {

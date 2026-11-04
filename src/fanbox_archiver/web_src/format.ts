@@ -28,11 +28,12 @@ namespace FanboxUI {
     if (!value) return "—";
     const text = String(value).trim();
     // Never let Date guess the host timezone for offset-less legacy values.
-    if (!explicitOffset.test(text)) return `${text}（時區未標示）`;
+    if (!explicitOffset.test(text)) return t("common.timezone_unknown", {value: text});
     const date = new Date(text);
     if (Number.isNaN(date.valueOf())) return text;
     const parts = Object.fromEntries(dateTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
-    return `${parts.year}年${parts.month}月${parts.day}日 ${parts.hour}:${parts.minute}`;
+    return t("common.datetime", {year: parts.year ?? "", month: parts.month ?? "", day: parts.day ?? "",
+      hour: parts.hour ?? "", minute: parts.minute ?? ""});
   }
 
   export function humanBytes(value: unknown): string {

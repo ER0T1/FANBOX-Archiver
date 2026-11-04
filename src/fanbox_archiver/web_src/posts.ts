@@ -76,25 +76,25 @@ namespace FanboxUI {
 
   export function renderCreatorPostList(data: PostPage, actions: PostListActions): HTMLElement {
     const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
-    const filter = actions.onTag ? h("section", {class: "tag-filter", "aria-label": "依標籤篩選投稿"},
+    const filter = actions.onTag ? h("section", {class: "tag-filter", "aria-label": t("posts.tag_filter_label")},
       h("div", {class: "tag-filter-heading"},
-        h("strong", {}, "標籤篩選"),
-        h("span", {}, actions.activeTag ? `目前：${actions.activeTag}` : "顯示全部投稿")),
+        h("strong", {}, t("posts.tag_filter_title")),
+        h("span", {}, actions.activeTag ? t("posts.tag_current", {tag: actions.activeTag}) : t("posts.tag_all_posts"))),
       h("div", {class: "tag-filter-options"},
         h("button", {type: "button", class: actions.activeTag ? "" : "active",
           "aria-pressed": actions.activeTag ? "false" : "true", onclick: () => actions.onTag?.("")},
-        `全部 ${data.creator_total}`),
+        t("posts.tag_all", {count: data.creator_total})),
         data.tag_facets.length ? data.tag_facets.map(facet => h("button", {
           type: "button", class: actions.activeTag === facet.name ? "active" : "",
           "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
           onclick: () => actions.onTag?.(facet.name),
-        }, `${facet.name} ${facet.count}`)) : h("span", {class: "tag-filter-empty"}, "尚無已保存的投稿標籤"))) : null;
+        }, `${facet.name} ${facet.count}`)) : h("span", {class: "tag-filter-empty"}, t("posts.tag_none")))) : null;
     return h("div", {class: "creator-posts"},
       filter,
       actions.onOrder ? h("div", {class: "list-toolbar"},
         sortToggle(actions.order ?? "desc", actions.onOrder, t("posts.sort_label"))) : null,
       h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, t("posts.empty"))),
-      renderPagination(data, actions.onPage, "創作者投稿分頁"));
+      renderPagination(data, actions.onPage, t("posts.creator_pagination")));
   }
 
   function richText(block: ContentBlock): DocumentFragment {
@@ -133,7 +133,7 @@ namespace FanboxUI {
       : {href: preview.fanbox_url || "#", target: "_blank", rel: "noreferrer noopener"};
     return h("a", {class: "embed-card", ...attributes},
       h("span", {class: "embed-content"},
-        h("span", {class: "embed-source"}, preview.local_available ? "FANBOX 投稿 · 本機備份" : "FANBOX 投稿"),
+        h("span", {class: "embed-source"}, preview.local_available ? t("reader.embed_local") : t("reader.embed_remote")),
         h("strong", {}, preview.title || `Post ${preview.post_id}`),
         preview.excerpt ? h("span", {class: "embed-excerpt"}, preview.excerpt) : null,
         h("span", {class: "embed-meta"}, meta)),
@@ -144,8 +144,8 @@ namespace FanboxUI {
 
   function blockView(block: ContentBlock, onOpenPost: (postId: string) => void): HTMLElement | null {
     if (block.type === "image" && block.media_url) return h("figure", {},
-      h("a", {href: block.media_url, target: "_blank"}, h("img", {src: block.media_url, loading: "lazy", alt: block.name || "投稿圖片"})));
-    if (block.type === "file" && block.media_url) return h("p", {class: "attachment"}, h("a", {href: block.media_url}, block.name || block.filename || "下載附件"));
+      h("a", {href: block.media_url, target: "_blank"}, h("img", {src: block.media_url, loading: "lazy", alt: block.name || t("reader.image_alt")})));
+    if (block.type === "file" && block.media_url) return h("p", {class: "attachment"}, h("a", {href: block.media_url}, block.name || block.filename || t("reader.download_attachment")));
     if (block.type === "separator") return h("hr");
     if (block.type === "quote") return h("blockquote", {}, richText(block));
     if (block.type === "heading") return h(`h${Math.min(Math.max(block.level || 2, 2), 6)}`, {}, richText(block));
@@ -160,13 +160,13 @@ namespace FanboxUI {
     const control = (item: PostNeighbor | null, direction: "previous" | "next") => h("button", {
       type: "button", class: `post-nav-button ${direction}`, disabled: !item,
       onclick: () => item && onOpenPost(item.post_id),
-      title: item?.title || (direction === "previous" ? "已是第一篇" : "已是最後一篇"),
+      title: item?.title || (direction === "previous" ? t("reader.first_post") : t("reader.last_post")),
     },
-    h("span", {}, direction === "previous" ? "← 上一篇" : "下一篇 →"),
-    h("strong", {}, item?.title || (direction === "previous" ? "沒有更前面的投稿" : "沒有更後面的投稿")));
+    h("span", {}, direction === "previous" ? t("reader.previous") : t("reader.next")),
+    h("strong", {}, item?.title || (direction === "previous" ? t("reader.no_previous") : t("reader.no_next"))));
     return h("nav", {
       class: `post-navigation ${placement}`,
-      "aria-label": placement === "top" ? "文章頂端導覽" : "文章底部導覽",
+      "aria-label": placement === "top" ? t("reader.nav_top") : t("reader.nav_bottom"),
     }, control(navigation.previous, "previous"),
     h("span", {class: "post-position"}, navigation.position ? `${navigation.position} / ${navigation.total}` : "—"),
     control(navigation.next, "next"));
@@ -177,17 +177,18 @@ namespace FanboxUI {
       .map(block => blockView(block, actions.onOpenPost))
       .filter((block): block is HTMLElement => block !== null);
     return h("article", {class: "reader"},
-      h("button", {type: "button", class: "back", onclick: actions.onBack}, "← 回到投稿"),
+      h("button", {type: "button", class: "back", onclick: actions.onBack}, t("reader.back")),
       navigationView(post.navigation, "top", actions.onOpenPost),
-      post.cover_url ? h("a", {href: post.cover_url, target: "_blank"}, h("img", {class: "cover", src: post.cover_url, alt: "投稿封面"})) : null,
+      post.cover_url ? h("a", {href: post.cover_url, target: "_blank"}, h("img", {class: "cover", src: post.cover_url, alt: t("reader.cover_alt")})) : null,
       h("header", {class: "reader-heading"}, h("p", {class: "eyebrow"}, `${post.creator_name} · POST ${post.post_id}`),
         h("h1", {}, post.title), h("div", {class: "reader-meta"},
-          post.is_pinned ? h("span", {class: "pin-badge"}, "置頂投稿") : null,
+          post.is_pinned ? h("span", {class: "pin-badge"}, t("reader.pinned")) : null,
           h("span", {class: "fee-badge"}, feeLabel(post.fee_required)),
-          h("span", {}, `發布 ${formatDate(post.published_at)}`), h("span", {}, `更新 ${formatDate(post.updated_at)}`)),
+          h("span", {}, t("reader.published", {time: formatDate(post.published_at)})),
+          h("span", {}, t("reader.updated", {time: formatDate(post.updated_at)}))),
         actions.versionSelect),
-      h("section", {class: "content"}, body.length ? body : h("p", {class: "empty"}, "此版本沒有可顯示的正文。")),
+      h("section", {class: "content"}, body.length ? body : h("p", {class: "empty"}, t("reader.empty_body"))),
       navigationView(post.navigation, "bottom", actions.onOpenPost),
-      h("footer", {}, h("a", {href: post.url, target: "_blank", rel: "noreferrer"}, "開啟 FANBOX 原文 ↗")));
+      h("footer", {}, h("a", {href: post.url, target: "_blank", rel: "noreferrer"}, t("reader.open_original"))));
   }
 }

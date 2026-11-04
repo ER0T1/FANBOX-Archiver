@@ -1219,3 +1219,79 @@ def test_job_polling_keeps_unsaved_settings_and_unlocks_in_place(page: Page, liv
     save.click()
     expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     assert AppConfig.load(config_path).logging.write_to_file is False
+
+
+# Text that comes from the archive itself (never translated) in the E2E fixture.
+_ARCHIVED = re.compile(
+    r"^(?:title=)?(投稿 \d\d( 稀有關鍵字)?|第 \d\d 篇正文|離線保存的創作者介紹|作品集|公開連結|(共同|奇數|精選)( \d+)?|"
+    r"Fan Card 密碼：example|Alice|Bob)$"
+)
+# Interface text that is not wrapped by the pseudo-locale: hard-coded strings still to convert.
+_UNTRANSLATED = """(skip) => {
+  const cjk = /[\\u3040-\\u30ff\\u3400-\\u9fff]/;
+  const found = new Set();
+  const walker = document.createTreeWalker(document.querySelector('#app'), NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (!text || !cjk.test(text) || node.parentElement.closest(skip)) continue;
+    // Remove catalogued text (innermost first, since messages nest) and see whether any CJK is left.
+    let rest = text, previous;
+    do { previous = rest; rest = rest.replace(/［[^［］]*］/g, ''); } while (rest !== previous);
+    if (cjk.test(rest)) found.add(text);
+  }
+  for (const element of document.querySelectorAll('#app [aria-label], #app [title], #app [alt], #app [placeholder]')) {
+    if (element.closest(skip)) continue;
+    for (const name of ['aria-label', 'title', 'alt', 'placeholder']) {
+      const value = (element.getAttribute(name) || '').trim();
+      if (value && cjk.test(value) && !value.startsWith('［')) found.add(`${name}=${value}`);
+    }
+  }
+  return [...found];
+}"""
+# Archived content, plus server-provided text (Fan Card benefits, creator status) that is converted
+# with the Python messages in a later batch.
+_NOT_YET = (".perk-section, .post-card strong, .post-tags, .body-text, .profile-about, .link-grid span, "
+            ".creator-card .badge")
+
+
+def _untranslated(page: Page) -> list[str]:
+    return [text for text in page.evaluate(_UNTRANSLATED, _NOT_YET) if not _ARCHIVED.match(text)]
+
+
+def test_pseudo_locale_covers_the_reading_screens(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    jobs.hold_backup = False
+    token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
+    assert token
+    assert httpx.patch(f"{base_url}/api/config", headers={"X-Fanbox-Token": token.group(1)},
+                       json={"display": {"language": "qps-ploc"}}).status_code == 200
+    page.set_viewport_size({"width": 375, "height": 844})
+    page.goto(base_url, wait_until="networkidle")
+    screens: dict[str, list[str]] = {}
+
+    def check(name: str) -> None:
+        page.wait_for_load_state("networkidle")
+        screens[name] = _untranslated(page)
+        assert page.evaluate(_NO_PAGE_OVERFLOW), (name, page.evaluate(_OVERFLOWING))
+
+    expect(page.locator(".post-card").first).to_be_visible()
+    check("posts")
+    page.locator(".post-card").first.click()
+    expect(page.locator(".reader-heading")).to_contain_text("［發布")
+    check("post reader")
+    page.locator("#nav button[data-view=creators]").click()
+    expect(page.locator(".heading h1")).to_have_text(re.compile(r"^［創作者"))
+    check("creators")
+    page.locator(".creator-card").filter(has_text="Alice").click()
+    expect(page.locator(".creator-hero")).to_contain_text("［")
+    check("creator profile")
+    page.locator('[data-creator-tab="posts"]').click()
+    expect(page.locator(".tag-filter")).to_contain_text("［標籤篩選")
+    check("creator posts")
+    page.locator('[data-creator-tab="fancards"]').click()
+    expect(page.locator(".fancard-card").first).to_be_visible()
+    check("fan cards")
+    page.locator(".fancard-card").first.click()
+    expect(page.locator(".fancard-reader")).to_contain_text("［方案資訊")
+    check("fan card reader")
+    assert screens == {name: [] for name in screens}, screens

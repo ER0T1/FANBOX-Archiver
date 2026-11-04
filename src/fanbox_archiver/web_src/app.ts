@@ -156,9 +156,10 @@ namespace FanboxUI {
         if (!load.live()) return;
         state.current = postId;
         state.postNavigation = post.navigation;
-        const versionSelect = customSelect({id: "post-version", label: "版本", value: post.version,
+        const versionSelect = customSelect({id: "post-version", label: t("common.version"), value: post.version,
           options: post.versions.map(item => ({value: item.number,
-            label: `v${String(item.number).padStart(4, "0")} · ${formatDate(item.captured_at)}`})),
+            label: t("common.version_option", {number: String(item.number).padStart(4, "0"),
+              time: formatDate(item.captured_at)})})),
           onChange: value => void loadPost(postId, Number(value))});
         target.replaceChildren(renderPostReader(post, {
           onBack: back,
@@ -173,7 +174,7 @@ namespace FanboxUI {
     async function loadCreators(): Promise<void> {
       const load = beginLoad();
       state.current = null;
-      app.replaceChildren(h("p", {class: "empty"}, "正在讀取創作者…"));
+      app.replaceChildren(h("p", {class: "empty"}, t("common.loading_creators")));
       try {
         const data = await getCreators(load.signal);
         if (!load.live()) return;
@@ -230,17 +231,17 @@ namespace FanboxUI {
         let creator = state.creator?.creator_id === creatorId ? state.creator : null;
         let heroProfile = state.creatorProfile;
         if (!creator) {
-          app.replaceChildren(h("p", {class: "empty"}, "正在讀取創作者頁面…"));
+          app.replaceChildren(h("p", {class: "empty"}, t("common.loading_creator_page")));
           creator = await getCreator(creatorId, load.signal);
           heroProfile = creator.profile_available ? await getCreatorProfile(creatorId, null, load.signal) : null;
           if (!load.live() || state.creatorId !== creatorId) return;
           state.creator = creator;
           state.creatorProfile = heroProfile;
-          app.replaceChildren(creatorShell(creator, tab, h("p", {class: "empty"}, "正在讀取內容…"), heroProfile));
+          app.replaceChildren(creatorShell(creator, tab, h("p", {class: "empty"}, t("common.loading_content")), heroProfile));
         }
         let shell = app.querySelector<HTMLElement>(".creator-page");
         if (!shell || shell.dataset.creatorId !== creatorId) {
-          app.replaceChildren(creatorShell(creator, tab, h("p", {class: "empty"}, "正在讀取內容…"), heroProfile));
+          app.replaceChildren(creatorShell(creator, tab, h("p", {class: "empty"}, t("common.loading_content")), heroProfile));
           shell = app.querySelector<HTMLElement>(".creator-page");
         }
         if (!shell) return;
@@ -249,7 +250,7 @@ namespace FanboxUI {
         }
         const contentRoot = shell.querySelector<HTMLElement>(".creator-content");
         if (!contentRoot) return;
-        contentRoot.replaceChildren(h("p", {class: "empty"}, "正在讀取內容…"));
+        contentRoot.replaceChildren(h("p", {class: "empty"}, t("common.loading_content")));
         let content: HTMLElement;
         if (tab === "posts") {
           const params = new URLSearchParams({creator: creatorId, page: String(state.page), page_size: "20",
@@ -282,9 +283,10 @@ namespace FanboxUI {
           if (creator.profile_available && profileVersion !== null) {
             profile = await getCreatorProfile(creatorId, profileVersion, load.signal);
           }
-          const versionSelect = profile ? customSelect({id: "profile-version", label: "Profile 版本", value: profile.version,
+          const versionSelect = profile ? customSelect({id: "profile-version", label: t("creator.profile_version"), value: profile.version,
             options: profile.versions.map(item => ({value: item.number,
-              label: `v${String(item.number).padStart(4, "0")} · ${formatDate(item.captured_at)}`})),
+              label: t("common.version_option", {number: String(item.number).padStart(4, "0"),
+              time: formatDate(item.captured_at)})})),
             onChange: value => void loadCreator(creatorId, "profile", Number(value))}) : null;
           content = renderCreatorProfile(creator, profile, versionSelect);
         }
@@ -303,14 +305,15 @@ namespace FanboxUI {
         ? app.querySelector<HTMLElement>(".creator-content") : null;
       const load = beginLoad();
       const target = creatorContent ?? app;
-      target.replaceChildren(h("p", {class: "empty"}, "正在讀取粉絲卡…"));
+      target.replaceChildren(h("p", {class: "empty"}, t("common.loading_fancard")));
       try {
         const card = await getFanCard(creatorId, month, version, load.signal);
         if (!load.live()) return;
         state.current = {type: "fancard", creatorId, month};
-        const versionSelect = customSelect({id: "fancard-version", label: "版本", value: card.version,
+        const versionSelect = customSelect({id: "fancard-version", label: t("common.version"), value: card.version,
           options: card.versions.map(item => ({value: item.number,
-            label: `v${String(item.number).padStart(4, "0")} · ${formatDate(item.captured_at)}`})),
+            label: t("common.version_option", {number: String(item.number).padStart(4, "0"),
+              time: formatDate(item.captured_at)})})),
           onChange: value => void loadFancard(creatorId, month, Number(value))});
         target.replaceChildren(renderFanCardReader(card, {
           onBack: () => void loadCreator(creatorId, "fancards"), versionSelect,
@@ -380,7 +383,7 @@ namespace FanboxUI {
     async function loadBackup(showLoading = true): Promise<void> {
       const load = beginLoad();
       state.current = null;
-      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, t("common.loading_jobs")));
       try {
         const [creatorData, jobData, settings, auth] = await Promise.all([
           getCreators(load.signal),
@@ -469,7 +472,7 @@ namespace FanboxUI {
     async function loadMaintenance(showLoading = true): Promise<void> {
       const load = beginLoad();
       state.current = null;
-      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取驗證狀態…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, t("common.loading_verify")));
       try {
         const [history, newest] = await Promise.all([
           getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal),
@@ -525,9 +528,9 @@ namespace FanboxUI {
     async function confirmLeaveSettings(): Promise<boolean> {
       if (state.view !== "settings" || !settingsPage?.isDirty()) return true;
       return confirmDialog({
-        title: "放棄未儲存的變更？",
-        message: "這個子頁面有尚未儲存的變更，離開後這些變更會遺失。",
-        cancelLabel: "繼續編輯", confirmLabel: "放棄變更", danger: true,
+        title: t("settings.leave_title"),
+        message: t("settings.leave_message"),
+        cancelLabel: t("settings.leave_cancel"), confirmLabel: t("settings.leave_confirm"), danger: true,
       });
     }
 
@@ -564,11 +567,11 @@ namespace FanboxUI {
         account: {
           onRefresh: () => void loadSettings(),
           onLogin: () => authAction(async () => { await startAuthLogin(sessionToken); },
-            "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
+            t("settings.login_opened")),
           onCancel: jobId => authAction(async () => { await cancelAuthLogin(jobId, sessionToken); },
-            "正在取消登入…"),
+            t("settings.login_cancelling")),
           onLogout: () => authAction(async () => { await logoutAuth(sessionToken); },
-            "已安全登出；封存與設定均未變更。"),
+            t("settings.logged_out")),
         },
         schedule: settingsExtras.schedule ? {...settingsExtras.schedule, actions: {
           onPreview: schedule => previewSchedule(schedule, sessionToken),
@@ -605,7 +608,7 @@ namespace FanboxUI {
         scheduleJobRefresh(auth.state === "checking");
       }).catch(error => {
         if (!load.live() || isAbortError(error)) return;
-        settingsPage?.setAuth({state: "error", source: "none", message: `無法檢查登入狀態：${errorText(error)}`,
+        settingsPage?.setAuth({state: "error", source: "none", message: t("settings.auth_check_failed", {error: errorText(error)}),
           can_login: false, can_logout: false, externally_managed: false, job: null});
       });
     }
@@ -615,7 +618,7 @@ namespace FanboxUI {
       const tab = state.settingsTab;
       state.current = null;
       settingsPage = null;
-      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
+      if (showLoading) app.replaceChildren(h("p", {class: "empty"}, t("common.loading_settings")));
       try {
         // Each sub-page reads only what it shows; only "帳號與登入" asks for the sign-in check.
         const [data, jobData, schedule, diagnostics] = await Promise.all([
@@ -691,8 +694,8 @@ namespace FanboxUI {
           if (state.view !== "settings" || state.settingsTab !== tab) return null;
         }
         renderSettings(languageChanged
-          ? "設定已安全寫入；介面語言會在重新整理頁面後套用。"
-          : "設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+          ? t("settings.saved_language")
+          : t("settings.saved"));
         return null;
       } catch (error) {
         return errorText(error);

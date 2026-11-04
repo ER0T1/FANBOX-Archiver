@@ -30,7 +30,7 @@ namespace FanboxUI {
         field.node.classList.toggle("is-dirty", changed);
         let badge = field.node.querySelector<HTMLElement>(":scope > .dirty-badge");
         if (changed && !badge) {
-          badge = h("span", {class: "dirty-badge"}, "已變更");
+          badge = h("span", {class: "dirty-badge"}, t("common.changed"));
           field.node.append(badge);
         } else if (!changed && badge) {
           badge.remove();
