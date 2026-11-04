@@ -27,6 +27,10 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.37-alpha 更新重點
+
+- 修正 `audit` 與 `verify` 遇到整個投稿（或 Creator Profile、Fan Card 月份）資料夾連同 `versions/` 一起遺失時會直接中止的問題：現在會繼續稽核，並把遺失的版本列為 `manifest_missing`（需人工判讀），不會嘗試自動重建。
+
 ## v1.3.36-alpha 更新重點
 
 - 修正 Fan Card 月初歸屬錯誤：卡片月份改依擷取當下的日本時間（FANBOX 的月份邊界）決定，不再取最新付款紀錄的月份。創作者在月初換上新卡面、但本月付款尚未出現時備份，新卡面會存到本月，而不是成為上個月的新版本；manifest 會記錄 `target_month_payment_seen: false`，`fancard.md` 也會註明本月付款紀錄尚未出現。付款出現後再備份會成為同月的下一版本。此月份固定使用日本時間，不受顯示時區設定影響。
@@ -38,15 +42,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 完整版本更新歷史改存於 [CHANGELOG.md](CHANGELOG.md)（由新到舊，從 v1.0.0-alpha 起）；README 只保留最新三個版本的更新重點，加入新版本時移除第四版以下的區塊，CHANGELOG 不刪除任何版本。
 - `npm run release:check` 新增文件契約檢查：CHANGELOG 必須存在、最新版本與專案版本一致、版本由新到舊且不重複；README 必須連到 CHANGELOG、恰好保留最新三版，且內容與 CHANGELOG 對應區塊一致。
 - 本版不改動程式功能。
-
-## v1.3.34-alpha 更新重點
-
-- 新增「設定 → 輸出與紀錄 → 時區」：預設「電腦系統」（顯示目前解析出的時區，例如 Asia/Taipei），也可改選常用時區或以「其他時區…」搜尋完整的 IANA 時區清單；設定寫入 `config.yaml` 的 `display.timezone`，無效時區會被拒絕，工作執行期間與其他設定一起鎖定。
-- 此時區同時套用到 GUI、CLI 輸出、Markdown front matter、新匯出的靜態網站與自動備份排程；只改變顯示與排程時刻的解讀，不改寫既有封存、manifest 或資料庫。網頁不使用瀏覽器自己的時區，靜態網站記錄匯出當下的時區，在其他電腦開啟也一致；改變時區後下次建置會重新產生頁面。
-- 自動備份的時間改依此時區解讀（摘要例如「每天 00:00（Asia/Tokyo）」），Windows 背景排程也同步改用該時區的時差；變更時區時會從當下重新起算，不會重複執行或誤判錯過。原本 `schedule.timezone` 欄位不再使用。
-- 升級相容：設定檔已有 `schedule.timezone: Asia/Taipei` 且尚未設定全域時區時，會自動寫入 `display.timezone: Asia/Taipei`，升級前後顯示與排程時間不變；全新設定檔才預設「電腦系統」。無法辨識電腦時區名稱時，暫以目前的 UTC 時差顯示並在設定頁提示。
-- 所有時間一律 24 小時制 `HH:mm`：排程時間改為「時／分」下拉選單，不再使用會依 Windows 地區設定顯示「上午／下午」的原生時間欄位。
-- 新增相依套件 `tzdata`（Windows 沒有系統時區資料庫）與 `tzlocal`（把 Windows 時區名稱對應到 IANA），並打包進桌面版 sidecar。不處理日光節約切換當天的特殊情況（已知限制）。
 
 ## 安裝
 

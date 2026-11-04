@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -474,6 +475,23 @@ def test_repair_report_marks_unrecoverable_history(tmp_path: Path):
     assert ("capture_order", "unknown/unrecoverable") in marked
     assert all(item["marking"] in {"unknown/unrecoverable", "needs manual review"} for item in report["remaining"])
     assert result.remaining_findings == len(report["remaining"])
+
+
+def test_audit_and_verify_report_missing_post_directory_instead_of_crashing(tmp_path: Path):
+    config = configured(tmp_path)
+    service = ArchiveService(config)
+    service.save(make_post("A"))
+    service.save(make_post("B"))
+    post_root = Path(str(service.db.post_row("42")["local_path"]))
+    shutil.rmtree(post_root)  # the whole post folder, versions/ included, is gone
+
+    report = ArchiveAuditor(config).run()
+
+    codes = {item.code for item in report.findings}
+    assert "manifest_missing" in codes
+    assert all(item.repairability != "automatic" for item in report.findings)
+    issues = ArchiveService(config).verify()
+    assert any("manifest_missing" in issue.reason for issue in issues)
 
 
 def misfiled_fancard_archive(tmp_path: Path, monkeypatch) -> AppConfig:

@@ -691,6 +691,8 @@ class ArchiveAuditor:
         versions_dir = parents.pop()
         if versions_dir.name != "versions" or self._safe_path(versions_dir) == "[outside archive]":
             return None
+        if not versions_dir.is_dir():
+            return None  # nothing on disk to rebuild from; manifest_missing reports each version
         if any(str(row["status"]) != "completed" for row in versions):
             return None
         disk = sorted(
