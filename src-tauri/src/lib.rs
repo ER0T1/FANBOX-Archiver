@@ -302,11 +302,32 @@ fn stop_sidecar(app: &AppHandle) {
     if let Some(state) = app.try_state::<DesktopState>() {
         if let Ok(mut process) = state.process.lock() {
             if let Some(child) = process.take() {
+                kill_process_tree(child.pid());
                 let _ = child.kill();
             }
         }
     }
 }
+
+/// The PyInstaller onefile sidecar is a launcher plus the real server as its child;
+/// killing only the launcher would leave the server running and holding the archive lock.
+#[cfg(windows)]
+fn kill_process_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    match std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    {
+        Ok(output) if output.status.success() => log::info!("sidecar process tree {pid} stopped"),
+        Ok(output) => log::warn!("taskkill for sidecar {pid} exited with {:?}", output.status.code()),
+        Err(error) => log::warn!("taskkill for sidecar {pid} failed: {error}"),
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_process_tree(_pid: u32) {}
 
 fn show_archive_selection(app: &AppHandle) -> Result<(), String> {
     stop_sidecar(app);
