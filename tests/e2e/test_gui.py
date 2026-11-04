@@ -1015,3 +1015,78 @@ def test_pseudo_locale_drives_dynamic_and_static_text_and_fits_narrow_screens(
     expect(page.locator(".page-heading")).to_contain_text("［55 筆符合目前條件")
     expect(page.get_by_role("combobox", name=re.compile("^［排序方式"))).to_be_visible()
     assert page.evaluate(_NO_PAGE_OVERFLOW), page.evaluate(_OVERFLOWING)
+
+
+def _hold(page: Page, pattern: str) -> list:
+    """Hold matching requests (as if the server were slow) until the test releases them."""
+    held: list = []
+    page.route(pattern, lambda route: held.append(route))
+    return held
+
+
+def _release(held: list) -> None:
+    for route in held:
+        try:
+            route.continue_()
+        except PlaywrightError:
+            pass  # the page already gave the request up
+
+
+def test_leaving_a_slow_page_abandons_its_load(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    jobs.hold_backup = False
+    failed: list[str] = []
+    page.on("requestfailed", lambda request: failed.append(request.url))
+    page.goto(base_url, wait_until="networkidle")
+
+    held = _hold(page, re.compile(r".*/api/jobs\?.*kind=backup.*"))
+    page.get_by_role("button", name="備份", exact=True).click()
+    expect(page.get_by_text("正在讀取工作狀態…")).to_be_visible()
+    page.get_by_role("button", name="創作者", exact=True).click()
+    expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    assert held, "the backup history request should have been held"
+    # The abandoned request is cancelled in the browser, not just ignored.
+    deadline = time.monotonic() + 5
+    while not any("kind=backup" in url for url in failed) and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert any("kind=backup" in url for url in failed), failed
+    _release(held)
+    page.unroute(re.compile(r".*/api/jobs\?.*kind=backup.*"))
+    page.wait_for_timeout(500)
+    expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    expect(page.locator("#nav button.active")).to_have_text("創作者")
+    expect(page.locator(".error")).to_have_count(0)
+    expect(page.locator(".backup-page")).to_have_count(0)
+
+    # A→B→A: the slow creators load must not replace the posts page the user came back to.
+    held = _hold(page, "**/api/creators")
+    page.get_by_role("button", name="投稿", exact=True).click()
+    expect(page.locator(".post-card").first).to_be_visible()
+    page.get_by_role("button", name="創作者", exact=True).click()
+    page.get_by_role("button", name="投稿", exact=True).click()
+    expect(page.locator(".post-card").first).to_be_visible()
+    _release(held)
+    page.unroute("**/api/creators")
+    page.wait_for_timeout(500)
+    expect(page.locator(".heading h1")).to_have_text("投稿")
+    expect(page.locator(".creator-card")).to_have_count(0)
+
+
+def test_only_the_latest_search_on_a_page_is_drawn(page: Page, live_gui) -> None:
+    base_url, _config_path, _jobs = live_gui
+    page.goto(base_url, wait_until="networkidle")
+    expect(page.locator(".post-card").first).to_be_visible()
+    slow = re.compile(r".*/api/posts\?.*q=%E7%A8%80%E6%9C%89.*")  # q=稀有
+    held = _hold(page, slow)
+    search = page.locator("#search")
+    search.fill("稀有")
+    page.wait_for_timeout(400)  # past the 180 ms debounce, so the slow request is in flight
+    assert held, "the first search should have been held"
+    search.fill("投稿 03")
+    expect(page.locator(".post-card")).to_have_count(1)
+    expect(page.locator(".post-card strong")).to_have_text("投稿 03")
+    _release(held)
+    page.unroute(slow)
+    page.wait_for_timeout(500)
+    expect(page.locator(".post-card")).to_have_count(1)
+    expect(page.locator(".post-card strong")).to_have_text("投稿 03")

@@ -1,4 +1,11 @@
 namespace FanboxUI {
+  /** True when a request was given up because the user moved on (see `beginLoad` in app.ts). */
+  export function isAbortError(error: unknown): boolean {
+    return typeof error === "object" && error !== null && (error as {name?: unknown}).name === "AbortError";
+  }
+
+  // Page reads take the signal of the load that started them, so leaving the page cancels them.
+  // Writes (start backup, save settings, sign in/out…) never take one: they always run to the end.
   export async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
     const headers = new Headers(options.headers);
     if (!headers.has("Accept")) headers.set("Accept", "application/json");
@@ -18,50 +25,50 @@ namespace FanboxUI {
     return response.json() as Promise<T>;
   }
 
-  export function getPosts(params: URLSearchParams): Promise<PostPage> {
-    return requestJson<PostPage>(`/api/posts?${params.toString()}`);
+  export function getPosts(params: URLSearchParams, signal?: AbortSignal): Promise<PostPage> {
+    return requestJson<PostPage>(`/api/posts?${params.toString()}`, {signal});
   }
 
-  export function getPost(postId: string, params: URLSearchParams): Promise<PostDetail> {
+  export function getPost(postId: string, params: URLSearchParams, signal?: AbortSignal): Promise<PostDetail> {
     const query = params.toString();
     return requestJson<PostDetail>(
-      `/api/posts/${encodeURIComponent(postId)}${query ? `?${query}` : ""}`,
+      `/api/posts/${encodeURIComponent(postId)}${query ? `?${query}` : ""}`, {signal},
     );
   }
 
-  export function getCreators(): Promise<{items: CreatorSummary[]}> {
-    return requestJson<{items: CreatorSummary[]}>("/api/creators");
+  export function getCreators(signal?: AbortSignal): Promise<{items: CreatorSummary[]}> {
+    return requestJson<{items: CreatorSummary[]}>("/api/creators", {signal});
   }
 
-  export function getCreator(creatorId: string): Promise<CreatorDetail> {
-    return requestJson<CreatorDetail>(`/api/creators/${encodeURIComponent(creatorId)}`);
+  export function getCreator(creatorId: string, signal?: AbortSignal): Promise<CreatorDetail> {
+    return requestJson<CreatorDetail>(`/api/creators/${encodeURIComponent(creatorId)}`, {signal});
   }
 
   export function getCreatorProfile(
-    creatorId: string, version: number | null = null,
+    creatorId: string, version: number | null = null, signal?: AbortSignal,
   ): Promise<CreatorProfile> {
     const query = version === null ? "" : `?version=${version}`;
     return requestJson<CreatorProfile>(
-      `/api/creators/${encodeURIComponent(creatorId)}/profile${query}`,
+      `/api/creators/${encodeURIComponent(creatorId)}/profile${query}`, {signal},
     );
   }
 
-  export function getFanCards(params: URLSearchParams): Promise<{items: FanCardSummary[]}> {
+  export function getFanCards(params: URLSearchParams, signal?: AbortSignal): Promise<{items: FanCardSummary[]}> {
     const query = params.toString();
-    return requestJson<{items: FanCardSummary[]}>(`/api/fancards${query ? `?${query}` : ""}`);
+    return requestJson<{items: FanCardSummary[]}>(`/api/fancards${query ? `?${query}` : ""}`, {signal});
   }
 
   export function getFanCard(
-    creatorId: string, month: string, version: number | null = null,
+    creatorId: string, month: string, version: number | null = null, signal?: AbortSignal,
   ): Promise<FanCardDetail> {
     const query = version === null ? "" : `?version=${version}`;
     return requestJson<FanCardDetail>(
-      `/api/fancards/${encodeURIComponent(creatorId)}/${encodeURIComponent(month)}${query}`,
+      `/api/fancards/${encodeURIComponent(creatorId)}/${encodeURIComponent(month)}${query}`, {signal},
     );
   }
 
-  export function getSettings(): Promise<SettingsResponse> {
-    return requestJson<SettingsResponse>("/api/config");
+  export function getSettings(signal?: AbortSignal): Promise<SettingsResponse> {
+    return requestJson<SettingsResponse>("/api/config", {signal});
   }
 
   export function saveSettings(patch: SettingsPatch, sessionToken: string): Promise<{saved: boolean}> {
@@ -72,8 +79,8 @@ namespace FanboxUI {
     });
   }
 
-  export function getScheduleStatus(): Promise<ScheduleStatus> {
-    return requestJson<ScheduleStatus>("/api/schedule");
+  export function getScheduleStatus(signal?: AbortSignal): Promise<ScheduleStatus> {
+    return requestJson<ScheduleStatus>("/api/schedule", {signal});
   }
 
   export function previewSchedule(schedule: ScheduleSettingsPatch, sessionToken: string): Promise<SchedulePreview> {
@@ -91,9 +98,9 @@ namespace FanboxUI {
     });
   }
 
-  export function getAuthStatus(sessionToken: string): Promise<AuthStatus> {
+  export function getAuthStatus(sessionToken: string, signal?: AbortSignal): Promise<AuthStatus> {
     return requestJson<AuthStatus>("/api/auth/status", {
-      headers: {"X-Fanbox-Token": sessionToken},
+      headers: {"X-Fanbox-Token": sessionToken}, signal,
     });
   }
 
@@ -117,8 +124,8 @@ namespace FanboxUI {
     });
   }
 
-  export function getDiagnostics(sessionToken: string): Promise<DiagnosticsInfo> {
-    return requestJson<DiagnosticsInfo>("/api/diagnostics", {headers: {"X-Fanbox-Token": sessionToken}});
+  export function getDiagnostics(sessionToken: string, signal?: AbortSignal): Promise<DiagnosticsInfo> {
+    return requestJson<DiagnosticsInfo>("/api/diagnostics", {headers: {"X-Fanbox-Token": sessionToken}, signal});
   }
 
   export function openDiagnosticsFolder(target: FolderTarget, sessionToken: string): Promise<{opened: FolderTarget}> {
@@ -129,12 +136,14 @@ namespace FanboxUI {
     });
   }
 
-  export function getJobs(params: URLSearchParams = new URLSearchParams({page_size: "1"})): Promise<JobPage> {
-    return requestJson<JobPage>(`/api/jobs?${params}`);
+  export function getJobs(
+    params: URLSearchParams = new URLSearchParams({page_size: "1"}), signal?: AbortSignal,
+  ): Promise<JobPage> {
+    return requestJson<JobPage>(`/api/jobs?${params}`, {signal});
   }
 
-  export function getJob(jobId: string): Promise<WebJob> {
-    return requestJson<WebJob>(`/api/jobs/${encodeURIComponent(jobId)}`);
+  export function getJob(jobId: string, signal?: AbortSignal): Promise<WebJob> {
+    return requestJson<WebJob>(`/api/jobs/${encodeURIComponent(jobId)}`, {signal});
   }
 
   export function startBackupJob(payload: BackupJobPayload, sessionToken: string): Promise<WebJob> {

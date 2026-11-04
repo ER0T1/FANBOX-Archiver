@@ -17,7 +17,36 @@ namespace FanboxUI {
     const state = createInitialState();
     let jobTimer: number | undefined;
     let searchTimer: number | undefined;
-    let creatorRequest = 0;
+    // The one page load that may still draw: every navigation, page, sort, tab or search starts a
+    // new load and gives up the previous one (its requests are aborted and its results dropped).
+    let currentLoad: AbortController | null = null;
+
+    interface Load {
+      signal: AbortSignal;
+      /** False once the user moved on; check after every await, before touching the page or state. */
+      live(): boolean;
+    }
+
+    function beginLoad(): Load {
+      currentLoad?.abort();
+      if (jobTimer !== undefined) clearTimeout(jobTimer);
+      const controller = new AbortController();
+      currentLoad = controller;
+      return {signal: controller.signal, live: () => currentLoad === controller && !controller.signal.aborted};
+    }
+
+    /** Shows an error only for the load still on screen; given-up loads fail silently. */
+    function loadFailed(load: Load, error: unknown): void {
+      if (load.live() && !isAbortError(error)) errorView(error);
+    }
+
+    /** A read whose failure is tolerated, but whose abort still ends the load. */
+    function optional<T>(request: Promise<T>): Promise<T | null> {
+      return request.catch(error => {
+        if (isAbortError(error)) throw error;
+        return null;
+      });
+    }
 
     document.addEventListener("click", event => closeDropdownsOutside(event.target));
 
@@ -37,6 +66,7 @@ namespace FanboxUI {
     let savedTheme = document.documentElement.dataset.theme ?? "auto";
 
     function setView(view: View): void {
+      currentLoad?.abort();
       if (jobTimer !== undefined) clearTimeout(jobTimer);
       document.documentElement.dataset.theme = savedTheme;
       state.view = view;
@@ -82,12 +112,14 @@ namespace FanboxUI {
     }
 
     async function loadPosts(): Promise<void> {
+      const load = beginLoad();
       state.current = null;
       app.replaceChildren(h("p", {class: "empty"}, t("common.loading_posts")));
       try {
         const params = new URLSearchParams({page: String(state.page), page_size: "20", order: state.postOrder});
         if (state.q) params.set("q", state.q);
-        const data = await getPosts(params);
+        const data = await getPosts(params, load.signal);
+        if (!load.live()) return;
         state.page = data.page;
         app.replaceChildren(renderPostListPage(data, {
           onOpen: postId => void loadPost(postId),
@@ -96,11 +128,12 @@ namespace FanboxUI {
           onOrder: order => { state.postOrder = order; state.page = 1; void loadPosts(); },
         }));
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function loadPost(postId: string, version: number | null = null): Promise<void> {
+      const load = beginLoad();
       const creatorContent = state.view === "creator"
         ? app.querySelector<HTMLElement>(".creator-content") : null;
       const target = creatorContent ?? app;
@@ -115,7 +148,8 @@ namespace FanboxUI {
         if (creatorContent && creatorId) params.set("creator", creatorId);
         if (state.q) params.set("q", state.q);
         if (creatorContent && state.tag) params.set("tag", state.tag);
-        const post = await getPost(postId, params);
+        const post = await getPost(postId, params, load.signal);
+        if (!load.live()) return;
         state.current = postId;
         state.postNavigation = post.navigation;
         const versionSelect = customSelect({id: "post-version", label: "版本", value: post.version,
@@ -128,18 +162,20 @@ namespace FanboxUI {
           versionSelect,
         }));
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function loadCreators(): Promise<void> {
+      const load = beginLoad();
       state.current = null;
       app.replaceChildren(h("p", {class: "empty"}, "正在讀取創作者…"));
       try {
-        const data = await getCreators();
+        const data = await getCreators(load.signal);
+        if (!load.live()) return;
         app.replaceChildren(renderCreatorsPage(data.items, state.q, creatorId => openCreator(creatorId)));
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
@@ -183,17 +219,17 @@ namespace FanboxUI {
     async function loadCreator(
       creatorId: string, tab: CreatorTab = "profile", profileVersion: number | null = null,
     ): Promise<void> {
+      const load = beginLoad();
       state.creatorTab = tab;
       setSearch("creator");
-      const requestNumber = ++creatorRequest;
       try {
         let creator = state.creator?.creator_id === creatorId ? state.creator : null;
         let heroProfile = state.creatorProfile;
         if (!creator) {
           app.replaceChildren(h("p", {class: "empty"}, "正在讀取創作者頁面…"));
-          creator = await getCreator(creatorId);
-          heroProfile = creator.profile_available ? await getCreatorProfile(creatorId) : null;
-          if (requestNumber !== creatorRequest || state.creatorId !== creatorId) return;
+          creator = await getCreator(creatorId, load.signal);
+          heroProfile = creator.profile_available ? await getCreatorProfile(creatorId, null, load.signal) : null;
+          if (!load.live() || state.creatorId !== creatorId) return;
           state.creator = creator;
           state.creatorProfile = heroProfile;
           app.replaceChildren(creatorShell(creator, tab, h("p", {class: "empty"}, "正在讀取內容…"), heroProfile));
@@ -216,7 +252,8 @@ namespace FanboxUI {
             order: state.postOrder});
           if (state.q) params.set("q", state.q);
           if (state.tag) params.set("tag", state.tag);
-          const data = await getPosts(params);
+          const data = await getPosts(params, load.signal);
+          if (!load.live()) return;
           state.page = data.page;
           content = renderCreatorPostList(data, {
             onOpen: postId => void loadPost(postId),
@@ -234,12 +271,12 @@ namespace FanboxUI {
         } else if (tab === "fancards") {
           const params = new URLSearchParams({creator: creatorId});
           if (state.q) params.set("q", state.q);
-          const data = await getFanCards(params);
+          const data = await getFanCards(params, load.signal);
           content = renderFanCardList(data, {onOpen: (id, month) => void loadFancard(id, month)});
         } else {
           let profile = heroProfile;
           if (creator.profile_available && profileVersion !== null) {
-            profile = await getCreatorProfile(creatorId, profileVersion);
+            profile = await getCreatorProfile(creatorId, profileVersion, load.signal);
           }
           const versionSelect = profile ? customSelect({id: "profile-version", label: "Profile 版本", value: profile.version,
             options: profile.versions.map(item => ({value: item.number,
@@ -247,11 +284,11 @@ namespace FanboxUI {
             onChange: value => void loadCreator(creatorId, "profile", Number(value))}) : null;
           content = renderCreatorProfile(creator, profile, versionSelect);
         }
-        if (requestNumber !== creatorRequest || state.creatorId !== creatorId || state.creatorTab !== tab) return;
+        if (!load.live() || state.creatorId !== creatorId || state.creatorTab !== tab) return;
         contentRoot.replaceChildren(content);
       } catch (error) {
-        if (requestNumber !== creatorRequest || state.creatorId !== creatorId) return;
-        errorView(error);
+        if (state.creatorId !== creatorId) return;
+        loadFailed(load, error);
       }
     }
 
@@ -260,10 +297,12 @@ namespace FanboxUI {
     ): Promise<void> {
       const creatorContent = state.view === "creator"
         ? app.querySelector<HTMLElement>(".creator-content") : null;
+      const load = beginLoad();
       const target = creatorContent ?? app;
       target.replaceChildren(h("p", {class: "empty"}, "正在讀取粉絲卡…"));
       try {
-        const card = await getFanCard(creatorId, month, version);
+        const card = await getFanCard(creatorId, month, version, load.signal);
+        if (!load.live()) return;
         state.current = {type: "fancard", creatorId, month};
         const versionSelect = customSelect({id: "fancard-version", label: "版本", value: card.version,
           options: card.versions.map(item => ({value: item.number,
@@ -273,17 +312,20 @@ namespace FanboxUI {
           onBack: () => void loadCreator(creatorId, "fancards"), versionSelect,
         }));
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function showJob(jobId: string, creators: CreatorSummary[]): Promise<void> {
+      const load = beginLoad();
       try {
+        const job = await getJob(jobId, load.signal);
+        if (!load.live()) return;
         state.backupScreen = "job";
         state.backupJobId = jobId;
-        renderJob(await getJob(jobId), creators);
+        renderJob(job, creators);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
@@ -332,27 +374,33 @@ namespace FanboxUI {
     }
 
     async function loadBackup(showLoading = true): Promise<void> {
+      const load = beginLoad();
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取工作狀態…"));
       try {
         const [creatorData, jobData, settings, auth] = await Promise.all([
-          getCreators(), getJobs(historyParams("backup", state.jobPage, state.jobOrder, state.jobFilter)),
-          getSettings(), getAuthStatus(sessionToken),
+          getCreators(load.signal),
+          getJobs(historyParams("backup", state.jobPage, state.jobOrder, state.jobFilter), load.signal),
+          getSettings(load.signal), getAuthStatus(sessionToken, load.signal),
         ]);
+        if (!load.live()) return;
         updateActiveJob(jobData);
         const active = jobData.active?.kind === "backup" ? jobData.active : null;
         if (active) {
+          const job = await getJob(active.job_id, load.signal);
+          if (!load.live()) return;
           state.backupScreen = "job";
           state.backupJobId = active.job_id;
-          renderJob({...await getJob(active.job_id), external: active.external}, creatorData.items);
+          renderJob({...job, external: active.external}, creatorData.items);
         } else if (state.backupScreen === "job" && state.backupJobId) {
-          const selected = await getJob(state.backupJobId).catch(() => null);
+          const selected = await optional(getJob(state.backupJobId, load.signal));
+          if (!load.live()) return;
           if (selected) renderJob(selected, creatorData.items);
           else { state.backupScreen = "form"; state.backupJobId = null; renderBackupForm(creatorData.items, settings, auth); }
         } else if (state.backupScreen === "history") renderBackupHistory(creatorData.items, jobData);
         else renderBackupForm(creatorData.items, settings, auth);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
@@ -361,36 +409,44 @@ namespace FanboxUI {
       mode: "full" | "profile" | "fancard" = "full",
       includeProfile = true, includeFancard = true,
     ): Promise<void> {
+      // The write itself is never aborted; only drawing its result is skipped if the user left.
+      const load = beginLoad();
       try {
         const job = await startBackupJob({creators, dry_run: dryRun, max_posts: maxPosts, mode,
           include_profile: includeProfile, include_fancard: includeFancard}, sessionToken);
+        if (!load.live()) return;
         state.backupScreen = "job";
         state.backupJobId = job.job_id;
-        await renderJobWithActive(job);
+        await renderJobWithActive(job, load);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
-    async function renderJobWithActive(job: WebJob): Promise<void> {
-      const [creatorData, jobData] = await Promise.all([getCreators(), getJobs()]);
+    async function renderJobWithActive(job: WebJob, load: Load): Promise<void> {
+      const [creatorData, jobData] = await Promise.all([getCreators(load.signal), getJobs(undefined, load.signal)]);
+      if (!load.live()) return;
       updateActiveJob(jobData);
       renderJob(job, creatorData.items);
     }
 
     async function cancelBackupJob(jobId: string): Promise<void> {
+      const load = beginLoad();
       try {
-        await renderJobWithActive(await cancelJob(jobId, sessionToken));
+        const job = await cancelJob(jobId, sessionToken);
+        if (load.live()) await renderJobWithActive(job, load);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function retryBackupJob(jobId: string): Promise<void> {
+      const load = beginLoad();
       try {
-        await renderJobWithActive(await retryJob(jobId, sessionToken));
+        const job = await retryJob(jobId, sessionToken);
+        if (load.live()) await renderJobWithActive(job, load);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
@@ -407,44 +463,53 @@ namespace FanboxUI {
     }
 
     async function loadMaintenance(showLoading = true): Promise<void> {
+      const load = beginLoad();
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取驗證狀態…"));
       try {
         const [history, newest] = await Promise.all([
-          getJobs(historyParams("verify", state.verifyPage, state.verifyOrder)),
-          getJobs(historyParams("verify", 1, "desc")),
+          getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal),
+          getJobs(historyParams("verify", 1, "desc"), load.signal),
         ]);
-        updateActiveJob(history);
+        if (!load.live()) return;
         // Show the running verification, else the one the user picked, else the newest result.
         const selectedId = (history.active?.kind === "verify" ? history.active.job_id : null)
           ?? state.verifyJobId ?? newest.items[0]?.job_id ?? null;
-        const selected = selectedId ? await getJob(selectedId).catch(() => null) : null;
+        const selected = selectedId ? await optional(getJob(selectedId, load.signal)) : null;
+        if (!load.live()) return;
+        updateActiveJob(history);
         renderMaintenance(selected, history);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function startVerification(): Promise<void> {
+      const load = beginLoad();
       try {
         const job = await startVerificationJob(sessionToken);
+        if (!load.live()) return;
         state.verifyJobId = job.job_id;
-        const history = await getJobs(historyParams("verify", state.verifyPage, state.verifyOrder));
+        const history = await getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal);
+        if (!load.live()) return;
         updateActiveJob(history);
         renderMaintenance(job, history);
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function loadSettings(message = "", showLoading = true): Promise<void> {
+      const load = beginLoad();
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
         const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
-          getSettings(), getJobs(), getAuthStatus(sessionToken), getScheduleStatus(), getCreators(),
-          getDiagnostics(sessionToken).catch(() => null),
+          getSettings(load.signal), getJobs(undefined, load.signal), getAuthStatus(sessionToken, load.signal),
+          getScheduleStatus(load.signal), getCreators(load.signal),
+          optional(getDiagnostics(sessionToken, load.signal)),
         ]);
+        if (!load.live()) return;
         updateActiveJob(jobData);
         setDisplayTimeZone(data.display.timezone);
         // A preview that was never saved is undone whenever the page reloads its settings.
@@ -486,14 +551,16 @@ namespace FanboxUI {
           }}));
         scheduleJobRefresh();
       } catch (error) {
-        errorView(error);
+        loadFailed(load, error);
       }
     }
 
     async function authAction(action: () => Promise<void>, message: string): Promise<string | null> {
       try {
         await action();
-        void loadSettings(message, false);
+        // The write always finishes; the settings page is redrawn only if the user is still on it
+        // (a background refresh of the same page does not count as leaving).
+        if (state.view === "settings") void loadSettings(message, false);
         return null;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
@@ -503,7 +570,7 @@ namespace FanboxUI {
     async function saveSettingsForm(patch: SettingsPatch): Promise<string | null> {
       try {
         await saveSettings(patch, sessionToken);
-        void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+        if (state.view === "settings") void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
         return null;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);

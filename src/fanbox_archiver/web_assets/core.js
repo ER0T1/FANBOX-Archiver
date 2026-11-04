@@ -337,6 +337,10 @@ var FanboxUI;
 })(FanboxUI || (FanboxUI = {}));
 var FanboxUI;
 (function (FanboxUI) {
+    function isAbortError(error) {
+        return typeof error === "object" && error !== null && error.name === "AbortError";
+    }
+    FanboxUI.isAbortError = isAbortError;
     async function requestJson(url, options = {}) {
         const headers = new Headers(options.headers);
         if (!headers.has("Accept"))
@@ -357,40 +361,40 @@ var FanboxUI;
         return response.json();
     }
     FanboxUI.requestJson = requestJson;
-    function getPosts(params) {
-        return requestJson(`/api/posts?${params.toString()}`);
+    function getPosts(params, signal) {
+        return requestJson(`/api/posts?${params.toString()}`, { signal });
     }
     FanboxUI.getPosts = getPosts;
-    function getPost(postId, params) {
+    function getPost(postId, params, signal) {
         const query = params.toString();
-        return requestJson(`/api/posts/${encodeURIComponent(postId)}${query ? `?${query}` : ""}`);
+        return requestJson(`/api/posts/${encodeURIComponent(postId)}${query ? `?${query}` : ""}`, { signal });
     }
     FanboxUI.getPost = getPost;
-    function getCreators() {
-        return requestJson("/api/creators");
+    function getCreators(signal) {
+        return requestJson("/api/creators", { signal });
     }
     FanboxUI.getCreators = getCreators;
-    function getCreator(creatorId) {
-        return requestJson(`/api/creators/${encodeURIComponent(creatorId)}`);
+    function getCreator(creatorId, signal) {
+        return requestJson(`/api/creators/${encodeURIComponent(creatorId)}`, { signal });
     }
     FanboxUI.getCreator = getCreator;
-    function getCreatorProfile(creatorId, version = null) {
+    function getCreatorProfile(creatorId, version = null, signal) {
         const query = version === null ? "" : `?version=${version}`;
-        return requestJson(`/api/creators/${encodeURIComponent(creatorId)}/profile${query}`);
+        return requestJson(`/api/creators/${encodeURIComponent(creatorId)}/profile${query}`, { signal });
     }
     FanboxUI.getCreatorProfile = getCreatorProfile;
-    function getFanCards(params) {
+    function getFanCards(params, signal) {
         const query = params.toString();
-        return requestJson(`/api/fancards${query ? `?${query}` : ""}`);
+        return requestJson(`/api/fancards${query ? `?${query}` : ""}`, { signal });
     }
     FanboxUI.getFanCards = getFanCards;
-    function getFanCard(creatorId, month, version = null) {
+    function getFanCard(creatorId, month, version = null, signal) {
         const query = version === null ? "" : `?version=${version}`;
-        return requestJson(`/api/fancards/${encodeURIComponent(creatorId)}/${encodeURIComponent(month)}${query}`);
+        return requestJson(`/api/fancards/${encodeURIComponent(creatorId)}/${encodeURIComponent(month)}${query}`, { signal });
     }
     FanboxUI.getFanCard = getFanCard;
-    function getSettings() {
-        return requestJson("/api/config");
+    function getSettings(signal) {
+        return requestJson("/api/config", { signal });
     }
     FanboxUI.getSettings = getSettings;
     function saveSettings(patch, sessionToken) {
@@ -401,8 +405,8 @@ var FanboxUI;
         });
     }
     FanboxUI.saveSettings = saveSettings;
-    function getScheduleStatus() {
-        return requestJson("/api/schedule");
+    function getScheduleStatus(signal) {
+        return requestJson("/api/schedule", { signal });
     }
     FanboxUI.getScheduleStatus = getScheduleStatus;
     function previewSchedule(schedule, sessionToken) {
@@ -420,9 +424,9 @@ var FanboxUI;
         });
     }
     FanboxUI.runScheduleNow = runScheduleNow;
-    function getAuthStatus(sessionToken) {
+    function getAuthStatus(sessionToken, signal) {
         return requestJson("/api/auth/status", {
-            headers: { "X-Fanbox-Token": sessionToken },
+            headers: { "X-Fanbox-Token": sessionToken }, signal,
         });
     }
     FanboxUI.getAuthStatus = getAuthStatus;
@@ -446,8 +450,8 @@ var FanboxUI;
         });
     }
     FanboxUI.logoutAuth = logoutAuth;
-    function getDiagnostics(sessionToken) {
-        return requestJson("/api/diagnostics", { headers: { "X-Fanbox-Token": sessionToken } });
+    function getDiagnostics(sessionToken, signal) {
+        return requestJson("/api/diagnostics", { headers: { "X-Fanbox-Token": sessionToken }, signal });
     }
     FanboxUI.getDiagnostics = getDiagnostics;
     function openDiagnosticsFolder(target, sessionToken) {
@@ -458,12 +462,12 @@ var FanboxUI;
         });
     }
     FanboxUI.openDiagnosticsFolder = openDiagnosticsFolder;
-    function getJobs(params = new URLSearchParams({ page_size: "1" })) {
-        return requestJson(`/api/jobs?${params}`);
+    function getJobs(params = new URLSearchParams({ page_size: "1" }), signal) {
+        return requestJson(`/api/jobs?${params}`, { signal });
     }
     FanboxUI.getJobs = getJobs;
-    function getJob(jobId) {
-        return requestJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+    function getJob(jobId, signal) {
+        return requestJson(`/api/jobs/${encodeURIComponent(jobId)}`, { signal });
     }
     FanboxUI.getJob = getJob;
     function startBackupJob(payload, sessionToken) {
@@ -1607,7 +1611,26 @@ var FanboxUI;
         const state = FanboxUI.createInitialState();
         let jobTimer;
         let searchTimer;
-        let creatorRequest = 0;
+        let currentLoad = null;
+        function beginLoad() {
+            currentLoad?.abort();
+            if (jobTimer !== undefined)
+                clearTimeout(jobTimer);
+            const controller = new AbortController();
+            currentLoad = controller;
+            return { signal: controller.signal, live: () => currentLoad === controller && !controller.signal.aborted };
+        }
+        function loadFailed(load, error) {
+            if (load.live() && !FanboxUI.isAbortError(error))
+                errorView(error);
+        }
+        function optional(request) {
+            return request.catch(error => {
+                if (FanboxUI.isAbortError(error))
+                    throw error;
+                return null;
+            });
+        }
         document.addEventListener("click", event => FanboxUI.closeDropdownsOutside(event.target));
         function errorView(error) {
             app.replaceChildren(FanboxUI.renderError(error, refreshView));
@@ -1620,6 +1643,7 @@ var FanboxUI;
         }
         let savedTheme = document.documentElement.dataset.theme ?? "auto";
         function setView(view) {
+            currentLoad?.abort();
             if (jobTimer !== undefined)
                 clearTimeout(jobTimer);
             document.documentElement.dataset.theme = savedTheme;
@@ -1669,13 +1693,16 @@ var FanboxUI;
             }
         }
         async function loadPosts() {
+            const load = beginLoad();
             state.current = null;
             app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_posts")));
             try {
                 const params = new URLSearchParams({ page: String(state.page), page_size: "20", order: state.postOrder });
                 if (state.q)
                     params.set("q", state.q);
-                const data = await FanboxUI.getPosts(params);
+                const data = await FanboxUI.getPosts(params, load.signal);
+                if (!load.live())
+                    return;
                 state.page = data.page;
                 app.replaceChildren(FanboxUI.renderPostListPage(data, {
                     onOpen: postId => void loadPost(postId),
@@ -1685,10 +1712,11 @@ var FanboxUI;
                 }));
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function loadPost(postId, version = null) {
+            const load = beginLoad();
             const creatorContent = state.view === "creator"
                 ? app.querySelector(".creator-content") : null;
             const target = creatorContent ?? app;
@@ -1707,7 +1735,9 @@ var FanboxUI;
                     params.set("q", state.q);
                 if (creatorContent && state.tag)
                     params.set("tag", state.tag);
-                const post = await FanboxUI.getPost(postId, params);
+                const post = await FanboxUI.getPost(postId, params, load.signal);
+                if (!load.live())
+                    return;
                 state.current = postId;
                 state.postNavigation = post.navigation;
                 const versionSelect = FanboxUI.customSelect({ id: "post-version", label: "版本", value: post.version,
@@ -1721,18 +1751,21 @@ var FanboxUI;
                 }));
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function loadCreators() {
+            const load = beginLoad();
             state.current = null;
             app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取創作者…"));
             try {
-                const data = await FanboxUI.getCreators();
+                const data = await FanboxUI.getCreators(load.signal);
+                if (!load.live())
+                    return;
                 app.replaceChildren(FanboxUI.renderCreatorsPage(data.items, state.q, creatorId => openCreator(creatorId)));
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         function openCreator(creatorId, tab = "profile") {
@@ -1767,17 +1800,17 @@ var FanboxUI;
             });
         }
         async function loadCreator(creatorId, tab = "profile", profileVersion = null) {
+            const load = beginLoad();
             state.creatorTab = tab;
             setSearch("creator");
-            const requestNumber = ++creatorRequest;
             try {
                 let creator = state.creator?.creator_id === creatorId ? state.creator : null;
                 let heroProfile = state.creatorProfile;
                 if (!creator) {
                     app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取創作者頁面…"));
-                    creator = await FanboxUI.getCreator(creatorId);
-                    heroProfile = creator.profile_available ? await FanboxUI.getCreatorProfile(creatorId) : null;
-                    if (requestNumber !== creatorRequest || state.creatorId !== creatorId)
+                    creator = await FanboxUI.getCreator(creatorId, load.signal);
+                    heroProfile = creator.profile_available ? await FanboxUI.getCreatorProfile(creatorId, null, load.signal) : null;
+                    if (!load.live() || state.creatorId !== creatorId)
                         return;
                     state.creator = creator;
                     state.creatorProfile = heroProfile;
@@ -1805,7 +1838,9 @@ var FanboxUI;
                         params.set("q", state.q);
                     if (state.tag)
                         params.set("tag", state.tag);
-                    const data = await FanboxUI.getPosts(params);
+                    const data = await FanboxUI.getPosts(params, load.signal);
+                    if (!load.live())
+                        return;
                     state.page = data.page;
                     content = FanboxUI.renderCreatorPostList(data, {
                         onOpen: postId => void loadPost(postId),
@@ -1825,13 +1860,13 @@ var FanboxUI;
                     const params = new URLSearchParams({ creator: creatorId });
                     if (state.q)
                         params.set("q", state.q);
-                    const data = await FanboxUI.getFanCards(params);
+                    const data = await FanboxUI.getFanCards(params, load.signal);
                     content = FanboxUI.renderFanCardList(data, { onOpen: (id, month) => void loadFancard(id, month) });
                 }
                 else {
                     let profile = heroProfile;
                     if (creator.profile_available && profileVersion !== null) {
-                        profile = await FanboxUI.getCreatorProfile(creatorId, profileVersion);
+                        profile = await FanboxUI.getCreatorProfile(creatorId, profileVersion, load.signal);
                     }
                     const versionSelect = profile ? FanboxUI.customSelect({ id: "profile-version", label: "Profile 版本", value: profile.version,
                         options: profile.versions.map(item => ({ value: item.number,
@@ -1839,23 +1874,26 @@ var FanboxUI;
                         onChange: value => void loadCreator(creatorId, "profile", Number(value)) }) : null;
                     content = FanboxUI.renderCreatorProfile(creator, profile, versionSelect);
                 }
-                if (requestNumber !== creatorRequest || state.creatorId !== creatorId || state.creatorTab !== tab)
+                if (!load.live() || state.creatorId !== creatorId || state.creatorTab !== tab)
                     return;
                 contentRoot.replaceChildren(content);
             }
             catch (error) {
-                if (requestNumber !== creatorRequest || state.creatorId !== creatorId)
+                if (state.creatorId !== creatorId)
                     return;
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function loadFancard(creatorId, month, version = null) {
             const creatorContent = state.view === "creator"
                 ? app.querySelector(".creator-content") : null;
+            const load = beginLoad();
             const target = creatorContent ?? app;
             target.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取粉絲卡…"));
             try {
-                const card = await FanboxUI.getFanCard(creatorId, month, version);
+                const card = await FanboxUI.getFanCard(creatorId, month, version, load.signal);
+                if (!load.live())
+                    return;
                 state.current = { type: "fancard", creatorId, month };
                 const versionSelect = FanboxUI.customSelect({ id: "fancard-version", label: "版本", value: card.version,
                     options: card.versions.map(item => ({ value: item.number,
@@ -1866,17 +1904,21 @@ var FanboxUI;
                 }));
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function showJob(jobId, creators) {
+            const load = beginLoad();
             try {
+                const job = await FanboxUI.getJob(jobId, load.signal);
+                if (!load.live())
+                    return;
                 state.backupScreen = "job";
                 state.backupJobId = jobId;
-                renderJob(await FanboxUI.getJob(jobId), creators);
+                renderJob(job, creators);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         function renderJob(job, creators) {
@@ -1921,23 +1963,32 @@ var FanboxUI;
             }));
         }
         async function loadBackup(showLoading = true) {
+            const load = beginLoad();
             state.current = null;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取工作狀態…"));
             try {
                 const [creatorData, jobData, settings, auth] = await Promise.all([
-                    FanboxUI.getCreators(), FanboxUI.getJobs(historyParams("backup", state.jobPage, state.jobOrder, state.jobFilter)),
-                    FanboxUI.getSettings(), FanboxUI.getAuthStatus(sessionToken),
+                    FanboxUI.getCreators(load.signal),
+                    FanboxUI.getJobs(historyParams("backup", state.jobPage, state.jobOrder, state.jobFilter), load.signal),
+                    FanboxUI.getSettings(load.signal), FanboxUI.getAuthStatus(sessionToken, load.signal),
                 ]);
+                if (!load.live())
+                    return;
                 updateActiveJob(jobData);
                 const active = jobData.active?.kind === "backup" ? jobData.active : null;
                 if (active) {
+                    const job = await FanboxUI.getJob(active.job_id, load.signal);
+                    if (!load.live())
+                        return;
                     state.backupScreen = "job";
                     state.backupJobId = active.job_id;
-                    renderJob({ ...await FanboxUI.getJob(active.job_id), external: active.external }, creatorData.items);
+                    renderJob({ ...job, external: active.external }, creatorData.items);
                 }
                 else if (state.backupScreen === "job" && state.backupJobId) {
-                    const selected = await FanboxUI.getJob(state.backupJobId).catch(() => null);
+                    const selected = await optional(FanboxUI.getJob(state.backupJobId, load.signal));
+                    if (!load.live())
+                        return;
                     if (selected)
                         renderJob(selected, creatorData.items);
                     else {
@@ -1952,40 +2003,51 @@ var FanboxUI;
                     renderBackupForm(creatorData.items, settings, auth);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function startBackup(creators, dryRun, maxPosts, mode = "full", includeProfile = true, includeFancard = true) {
+            const load = beginLoad();
             try {
                 const job = await FanboxUI.startBackupJob({ creators, dry_run: dryRun, max_posts: maxPosts, mode,
                     include_profile: includeProfile, include_fancard: includeFancard }, sessionToken);
+                if (!load.live())
+                    return;
                 state.backupScreen = "job";
                 state.backupJobId = job.job_id;
-                await renderJobWithActive(job);
+                await renderJobWithActive(job, load);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
-        async function renderJobWithActive(job) {
-            const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(), FanboxUI.getJobs()]);
+        async function renderJobWithActive(job, load) {
+            const [creatorData, jobData] = await Promise.all([FanboxUI.getCreators(load.signal), FanboxUI.getJobs(undefined, load.signal)]);
+            if (!load.live())
+                return;
             updateActiveJob(jobData);
             renderJob(job, creatorData.items);
         }
         async function cancelBackupJob(jobId) {
+            const load = beginLoad();
             try {
-                await renderJobWithActive(await FanboxUI.cancelJob(jobId, sessionToken));
+                const job = await FanboxUI.cancelJob(jobId, sessionToken);
+                if (load.live())
+                    await renderJobWithActive(job, load);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function retryBackupJob(jobId) {
+            const load = beginLoad();
             try {
-                await renderJobWithActive(await FanboxUI.retryJob(jobId, sessionToken));
+                const job = await FanboxUI.retryJob(jobId, sessionToken);
+                if (load.live())
+                    await renderJobWithActive(job, load);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         function renderMaintenance(job, history) {
@@ -2001,45 +2063,59 @@ var FanboxUI;
             scheduleJobRefresh();
         }
         async function loadMaintenance(showLoading = true) {
+            const load = beginLoad();
             state.current = null;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取驗證狀態…"));
             try {
                 const [history, newest] = await Promise.all([
-                    FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder)),
-                    FanboxUI.getJobs(historyParams("verify", 1, "desc")),
+                    FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal),
+                    FanboxUI.getJobs(historyParams("verify", 1, "desc"), load.signal),
                 ]);
-                updateActiveJob(history);
+                if (!load.live())
+                    return;
                 const selectedId = (history.active?.kind === "verify" ? history.active.job_id : null)
                     ?? state.verifyJobId ?? newest.items[0]?.job_id ?? null;
-                const selected = selectedId ? await FanboxUI.getJob(selectedId).catch(() => null) : null;
+                const selected = selectedId ? await optional(FanboxUI.getJob(selectedId, load.signal)) : null;
+                if (!load.live())
+                    return;
+                updateActiveJob(history);
                 renderMaintenance(selected, history);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function startVerification() {
+            const load = beginLoad();
             try {
                 const job = await FanboxUI.startVerificationJob(sessionToken);
+                if (!load.live())
+                    return;
                 state.verifyJobId = job.job_id;
-                const history = await FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder));
+                const history = await FanboxUI.getJobs(historyParams("verify", state.verifyPage, state.verifyOrder), load.signal);
+                if (!load.live())
+                    return;
                 updateActiveJob(history);
                 renderMaintenance(job, history);
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function loadSettings(message = "", showLoading = true) {
+            const load = beginLoad();
             state.current = null;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
             try {
                 const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
-                    FanboxUI.getSettings(), FanboxUI.getJobs(), FanboxUI.getAuthStatus(sessionToken), FanboxUI.getScheduleStatus(), FanboxUI.getCreators(),
-                    FanboxUI.getDiagnostics(sessionToken).catch(() => null),
+                    FanboxUI.getSettings(load.signal), FanboxUI.getJobs(undefined, load.signal), FanboxUI.getAuthStatus(sessionToken, load.signal),
+                    FanboxUI.getScheduleStatus(load.signal), FanboxUI.getCreators(load.signal),
+                    optional(FanboxUI.getDiagnostics(sessionToken, load.signal)),
                 ]);
+                if (!load.live())
+                    return;
                 updateActiveJob(jobData);
                 FanboxUI.setDisplayTimeZone(data.display.timezone);
                 FanboxUI.applyTheme(data.editable.display.theme);
@@ -2071,13 +2147,14 @@ var FanboxUI;
                 scheduleJobRefresh();
             }
             catch (error) {
-                errorView(error);
+                loadFailed(load, error);
             }
         }
         async function authAction(action, message) {
             try {
                 await action();
-                void loadSettings(message, false);
+                if (state.view === "settings")
+                    void loadSettings(message, false);
                 return null;
             }
             catch (error) {
@@ -2087,7 +2164,8 @@ var FanboxUI;
         async function saveSettingsForm(patch) {
             try {
                 await FanboxUI.saveSettings(patch, sessionToken);
-                void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+                if (state.view === "settings")
+                    void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
                 return null;
             }
             catch (error) {
