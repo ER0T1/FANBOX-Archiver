@@ -342,7 +342,7 @@ async def test_every_api_time_point_carries_an_explicit_offset(tmp_path: Path):
         "plan": {"creatorId": "alice", "title": "Gold", "fee": 100, "user": {"name": "Alice"}},
         "supportStartDatetime": "2026-09-01T00:00:00+09:00",
         "supportTransactions": [{"targetMonth": "2026-10"}],
-    }}, b"jpeg", "image/jpeg")
+    }}, b"jpeg", "image/jpeg", captured_at="2026-10-15T03:00:00+00:00")
 
     app = create_app(config)
     instant = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")

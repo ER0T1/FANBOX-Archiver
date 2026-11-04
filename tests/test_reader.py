@@ -44,7 +44,7 @@ def dynamic_archive(tmp_path: Path) -> tuple[AppConfig, ArchiveReader]:
             {"id": "private-transaction", "targetMonth": "2026-10"},
         ],
         "supporterCardImageUrl": "https://example.test/card.jpeg",
-    }}, b"jpeg-data", "image/jpeg")
+    }}, b"jpeg-data", "image/jpeg", captured_at="2026-10-15T03:00:00+00:00")
     return config, ArchiveReader(config)
 
 

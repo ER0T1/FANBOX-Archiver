@@ -21,7 +21,7 @@ from .markdown import render_markdown
 from .models import Asset, AssetStatus, CreatorProfile, Post, PostStatus, VerificationIssue
 from .security import confined_path, safe_filename, validate_url
 from .storage import BackupStorage
-from .timestamps import isoformat_display
+from .timestamps import fanbox_month, isoformat_display
 from .logging_setup import get_logger
 
 
@@ -479,6 +479,7 @@ class ArchiveService:
 
     def save_fancard(
         self, payload: dict, image_data: bytes | None, content_type: str | None = "image/jpeg",
+        *, captured_at: str | None = None,
     ) -> tuple[str, Path]:
         body = payload.get("body")
         if not isinstance(body, dict):
@@ -494,7 +495,13 @@ class ArchiveService:
         })
         if not months:
             raise ValueError("Fan Card 回應缺少有效 targetMonth")
-        target_month = months[-1]
+        # The API has no card-month field and this month's payment can appear days after the
+        # creator switches cards, so the card belongs to the JST month it was captured in.
+        captured_at = captured_at or now_iso()
+        target_month = fanbox_month(captured_at)
+        if target_month is None:
+            raise ValueError("Fan Card 擷取時間缺少 UTC offset")
+        payment_seen = target_month in months
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         fingerprint = hashlib.sha256(encoded).hexdigest()
         image_sha = hashlib.sha256(image_data).hexdigest() if image_data is not None else ""
@@ -521,7 +528,6 @@ class ArchiveService:
         temp.mkdir(parents=True, exist_ok=False)
         suffix = ".png" if content_type and "png" in content_type.casefold() else ".jpeg"
         image_name = f"card{suffix}" if image_data is not None else None
-        captured_at = now_iso()
         try:
             if image_name and image_data is not None:
                 (temp / image_name).write_bytes(image_data)
@@ -533,6 +539,8 @@ class ArchiveService:
             self._write_json(temp / "manifest.json", {
                 "creator_id": creator_id,
                 "target_month": target_month,
+                "target_month_basis": "captured_at_jst",
+                "target_month_payment_seen": payment_seen,
                 "version": number,
                 "captured_at": captured_at,
                 "content_fingerprint": fingerprint,
@@ -611,9 +619,13 @@ class ArchiveService:
                 if perk["action_url"]:
                     lines.extend([f"[{perk['action_label']}]({perk['action_url']})", ""])
         lines.extend(["## 支援月份", ""])
+        paid_months = set()
         for item in body.get("supportTransactions") or []:
             if isinstance(item, dict):
+                paid_months.add(str(item.get("targetMonth")))
                 lines.append(f"- {item.get('targetMonth')}: ¥{item.get('paidAmount')}")
+        if target_month not in paid_months:
+            lines.extend(["", f"> {target_month} 的付款紀錄尚未出現；卡片月份依擷取當下的日本時間判定。"])
         return "\n".join(lines).rstrip() + "\n"
 
     def _write_manifest(self, directory: Path, post: Post, number: int, captured_at: str,

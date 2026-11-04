@@ -250,7 +250,7 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
         "supportStartDatetime": "2026-10-01T00:00:00+09:00",
         "supportTransactions": [{"targetMonth": "2026-10"}],
         "supporterCardImageUrl": None,
-    }}, None, None)
+    }}, None, None, captured_at="2026-10-15T03:00:00+00:00")
     return config, tmp_path / "config.yaml"
 
 

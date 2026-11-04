@@ -2,6 +2,12 @@
 
 本檔保存 FANBOX Archiver 從 `v1.0.0-alpha` 起所有版本的更新重點，依版本由新到舊排列。`README.md` 只保留最新三個版本；每次發布先在本檔最上方新增版本區塊，舊版本不會從本檔刪除。
 
+## v1.3.36-alpha 更新重點
+
+- 修正 Fan Card 月初歸屬錯誤：卡片月份改依擷取當下的日本時間（FANBOX 的月份邊界）決定，不再取最新付款紀錄的月份。創作者在月初換上新卡面、但本月付款尚未出現時備份，新卡面會存到本月，而不是成為上個月的新版本；manifest 會記錄 `target_month_payment_seen: false`，`fancard.md` 也會註明本月付款紀錄尚未出現。付款出現後再備份會成為同月的下一版本。此月份固定使用日本時間，不受顯示時區設定影響。
+- `audit` 新增「月份歸屬可疑」（`fancard_month`，warning）：Fan Card 版本的擷取月份（日本時間）晚於歸屬月份，且該版本的付款紀錄沒有擷取月份時列出。資料本身未遺失，因此不會讓 `verify` 失敗。
+- `repair-copy` 可在副本中修正上述版本：移到擷取月份並與該月既有版本依擷取時間重新編號，同步更新 manifest、`fancard.md` 的月份與版本號、資料庫、latest 別名與靜態網站；保留每個版本原本的 `captured_at`、卡面與 `fancard.json`，manifest 以 `relocated_from` 記錄原月份與版本。誤歸版本不是來源月份最新的版本、或任何相關版本的 manifest 雜湊不一致時，只列為需人工判讀。原封存不會被修改，確認副本後才由使用者自行取代。
+
 ## v1.3.35-alpha 更新重點
 
 - 完整版本更新歷史改存於 [CHANGELOG.md](CHANGELOG.md)（由新到舊，從 v1.0.0-alpha 起）；README 只保留最新三個版本的更新重點，加入新版本時移除第四版以下的區塊，CHANGELOG 不刪除任何版本。

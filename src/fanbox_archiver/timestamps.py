@@ -20,6 +20,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 SYSTEM = "system"
 DEVELOPMENT_TIMEZONE = "Asia/Taipei"
 TAIPEI = ZoneInfo(DEVELOPMENT_TIMEZONE)
+# FANBOX bills and changes Fan Cards on Japanese calendar months; this is data semantics,
+# so it never follows the display timezone.
+FANBOX_TIMEZONE = ZoneInfo("Asia/Tokyo")
 UNKNOWN_ZONE_SUFFIX = "（時區未標示）"
 COMMON_TIMEZONES = (
     "Asia/Taipei", "Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore",
@@ -112,6 +115,12 @@ def parse_instant(value: object) -> datetime | None:
     else:
         return None
     return parsed if parsed.utcoffset() is not None else None
+
+
+def fanbox_month(value: object) -> str | None:
+    """FANBOX month (``YYYY-MM`` in JST) of a time point, or None when it has no explicit offset."""
+    parsed = parse_instant(value)
+    return parsed.astimezone(FANBOX_TIMEZONE).strftime("%Y-%m") if parsed is not None else None
 
 
 def _fallback(value: object, empty: str) -> str:

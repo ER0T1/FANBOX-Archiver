@@ -7,6 +7,9 @@ from fanbox_archiver.models import ContentBlock, Post
 from fanbox_archiver.service import ArchiveService
 
 
+OCTOBER = "2026-10-15T03:00:00+00:00"
+
+
 def service(tmp_path: Path) -> ArchiveService:
     config = AppConfig(storage=StorageConfig(
         output_dir=tmp_path / "out", database=tmp_path / "out/db.sqlite"
@@ -38,7 +41,7 @@ def payload(description: str = "Password: example") -> dict:
 
 def test_fancard_is_saved_by_month_with_readable_metadata(tmp_path: Path):
     archive = service(tmp_path)
-    status, version = archive.save_fancard(payload(), b"jpeg-data", "image/jpeg")
+    status, version = archive.save_fancard(payload(), b"jpeg-data", "image/jpeg", captured_at=OCTOBER)
     assert status == "new"
     assert version.name == "v0001"
     markdown = (version / "fancard.md").read_text(encoding="utf-8")
@@ -53,13 +56,13 @@ def test_fancard_is_saved_by_month_with_readable_metadata(tmp_path: Path):
 
 def test_fancard_unchanged_is_not_duplicated_and_change_creates_version(tmp_path: Path):
     archive = service(tmp_path)
-    first_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg")
+    first_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg", captured_at=OCTOBER)
     with archive.db.connect() as db:
         first_captured_at = db.execute(
             "SELECT captured_at FROM fancard_versions WHERE version_number=1"
         ).fetchone()[0]
-    same_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg")
-    changed_status, changed = archive.save_fancard(payload("new password"), b"two", "image/jpeg")
+    same_status, _ = archive.save_fancard(payload(), b"one", "image/jpeg", captured_at=OCTOBER)
+    changed_status, changed = archive.save_fancard(payload("new password"), b"two", "image/jpeg", captured_at=OCTOBER)
     assert (first_status, same_status, changed_status) == ("new", "unchanged", "updated")
     assert changed.name == "v0002"
     with archive.db.connect() as db:
@@ -71,13 +74,13 @@ def test_fancard_unchanged_is_not_duplicated_and_change_creates_version(tmp_path
 
 def test_fancard_a_b_a_creates_three_immutable_versions(tmp_path: Path):
     archive = service(tmp_path)
-    archive.save_fancard(payload("A"), b"one", "image/jpeg")
+    archive.save_fancard(payload("A"), b"one", "image/jpeg", captured_at=OCTOBER)
     with archive.db.connect() as db:
         first_captured_at = db.execute(
             "SELECT captured_at FROM fancard_versions WHERE version_number=1"
         ).fetchone()[0]
-    archive.save_fancard(payload("B"), b"two", "image/jpeg")
-    archive.save_fancard(payload("A"), b"three", "image/jpeg")
+    archive.save_fancard(payload("B"), b"two", "image/jpeg", captured_at=OCTOBER)
+    archive.save_fancard(payload("A"), b"three", "image/jpeg", captured_at=OCTOBER)
 
     with archive.db.connect() as db:
         rows = db.execute(
@@ -93,8 +96,8 @@ def test_fancard_without_custom_image_saves_metadata_and_stays_incremental(tmp_p
     archive = service(tmp_path)
     no_image = payload()
     no_image["body"]["supporterCardImageUrl"] = None
-    first_status, version = archive.save_fancard(no_image, None, None)
-    second_status, same_version = archive.save_fancard(no_image, None, None)
+    first_status, version = archive.save_fancard(no_image, None, None, captured_at=OCTOBER)
+    second_status, same_version = archive.save_fancard(no_image, None, None, captured_at=OCTOBER)
 
     assert (first_status, second_status) == ("new", "unchanged")
     assert same_version == version
@@ -111,7 +114,7 @@ def test_fancard_without_custom_image_saves_metadata_and_stays_incremental(tmp_p
 
 def test_clear_posts_preserves_fancards_and_creator_records(tmp_path: Path):
     archive = service(tmp_path)
-    archive.save_fancard(payload(), b"jpeg-data", "image/jpeg")
+    archive.save_fancard(payload(), b"jpeg-data", "image/jpeg", captured_at=OCTOBER)
     post = Post(
         post_id="10", creator_id="alice", creator_name="Alice", title="old",
         published_at=datetime(2026, 10, 1), url="https://www.fanbox.cc/@alice/posts/10",
@@ -129,3 +132,60 @@ def test_clear_posts_preserves_fancards_and_creator_records(tmp_path: Path):
     assert archive.db.creator_row("alice") is not None
     with archive.db.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM fancard_versions").fetchone()[0] == 1
+
+
+def with_months(*months: str, description: str = "Password: example") -> dict:
+    card = payload(description)
+    card["body"]["supportTransactions"] = [
+        {"paidAmount": 1000, "targetMonth": month} for month in months
+    ]
+    return card
+
+
+def test_fancard_before_this_months_payment_is_saved_to_the_capture_month(tmp_path: Path):
+    archive = service(tmp_path)
+    archive.save_fancard(with_months("2026-10"), b"card-a", "image/jpeg", captured_at=OCTOBER)
+
+    # Creator switched to the November card; the November payment has not appeared yet.
+    status, early = archive.save_fancard(
+        with_months("2026-10"), b"card-b", "image/jpeg", captured_at="2026-11-01T06:17:00+00:00",
+    )
+    assert status == "new"
+    assert early.parent.parent.name == "2026-11" and early.name == "v0001"
+    manifest = json.loads((early / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["target_month"] == "2026-11"
+    assert manifest["target_month_payment_seen"] is False
+    assert "2026-11 的付款紀錄尚未出現" in (early / "fancard.md").read_text(encoding="utf-8")
+
+    # Once the payment shows up the same card becomes a new November version, never an October one.
+    status, paid = archive.save_fancard(
+        with_months("2026-10", "2026-11"), b"card-b", "image/jpeg",
+        captured_at="2026-11-02T14:02:00+00:00",
+    )
+    assert (status, paid.parent.parent.name, paid.name) == ("updated", "2026-11", "v0002")
+    paid_manifest = json.loads((paid / "manifest.json").read_text(encoding="utf-8"))
+    assert paid_manifest["target_month_payment_seen"] is True
+    assert "付款紀錄尚未出現" not in (paid / "fancard.md").read_text(encoding="utf-8")
+    assert archive.db.latest_fancard_version("alice", "2026-10")["version_number"] == 1
+    assert archive.verify() == []
+
+
+def test_fancard_month_uses_jst_boundary_regardless_of_display_timezone(tmp_path: Path):
+    from fanbox_archiver.timestamps import set_display_timezone
+
+    archive = service(tmp_path)
+    try:
+        for zone in ("Asia/Taipei", "America/Los_Angeles"):
+            set_display_timezone(zone)
+            # 2026-10-31 23:30 in Taipei is already 2026-11-01 00:30 in Japan.
+            _, version = archive.save_fancard(
+                with_months("2026-10", description=zone), b"card", "image/jpeg",
+                captured_at="2026-10-31T15:30:00+00:00",
+            )
+            assert version.parent.parent.name == "2026-11"
+        _, before = archive.save_fancard(
+            with_months("2026-10"), b"card", "image/jpeg", captured_at="2026-10-31T14:59:59+00:00",
+        )
+        assert before.parent.parent.name == "2026-10"
+    finally:
+        set_display_timezone("Asia/Taipei")

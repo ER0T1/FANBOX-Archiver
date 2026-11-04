@@ -104,7 +104,9 @@ def test_fancard_contract_fixture_saves_without_private_transaction_fields(tmp_p
     archive = ArchiveService(config)
     archive.db.record_supporting_creators([("fixture-creator", "Fixture Creator")])
 
-    status, version = archive.save_fancard(load_fixture("fancard.json"), None, None)
+    status, version = archive.save_fancard(
+        load_fixture("fancard.json"), None, None, captured_at="2026-01-15T03:00:00+00:00",
+    )
 
     assert status == "new"
     markdown = (version / "fancard.md").read_text(encoding="utf-8")

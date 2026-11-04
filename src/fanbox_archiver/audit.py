@@ -20,7 +20,7 @@ from .config import AppConfig, StorageConfig
 from .database import Database, SCHEMA_VERSION
 from .indexer import IndexBuilder
 from .storage import BackupStorage
-from .timestamps import parse_instant
+from .timestamps import fanbox_month, parse_instant
 
 
 Severity = Literal["error", "warning", "info"]
@@ -91,6 +91,26 @@ class RebuildPlan:
     entries: list[RebuildEntry]
 
 
+@dataclass(slots=True)
+class FancardMonthEntry:
+    row_id: int
+    source_month: str
+    number: int
+    path: Path
+    captured: datetime
+
+
+@dataclass(slots=True)
+class FancardMonthPlan:
+    """Move Fan Card versions captured in a later JST month into that month, renumbered by capture."""
+
+    creator_id: str
+    target_month: str
+    fancards_dir: Path
+    entries: list[FancardMonthEntry]  # final order: entries[i] becomes v{i+1}
+    source_months: list[str]
+
+
 def capture_drift(manifest_value: object, database_value: object) -> Literal["exact", "drift"] | None:
     """Classify manifest vs database captured_at: identical, tolerated legacy drift, or mismatch."""
     if manifest_value == database_value:
@@ -141,7 +161,7 @@ class ArchiveAuditor:
         self.database = config.storage.database.resolve()
         self.findings: list[AuditFinding] = []
         self._known_version_dirs: set[Path] = set()
-        self.rebuild_plans: dict[str, RebuildPlan] = {}
+        self.rebuild_plans: dict[str, RebuildPlan | FancardMonthPlan] = {}
 
     def run(self) -> AuditReport:
         self.findings = []
@@ -165,6 +185,8 @@ class ArchiveAuditor:
                 for spec in self._VERSION_SPECS:
                     if self._table_exists(db, str(spec["table"])):
                         self._audit_versions(db, spec)
+                if self._table_exists(db, "fancard_versions"):
+                    self._audit_fancard_months(db)
                 self._audit_timestamps(db)
         except sqlite3.Error as exc:
             self._add(
@@ -492,6 +514,96 @@ class ArchiveAuditor:
                         suggested_action="保留證據並以其他可靠副本復原。",
                     )
 
+    def _audit_fancard_months(self, db: sqlite3.Connection) -> None:
+        """Flag versions filed under an earlier month because the captured month's payment was not there yet."""
+        by_month: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        for row in db.execute(
+            "SELECT * FROM fancard_versions WHERE status='completed' "
+            "ORDER BY creator_id,target_month,version_number"
+        ):
+            by_month[(str(row["creator_id"]), str(row["target_month"]))].append(row)
+        misfiled: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        for (creator_id, month), versions in by_month.items():
+            for row in versions:
+                captured_month = fanbox_month(row["captured_at"])
+                if captured_month is None or captured_month <= month:
+                    continue
+                paid = self._fancard_paid_months(Path(str(row["local_path"])))
+                if paid is None or captured_month not in paid:
+                    misfiled[(creator_id, captured_month)].append(row)
+        for (creator_id, target_month), moved in misfiled.items():
+            subject_id = f"{creator_id}/{target_month}"
+            plan = self._fancard_month_plan(creator_id, target_month, moved, by_month)
+            if plan is not None:
+                self.rebuild_plans[f"fancard_month:fancard:{subject_id}"] = plan
+            labels = ", ".join(f"{row['target_month']}/v{int(row['version_number']):04d}" for row in moved)
+            self._add(
+                code="fancard_month", severity="warning", subject_type="fancard",
+                subject_id=subject_id, creator_id=creator_id,
+                issue="Fan Card 版本的擷取月份（日本時間）晚於歸屬月份，且當時的付款紀錄沒有擷取月份；疑似月初換卡面時被存到上個月。",
+                evidence=f"versions: {labels}; captured month (JST): {target_month}; payment for captured month: absent",
+                repairability="automatic" if plan is not None else "manual",
+                suggested_action=(
+                    f"以 repair-copy 在副本中把這些版本移到 {target_month}，依擷取時間重新編號；保留 captured_at、卡面與 fancard.json。"
+                    if plan is not None else
+                    "版本證據不完整或仍有其他錯誤；先處理其他稽核問題，再人工確認月份。"
+                ),
+            )
+
+    @staticmethod
+    def _fancard_paid_months(version_path: Path) -> set[str] | None:
+        try:
+            payload = json.loads((version_path / "fancard.json").read_text(encoding="utf-8"))
+            transactions = payload["body"].get("supportTransactions") or []
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return None
+        return {str(item.get("targetMonth")) for item in transactions if isinstance(item, dict)}
+
+    def _fancard_month_plan(
+        self, creator_id: str, target_month: str, moved: list[sqlite3.Row],
+        by_month: dict[tuple[str, str], list[sqlite3.Row]],
+    ) -> FancardMonthPlan | None:
+        moved_ids = {int(row["fancard_version_id"]) for row in moved}
+        sources = sorted({str(row["target_month"]) for row in moved})
+        for month in sources:
+            # Misfiled versions must be the newest ones of their source month.
+            flags = [int(row["fancard_version_id"]) in moved_ids for row in by_month[(creator_id, month)]]
+            if flags != sorted(flags):
+                return None
+        subjects = {f"{creator_id}/{month}" for month in (*sources, target_month)}
+        if any(
+            item.subject_type == "fancard" and item.subject_id in subjects and item.severity == "error"
+            for item in self.findings
+        ):
+            return None
+        entries: list[FancardMonthEntry] = []
+        for row in [*moved, *by_month.get((creator_id, target_month), [])]:
+            path = Path(str(row["local_path"])).resolve()
+            captured = parse_instant(row["captured_at"])
+            if (
+                captured is None or self._safe_path(path) == "[outside archive]"
+                or path.parent.parent.name != str(row["target_month"])
+                or not self._manifest_is_consistent(row)
+            ):
+                return None
+            entries.append(FancardMonthEntry(
+                row_id=int(row["fancard_version_id"]), source_month=str(row["target_month"]),
+                number=int(row["version_number"]), path=path, captured=captured,
+            ))
+        entries.sort(key=lambda entry: entry.captured)
+        if any(left.captured >= right.captured for left, right in zip(entries, entries[1:])):
+            return None
+        fancards_dirs = {entry.path.parent.parent.parent for entry in entries}
+        if len(fancards_dirs) != 1:
+            return None
+        fancards_dir = fancards_dirs.pop()
+        if fancards_dir.name != "fancards":
+            return None
+        return FancardMonthPlan(
+            creator_id=creator_id, target_month=target_month, fancards_dir=fancards_dir,
+            entries=entries, source_months=sources,
+        )
+
     def _audit_timestamps(self, db: sqlite3.Connection) -> None:
         for table, requested in self._TIMESTAMP_COLUMNS.items():
             if not self._table_exists(db, table):
@@ -679,6 +791,13 @@ class ArchiveAuditor:
                 "所有版本目錄連續且 manifest 檔案 SHA-256 全部一致",
                 "manifest captured_at 嚴格遞增",
                 "既有資料列皆指向其中一個版本目錄且 fingerprint 相符",
+            ]
+        elif finding.code == "fancard_month":
+            description = "把誤歸到上個月的 Fan Card 版本移到擷取月份，依擷取時間重新編號並重建 latest alias。"
+            prerequisites = [
+                "誤歸版本是來源月份最新的版本",
+                "所有相關版本的 manifest 與檔案 SHA-256 一致",
+                "合併後 captured_at 嚴格遞增",
             ]
         elif finding.code == "latest_pointer":
             description = "將 latest pointer 預覽為最大且已驗證的完成版本。"
@@ -997,13 +1116,16 @@ class ArchiveRepairer:
 
     def _apply(
         self, config: AppConfig, actions: list[AuditRepairAction],
-        rebuild_plans: dict[str, RebuildPlan],
+        rebuild_plans: dict[str, RebuildPlan | FancardMonthPlan],
     ) -> None:
         with closing(sqlite3.connect(config.storage.database)) as db, db:
             db.row_factory = sqlite3.Row
             for action in actions:
                 if action.finding_code == "version_rebuild":
                     self._apply_rebuild(db, rebuild_plans[action.action_id])
+                    continue
+                if action.finding_code == "fancard_month":
+                    self._apply_fancard_month(db, rebuild_plans[action.action_id])
                     continue
                 row = self._canonical_row(db, action)
                 if row is None or not ArchiveAuditor(config)._manifest_is_consistent(row):
@@ -1083,6 +1205,93 @@ class ArchiveRepairer:
             )
         elif plan.kind == "post":
             db.execute("UPDATE posts SET latest_version_id=? WHERE post_id=?", (latest_id, plan.owner_id))
+
+    @classmethod
+    def _apply_fancard_month(cls, db: sqlite3.Connection, plan: FancardMonthPlan) -> None:
+        """Rebuild the target month's versions directory in staging, then swap it in (copy only)."""
+        target_root = plan.fancards_dir / plan.target_month
+        target_root.mkdir(parents=True, exist_ok=True)
+        token = uuid.uuid4().hex
+        staging = target_root / f".versions.{token}.tmp"
+        staging.mkdir()
+        for number, entry in enumerate(plan.entries, start=1):
+            destination = staging / f"v{number:04d}"
+            shutil.copytree(entry.path, destination, copy_function=shutil.copy2)
+            if entry.source_month != plan.target_month or entry.number != number:
+                cls._relabel_fancard_version(destination, plan.target_month, number, entry)
+        versions = target_root / "versions"
+        retired = target_root / f".versions.{token}.old"
+        if versions.exists():
+            os.replace(versions, retired)
+        os.replace(staging, versions)
+        shutil.rmtree(retired, ignore_errors=True)
+        for entry in plan.entries:
+            if entry.source_month != plan.target_month:
+                shutil.rmtree(entry.path)
+
+        # Park rows on negative numbers first so UNIQUE(creator_id,target_month,version_number) never collides.
+        for entry in plan.entries:
+            db.execute(
+                "UPDATE fancard_versions SET version_number=? WHERE fancard_version_id=?",
+                (-entry.row_id, entry.row_id),
+            )
+        for number, entry in enumerate(plan.entries, start=1):
+            path = versions / f"v{number:04d}"
+            image = db.execute(
+                "SELECT image_path FROM fancard_versions WHERE fancard_version_id=?", (entry.row_id,),
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE fancard_versions SET target_month=?,version_number=?,local_path=?,image_path=? "
+                "WHERE fancard_version_id=?",
+                (plan.target_month, number, str(path),
+                 str(path / Path(str(image)).name) if image else image, entry.row_id),
+            )
+
+        for month in (*plan.source_months, plan.target_month):
+            month_root = plan.fancards_dir / month
+            latest = db.execute(
+                "SELECT local_path FROM fancard_versions WHERE creator_id=? AND target_month=? "
+                "AND status='completed' ORDER BY version_number DESC LIMIT 1",
+                (plan.creator_id, month),
+            ).fetchone()
+            if latest is not None:
+                cls._refresh_fancard_alias(month_root, Path(str(latest[0])))
+            elif not any((month_root / "versions").glob("*")):
+                shutil.rmtree(month_root)
+
+    @staticmethod
+    def _relabel_fancard_version(
+        version: Path, month: str, number: int, entry: FancardMonthEntry,
+    ) -> None:
+        manifest_path = version / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        markdown = version / "fancard.md"
+        if markdown.is_file():
+            text = markdown.read_bytes().decode("utf-8")
+            for pattern, replacement in (
+                (r"^target_month: [^\r\n]*", f"target_month: {json.dumps(month)}"),
+                (r"^archive_version: \d+(?=\r?$)", f"archive_version: {number}"),
+                (r"^# Fan Card — \d{4}-\d{2}(?=\r?$)", f"# Fan Card — {month}"),
+            ):
+                text = re.sub(pattern, replacement, text, count=1, flags=re.MULTILINE)
+            markdown.write_bytes(text.encode("utf-8"))
+            if isinstance(manifest.get("files"), dict) and "fancard.md" in manifest["files"]:
+                manifest["files"]["fancard.md"] = ArchiveAuditor._sha256(markdown)
+        if entry.source_month != month:
+            manifest["target_month_payment_seen"] = False
+        manifest.setdefault("relocated_from", {"target_month": entry.source_month, "version": entry.number})
+        manifest.update(version=number, target_month=month)
+        manifest_path.write_bytes((json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+    @staticmethod
+    def _refresh_fancard_alias(month_root: Path, version: Path) -> None:
+        for name in ("card.jpeg", "card.png"):
+            (month_root / name).unlink(missing_ok=True)
+        for source in version.iterdir():
+            if source.name in {"fancard.json", "fancard.md"} or source.name.startswith("card."):
+                temporary = month_root / f".{source.name}.{uuid.uuid4().hex}.tmp"
+                shutil.copy2(source, temporary)
+                os.replace(temporary, month_root / source.name)
 
     @staticmethod
     def _canonical_row(

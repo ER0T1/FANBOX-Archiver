@@ -89,7 +89,7 @@ def archive_fixture(tmp_path: Path) -> tuple[AppConfig, ArchiveService]:
         "supportTransactions": [{"id": "private-tx", "targetMonth": "2026-10",
                                    "paidAmount": 1000, "supporter": {"userId": "private-user"}}],
         "supporterCardImageUrl": "https://example.test/card.jpeg",
-    }}, b"jpeg-data", "image/jpeg")
+    }}, b"jpeg-data", "image/jpeg", captured_at="2026-10-15T03:00:00+00:00")
     return config, archive
 
 

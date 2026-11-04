@@ -27,6 +27,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.36-alpha 更新重點
+
+- 修正 Fan Card 月初歸屬錯誤：卡片月份改依擷取當下的日本時間（FANBOX 的月份邊界）決定，不再取最新付款紀錄的月份。創作者在月初換上新卡面、但本月付款尚未出現時備份，新卡面會存到本月，而不是成為上個月的新版本；manifest 會記錄 `target_month_payment_seen: false`，`fancard.md` 也會註明本月付款紀錄尚未出現。付款出現後再備份會成為同月的下一版本。此月份固定使用日本時間，不受顯示時區設定影響。
+- `audit` 新增「月份歸屬可疑」（`fancard_month`，warning）：Fan Card 版本的擷取月份（日本時間）晚於歸屬月份，且該版本的付款紀錄沒有擷取月份時列出。資料本身未遺失，因此不會讓 `verify` 失敗。
+- `repair-copy` 可在副本中修正上述版本：移到擷取月份並與該月既有版本依擷取時間重新編號，同步更新 manifest、`fancard.md` 的月份與版本號、資料庫、latest 別名與靜態網站；保留每個版本原本的 `captured_at`、卡面與 `fancard.json`，manifest 以 `relocated_from` 記錄原月份與版本。誤歸版本不是來源月份最新的版本、或任何相關版本的 manifest 雜湊不一致時，只列為需人工判讀。原封存不會被修改，確認副本後才由使用者自行取代。
+
 ## v1.3.35-alpha 更新重點
 
 - 完整版本更新歷史改存於 [CHANGELOG.md](CHANGELOG.md)（由新到舊，從 v1.0.0-alpha 起）；README 只保留最新三個版本的更新重點，加入新版本時移除第四版以下的區塊，CHANGELOG 不刪除任何版本。
@@ -41,15 +47,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 升級相容：設定檔已有 `schedule.timezone: Asia/Taipei` 且尚未設定全域時區時，會自動寫入 `display.timezone: Asia/Taipei`，升級前後顯示與排程時間不變；全新設定檔才預設「電腦系統」。無法辨識電腦時區名稱時，暫以目前的 UTC 時差顯示並在設定頁提示。
 - 所有時間一律 24 小時制 `HH:mm`：排程時間改為「時／分」下拉選單，不再使用會依 Windows 地區設定顯示「上午／下午」的原生時間欄位。
 - 新增相依套件 `tzdata`（Windows 沒有系統時區資料庫）與 `tzlocal`（把 Windows 時區名稱對應到 IANA），並打包進桌面版 sidecar。不處理日光節約切換當天的特殊情況（已知限制）。
-
-## v1.3.33-alpha 更新重點
-
-- 自動備份第二階段：Windows 桌面版會在「設定 → 備份 → 自動備份」儲存時建立或更新目前使用者的 Windows 工作排程器工作（`FANBOX Archiver\Scheduled Backup`），程式完全關閉時也能依排程執行。工作以背景方式啟動桌面程式（`--scheduled-backup`），不會開啟任何視窗；每次啟動桌面程式也會重新同步，升級或移動安裝位置後會自動修正。
-- 排程照設定頁選的時間執行（預設改為 00:00，Asia/Taipei）。背景檢查從該時間起每 15 分鐘一次，並在登入 Windows 時檢查；若排程因電腦關機、休眠、其他工作執行中或使用電池而沒有開始，會在 15 分鐘後再試，直到開始為止。已經開始但失敗的備份（例如登入失效）會記錄失敗原因，等下一次排程，不會每 15 分鐘重試。
-- 新增「電源與休眠」選項：不喚醒電腦且使用電池時也執行（預設）、不喚醒電腦且只在接上電源時執行（程式開著時也適用）、或在排程時間喚醒休眠中的電腦。喚醒模式另建一個只在下一次排程時間觸發的喚醒工作，不會每 15 分鐘喚醒電腦。
-- 桌面程式開著時由程式負責排程；背景檢查發現程式正在使用封存時會直接略過。若背景排程備份進行中才開啟程式，程式會顯示該工作並暫時鎖定新的備份、驗證、登入與設定變更，完成後自動解除，不會把背景工作誤判為中斷。兩者以封存資料夾內的 `.fanbox-archiver.lock` 互斥，避免同時寫入封存。
-- 解除安裝時會移除背景排程工作；封存與設定檔維持不變。
-- 新增 CLI `fanbox-archiver schedule-run --config <設定檔>`（背景排程入口，通常不需手動執行）。
 
 ## 安裝
 
@@ -163,7 +160,7 @@ fanbox-archiver versions 123456
 
 `audit` 是版本與時間契約的唯讀稽核，不會像修復工具一樣修改資料；發現問題時以結束碼 `1` 回報。`--json` 適合保存或比較結構化報告，其中的 `repair_plan` 仍是 dry-run 預覽，不會自動套用。現有 `verify` 則保留資源完整性驗證與重試狀態整合語意，兩者用途不同。
 
-`repair-copy` 不會修改原始封存，只接受尚不存在且位於原始封存外的 `--output` 目錄。它建立完整副本與修復前資料庫備份，並只套用 `audit` 已標示為 automatic 的 latest pointer／alias 動作；沒有 automatic 動作時不建立副本，其餘問題仍需人工判讀。確認副本內容前，不要用它取代原始封存。
+`repair-copy` 不會修改原始封存，只接受尚不存在且位於原始封存外的 `--output` 目錄。它建立完整副本與修復前資料庫備份，並只套用 `audit` 已標示為 automatic 的動作（latest pointer／alias、依 manifest 重建版本列、把誤歸上個月的 Fan Card 版本移回擷取月份）；沒有 automatic 動作時不建立副本，其餘問題仍需人工判讀。確認副本內容前，不要用它取代原始封存。
 
 舊指令遷移：`download <post>` 改用 `backup --post <post>`；`sync --creator <creator>` 改用 `backup --creator <creator>`；`sync --supporting` 改用不帶 selector 的 `backup`。
 
@@ -264,6 +261,8 @@ FANBOX/<creator-id>/fancards/<YYYY-MM>/
 ```
 
 卡面原圖（若有）、方案資訊、金額、支援月份與完整 API 資料都保存在本機。若創作者把密碼或提示寫在卡面或方案資訊中，備份仍會保留；同月資料變更時會建立下一版本。
+
+`<YYYY-MM>` 是擷取當下的日本時間月份（FANBOX 的月份邊界），不受顯示時區影響。月初創作者已換上新卡面、但本月付款紀錄尚未出現時，卡片仍歸到本月，manifest 會記錄 `target_month_payment_seen: false`；舊版曾把這類卡面存成上個月的新版本，可用 `audit` 找出（`fancard_month`）並以 `repair-copy` 在副本中修正。
 
 原圖依正文出現順序命名為 `001.png`、`002.jpg`；附件盡量保留原名，撞名時加入資源 ID。工具不會自動解壓縮附件，也不會因遠端投稿失效而刪除本機備份。
 

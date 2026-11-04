@@ -125,7 +125,7 @@ def test_clean_archive_and_manifest_database_timestamps_are_consistent(tmp_path:
     service.save_fancard({"body": {
         "plan": {"creatorId": "alice", "title": "Plan", "fee": 100},
         "supportTransactions": [{"targetMonth": "2026-11", "paidAmount": 100}],
-    }}, None, None)
+    }}, None, None, captured_at="2026-11-02T03:00:00+00:00")
 
     report = ArchiveAuditor(config).run()
 
@@ -385,11 +385,11 @@ def test_repair_copy_rebuilds_fancard_history(tmp_path: Path):
     config = configured(tmp_path)
     service = ArchiveService(config)
     service.db.record_supporting_creators([("alice", "Alice")])
-    for title in ("Gold", "Silver", "Gold"):
+    for day, title in enumerate(("Gold", "Silver", "Gold"), start=1):
         service.save_fancard({"body": {
             "plan": {"creatorId": "alice", "title": title, "fee": 100},
             "supportTransactions": [{"targetMonth": "2026-11", "paidAmount": 100}],
-        }}, b"jpeg-" + title.encode(), "image/jpeg")
+        }}, b"jpeg-" + title.encode(), "image/jpeg", captured_at=f"2026-11-{day:02d}T03:00:00+00:00")
     with service.db.connect() as db:
         ids = [row[0] for row in db.execute(
             "SELECT fancard_version_id FROM fancard_versions ORDER BY version_number"
@@ -474,3 +474,128 @@ def test_repair_report_marks_unrecoverable_history(tmp_path: Path):
     assert ("capture_order", "unknown/unrecoverable") in marked
     assert all(item["marking"] in {"unknown/unrecoverable", "needs manual review"} for item in report["remaining"])
     assert result.remaining_findings == len(report["remaining"])
+
+
+def misfiled_fancard_archive(tmp_path: Path, monkeypatch) -> AppConfig:
+    """Reproduce the pre-fix layout: a November card saved under October before the payment appeared."""
+    import fanbox_archiver.service as service_module
+
+    config = configured(tmp_path)
+    service = ArchiveService(config)
+    service.db.record_supporting_creators([("alice", "Alice"), ("bob", "Bob")])
+
+    def card(creator: str, image: str, *months: str) -> dict:
+        return {"body": {
+            "plan": {"creatorId": creator, "title": "Gold", "fee": 100},
+            "supportTransactions": [{"targetMonth": month, "paidAmount": 100} for month in months],
+            "supporterCardImageUrl": f"https://example.test/{creator}-{image}.jpeg",
+        }}
+
+    service.save_fancard(card("alice", "a", "2026-10"), b"card-a", "image/jpeg",
+                         captured_at="2026-10-26T03:00:00+00:00")
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "fanbox_month", lambda value: "2026-10")  # legacy: latest payment month
+        service.save_fancard(card("alice", "b", "2026-10"), b"card-b", "image/jpeg",
+                             captured_at="2026-11-01T06:17:00+00:00")
+    service.save_fancard(card("alice", "b", "2026-10", "2026-11"), b"card-b", "image/jpeg",
+                         captured_at="2026-11-02T14:02:00+00:00")
+    service.save_fancard(card("bob", "a", "2026-10"), b"bob-a", "image/jpeg",
+                         captured_at="2026-10-20T03:00:00+00:00")
+    service.save_fancard(card("bob", "b", "2026-10", "2026-11"), b"bob-b", "image/jpeg",
+                         captured_at="2026-11-03T03:00:00+00:00")
+    return config
+
+
+def archive_digest(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def test_audit_flags_fancard_saved_to_previous_month_only(tmp_path: Path, monkeypatch):
+    config = misfiled_fancard_archive(tmp_path, monkeypatch)
+
+    report = ArchiveAuditor(config).run()
+
+    assert [(item.code, item.subject_id, item.severity, item.repairability) for item in report.findings] == [
+        ("fancard_month", "alice/2026-11", "warning", "automatic"),
+    ]
+    assert "2026-10/v0002" in report.findings[0].evidence
+    assert [action.action_id for action in report.repair_plan] == ["fancard_month:fancard:alice/2026-11"]
+    assert ArchiveService(config).verify() == []  # the data is intact; only `audit` reports it
+
+
+def test_repair_copy_moves_misfiled_fancard_into_capture_month(tmp_path: Path, monkeypatch):
+    config = misfiled_fancard_archive(tmp_path, monkeypatch)
+    source = config.storage.output_dir
+    with sqlite3.connect(config.storage.database) as db:
+        before_rows = {
+            row[0]: row[1:] for row in db.execute(
+                "SELECT captured_at,image_sha256,content_fingerprint FROM fancard_versions "
+                "WHERE creator_id='alice'"
+            )
+        }
+    original = archive_digest(source)
+    destination = tmp_path / "repaired"
+
+    result = ArchiveRepairer(config).repair_copy(destination)
+
+    assert archive_digest(source) == original
+    assert result.remaining_findings == 0 and result.verify_issue_count == 0
+    copied = AppConfig(storage=StorageConfig(output_dir=destination, database=destination / "backup.db"))
+    assert ArchiveAuditor(copied).run().findings == []
+    with sqlite3.connect(destination / "backup.db") as db:
+        rows = db.execute(
+            "SELECT target_month,version_number,captured_at,image_sha256,content_fingerprint,"
+            "local_path,image_path FROM fancard_versions WHERE creator_id='alice' "
+            "ORDER BY target_month,version_number"
+        ).fetchall()
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("2026-10", 1, "2026-10-26T03:00:00+00:00"),
+        ("2026-11", 1, "2026-11-01T06:17:00+00:00"),
+        ("2026-11", 2, "2026-11-02T14:02:00+00:00"),
+    ]
+    assert {row[2]: (row[3], row[4]) for row in rows} == before_rows
+    for row in rows:
+        version = Path(row[5])
+        assert version.parent.parent.name == row[0] and version.name == f"v{row[1]:04d}"
+        assert Path(row[6]).is_file() and Path(row[6]).parent == version
+
+    alice = destination / "alice/fancards"
+    moved = alice / "2026-11/versions/v0001"
+    assert (moved / "card.jpeg").read_bytes() == b"card-b"
+    assert (moved / "fancard.json").read_bytes() == (
+        source / "alice/fancards/2026-10/versions/v0002/fancard.json"
+    ).read_bytes()
+    manifest = json.loads((moved / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["relocated_from"] == {"target_month": "2026-10", "version": 2}
+    assert (manifest["target_month"], manifest["version"]) == ("2026-11", 1)
+    markdown = (moved / "fancard.md").read_text(encoding="utf-8")
+    assert 'target_month: "2026-11"' in markdown and "archive_version: 1" in markdown
+    assert "# Fan Card — 2026-11" in markdown
+    assert not (alice / "2026-10/versions/v0002").exists()
+    assert (alice / "2026-10/card.jpeg").read_bytes() == b"card-a"
+    assert (alice / "2026-11/fancard.md").read_bytes() == (
+        alice / "2026-11/versions/v0002/fancard.md"
+    ).read_bytes()
+    site = destination / "_site/fancards/alice"
+    assert (site / "2026-11/v0002.html").is_file()
+    assert not (site / "2026-10/v0002.html").exists()
+    report = json.loads((destination / result.report).read_text(encoding="utf-8"))
+    assert [item["finding_code"] for item in report["applied"]] == ["fancard_month"]
+
+
+def test_fancard_month_repair_is_manual_when_misfiled_version_is_not_the_newest(tmp_path: Path, monkeypatch):
+    import fanbox_archiver.service as service_module
+
+    config = misfiled_fancard_archive(tmp_path, monkeypatch)
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "fanbox_month", lambda value: "2026-10")
+        ArchiveService(config).save_fancard({"body": {
+            "plan": {"creatorId": "alice", "title": "Gold", "fee": 100},
+            "supportTransactions": [{"targetMonth": "2026-10", "paidAmount": 100},
+                                    {"targetMonth": "2026-11", "paidAmount": 100}],
+        }}, b"card-c", "image/jpeg", captured_at="2026-11-03T03:00:00+00:00")
+
+    report = ArchiveAuditor(config).run()
+
+    assert [(item.code, item.repairability) for item in report.findings] == [("fancard_month", "manual")]
+    assert report.repair_plan == []

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import fanbox_archiver.application.backup as backup_module
@@ -7,6 +8,7 @@ from fanbox_archiver.application.events import CollectingEventSink
 from fanbox_archiver.client import Creator, PostSummary
 from fanbox_archiver.config import AppConfig, AuthConfig, StorageConfig
 from fanbox_archiver.models import ContentBlock, CreatorProfile, Post
+from fanbox_archiver.timestamps import fanbox_month
 
 
 class DryRunClient:
@@ -195,7 +197,10 @@ def test_fancard_only_mode_skips_posts_and_saves_card(monkeypatch, backup_config
 
     assert outcome.plan.selected == []
     assert any(event.kind == "fancard_finished" for event in sink.events)
-    row = backup_module.ArchiveService(config).db.latest_fancard_version("alice", "2026-10")
+    # The card month is the JST month of the capture, not the payment month in the response.
+    row = backup_module.ArchiveService(config).db.latest_fancard_version(
+        "alice", fanbox_month(datetime.now(UTC))
+    )
     assert row is not None
 
 
