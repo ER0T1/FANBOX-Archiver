@@ -202,3 +202,13 @@ def test_core_text_keeps_its_key_for_later_translation():
     assert error_text(RuntimeError(summary)) is summary and error_text(ValueError("x")) == "x"
     tree = localize({"items": [{"status": Text("creators.status_synced")}], "count": 3}, PSEUDO_LOCALE)
     assert tree["items"][0]["status"].startswith("［同步完成") and tree["count"] == 3
+
+
+def test_core_errors_keep_their_key():
+    from fanbox_archiver.client import FanboxClient
+    from fanbox_archiver.i18n import Text, error_text
+
+    with pytest.raises(ValueError) as raised:
+        FanboxClient.creator_id("")
+    assert isinstance(error_text(raised.value), Text)
+    assert error_text(raised.value).localized(PSEUDO_LOCALE).startswith("［Creator ID 不可為空")

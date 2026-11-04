@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 from typing import Any
 
 from .models import CreatorProfile, CreatorProfileItem
@@ -11,10 +13,10 @@ class CreatorProfileParser:
     def parse(self, payload: dict[str, Any], creator_id: str) -> CreatorProfile:
         body = payload.get("body")
         if not isinstance(body, dict):
-            raise ValueError("creator.get 回應缺少 body")
+            raise ValueError(Text("parser.profile_body_missing"))
         actual_id = str(body.get("creatorId") or creator_id).strip()
         if not actual_id:
-            raise ValueError("creator.get 回應缺少 creatorId")
+            raise ValueError(Text("parser.profile_creator_missing"))
         user = body.get("user") if isinstance(body.get("user"), dict) else {}
         items = body.get("profileItems")
         parse_warnings: list[str] = []

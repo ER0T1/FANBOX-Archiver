@@ -15,6 +15,8 @@ Failures (e.g. a file open in a browser) never stop the program; the next start 
 
 from __future__ import annotations
 
+from .i18n import Text
+
 import os
 import re
 import shutil
@@ -42,7 +44,7 @@ class LegacySiteCleanup:
 
     @property
     def notices(self) -> list[str]:
-        return [f"未刪除舊靜態網站項目「{name}」：{reason}" for name, reason in self.skipped + self.failed]
+        return [Text("legacy.not_removed", name=name, reason=reason) for name, reason in self.skipped + self.failed]
 
     def as_dict(self) -> dict:
         return {"removed": self.removed, "notices": self.notices}
@@ -104,31 +106,31 @@ def remove_legacy_static_site(root: Path) -> LegacySiteCleanup:
             continue
         name = path.name
         if _is_link(path):
-            result.skipped.append((name, "這是連結或 junction"))
+            result.skipped.append((name, Text("legacy.reason_link")))
         elif not path.is_dir() or not _inside(root, path):
-            result.skipped.append((name, "不是封存目錄內的資料夾"))
+            result.skipped.append((name, Text("legacy.reason_not_folder")))
         elif needs_build_file and not (path / "build.json").is_file():
-            result.skipped.append((name, "缺少 build.json，可能不是本程式產生的"))
+            result.skipped.append((name, Text("legacy.reason_no_build")))
         elif _contains_link(path):
-            result.skipped.append((name, "資料夾內含連結或 junction"))
+            result.skipped.append((name, Text("legacy.reason_contains_link")))
         else:
             try:
                 shutil.rmtree(path)
                 result.removed.append(f"{name}/")
             except OSError as exc:
-                result.failed.append((name, f"刪除失敗（{exc.__class__.__name__}），下次啟動再試"))
+                result.failed.append((name, Text("legacy.reason_delete_failed", error=exc.__class__.__name__)))
     index = root / INDEX_FILE
     if os.path.lexists(index):
         if _is_link(index):
-            result.skipped.append((INDEX_FILE, "這是連結"))
+            result.skipped.append((INDEX_FILE, Text("legacy.reason_file_link")))
         elif not _generated_index(index):
-            result.skipped.append((INDEX_FILE, "內容不是本程式產生的索引入口"))
+            result.skipped.append((INDEX_FILE, Text("legacy.reason_not_ours")))
         else:
             try:
                 index.unlink()
                 result.removed.append(INDEX_FILE)
             except OSError as exc:
-                result.failed.append((INDEX_FILE, f"刪除失敗（{exc.__class__.__name__}），下次啟動再試"))
+                result.failed.append((INDEX_FILE, Text("legacy.reason_delete_failed", error=exc.__class__.__name__)))
     if result.removed:
         log.info("已刪除舊版離線靜態網站：%s", "、".join(result.removed))
     for notice in result.notices:

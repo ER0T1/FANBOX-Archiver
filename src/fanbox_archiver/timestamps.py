@@ -81,7 +81,7 @@ def _offset_zone() -> DisplayZone:
 def resolve_timezone(setting: str, *, system_name: Callable[[], str | None] | None = None) -> DisplayZone:
     if setting != SYSTEM:
         if not is_valid_timezone(setting):
-            raise ValueError(f"不支援的時區：{setting}")
+            raise ValueError(Text("config.timezone_unsupported", value=setting))
         return DisplayZone(setting, setting, ZoneInfo(setting))
     name = (system_name or _system_timezone_name)()
     if name and is_valid_timezone(name):

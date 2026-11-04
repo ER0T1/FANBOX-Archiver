@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import os
 from http.cookiejar import CookieJar
 
@@ -24,7 +26,7 @@ def cookie_header(
     if browser:
         browser = browser.casefold()
         if browser not in SUPPORTED_BROWSERS:
-            raise ValueError(f"不支援的瀏覽器：{browser}")
+            raise ValueError(Text("credentials.unsupported_browser", browser=browser))
 
         import browser_cookie3
 
@@ -32,10 +34,7 @@ def cookie_header(
         try:
             jar: CookieJar = loader(domain_name="fanbox.cc")
         except Exception as exc:
-            raise RuntimeError(
-                f"無法從 {browser} 讀取 FANBOX 工作階段；請關閉瀏覽器後重試，"
-                "或使用 `fanbox-archiver auth login`"
-            ) from exc
+            raise RuntimeError(Text("credentials.read_failed", browser=browser)) from exc
         values: list[str] = []
         for item in jar:
             domain = item.domain.lstrip(".").casefold()
@@ -52,11 +51,11 @@ def cookie_header(
         return ""
     _reject_header_injection(header)
     if not header:
-        source = browser or "專用瀏覽器設定檔"
-        raise RuntimeError(f"{source} 中找不到 FANBOX Cookie；請執行 `fanbox-archiver auth login`")
+        source = browser or Text("credentials.profile_source")
+        raise RuntimeError(Text("credentials.cookie_missing", source=source))
     return header
 
 
 def _reject_header_injection(value: str) -> None:
     if "\r" in value or "\n" in value:
-        raise ValueError("Cookie header 含有非法換行字元")
+        raise ValueError(Text("credentials.header_newline"))

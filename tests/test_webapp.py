@@ -643,3 +643,21 @@ async def test_server_text_follows_the_request_language(tmp_path: Path):
         plain = await client.get("/api/creators/nobody", headers={"Accept-Language": "en-US"})
         assert plain.json()["detail"] == "找不到創作者"  # no English catalog yet: base language
         assert (await client.get("/api/schedule")).json()["summary"].startswith("每天")
+
+
+@pytest.mark.anyio
+async def test_settings_validation_errors_are_translated_without_pydantic_wrapping(tmp_path: Path):
+    from fanbox_archiver.config import AppConfig
+
+    config, _ = dynamic_archive(tmp_path)
+    config.display.language = "qps-ploc"  # type: ignore[assignment]
+    config_path = tmp_path / "config.yaml"
+    AppConfig.save_editable(config_path, config, {})
+    app = create_app(config, config_path=config_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        bad = await client.patch("/api/config", json={"display": {"timezone": "Mars/Base"}},
+                                 headers={"X-Fanbox-Token": app.state.session_token})
+        assert bad.status_code == 422
+        assert bad.json()["detail"].startswith("［不支援的時區：Mars/Base")
+        assert "validation error" not in bad.json()["detail"]

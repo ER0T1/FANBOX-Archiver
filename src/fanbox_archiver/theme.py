@@ -6,6 +6,8 @@ else (selectors, functions, URLs or free text) can reach the generated styleshee
 
 from __future__ import annotations
 
+from .i18n import Text
+
 import re
 
 # Order is the editor's order: the 8 base colours, then the 5 status colours.
@@ -37,10 +39,10 @@ def normalize_colors(values: dict[str, str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for key, value in values.items():
         if key not in THEME_COLOR_KEYS:
-            raise ValueError(f"不支援的顏色名稱：{key}")
+            raise ValueError(Text("config.color_unsupported", key=str(key)))
         color = str(value).strip().lower()
         if not HEX_COLOR.fullmatch(color):
-            raise ValueError(f"顏色必須是 #RRGGBB：{key}")
+            raise ValueError(Text("config.color_invalid", key=str(key)))
         result[key] = color
     return result
 

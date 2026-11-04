@@ -229,6 +229,28 @@ def decode_text(value: object) -> object:
     return value
 
 
+def encode_texts(value: object) -> object:
+    """``value`` (e.g. job event data) with every ``Text`` replaced by its stored form, for JSON."""
+    if isinstance(value, Text):
+        return value.encode()
+    if isinstance(value, dict):
+        return {name: encode_texts(item) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [encode_texts(item) for item in value]
+    return value
+
+
+def decode_texts(value: object) -> object:
+    """Undo :func:`encode_texts` after reading the JSON back."""
+    if isinstance(value, str):
+        return decode_text(value)
+    if isinstance(value, dict):
+        return {name: decode_texts(item) for name, item in value.items()}
+    if isinstance(value, list):
+        return [decode_texts(item) for item in value]
+    return value
+
+
 def error_text(exc: BaseException) -> str:
     """An exception's message, keeping it translatable when it was raised with ``Text``."""
     return exc.args[0] if len(exc.args) == 1 and isinstance(exc.args[0], Text) else str(exc)

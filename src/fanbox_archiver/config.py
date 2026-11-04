@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -99,7 +101,7 @@ class DisplayConfig(BaseModel):
 
         value = value.strip()
         if not is_valid_timezone(value):
-            raise ValueError(f"不支援的時區：{value}")
+            raise ValueError(Text("config.timezone_unsupported", value=str(value)))
         return value
 
 
@@ -123,7 +125,7 @@ class ScheduleConfig(BaseModel):
     def validate_time(cls, value: str) -> str:
         match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", value.strip())
         if not match:
-            raise ValueError("排程時間必須是 HH:MM（24 小時制）")
+            raise ValueError(Text("config.schedule_time_invalid"))
         return match.group(0)
 
 
@@ -137,7 +139,7 @@ class LoggingConfig(BaseModel):
     def validate_level(cls, value: str) -> str:
         value = value.upper()
         if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-            raise ValueError("不支援的日誌等級")
+            raise ValueError(Text("config.log_level_invalid"))
         return value
 
 
@@ -200,7 +202,7 @@ class AppConfig(BaseModel):
         merged = self.model_dump(mode="python")
         for section, values in patch.items():
             if section not in {"download", "sync", "backup_defaults", "schedule", "display", "markdown", "logging"}:
-                raise ValueError(f"不允許修改設定區段：{section}")
+                raise ValueError(Text("config.section_not_editable", section=str(section)))
             merged[section] = {**merged[section], **values}
         return type(self).model_validate(merged)
 
@@ -211,7 +213,7 @@ class AppConfig(BaseModel):
             with path.open("r", encoding="utf-8") as handle:
                 loaded = yaml.safe_load(handle) or {}
             if not isinstance(loaded, dict):
-                raise ValueError("設定檔根節點必須是物件")
+                raise ValueError(Text("config.root_not_mapping"))
             raw = loaded
         editable = config.editable_dict()
         for section in patch:

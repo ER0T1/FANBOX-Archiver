@@ -175,11 +175,11 @@ class AuthenticationJobManager:
         except BrowserLoginCancelled as exc:
             with self._lock:
                 self._job["status"] = "cancelled"
-                self._job["error"] = str(exc)
+                self._job["error"] = error_text(exc)
         except Exception as exc:
             with self._lock:
                 self._job["status"] = "failed"
-                self._job["error"] = str(exc)
+                self._job["error"] = error_text(exc)
         finally:
             with self._lock:
                 if self._job and self._job["job_id"] == job_id:

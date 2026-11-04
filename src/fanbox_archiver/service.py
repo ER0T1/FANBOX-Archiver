@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text, error_text
+
 import json
 import hashlib
 import os
@@ -216,9 +218,9 @@ class ArchiveService:
             try:
                 relative = path.relative_to(root)
             except ValueError as exc:
-                raise ValueError(f"Post 路徑超出備份根目錄：{path}") from exc
+                raise ValueError(Text("service.post_path_outside", path=str(path))) from exc
             if len(relative.parts) != 2 or "fancards" in {part.casefold() for part in relative.parts}:
-                raise ValueError(f"拒絕清除非標準 Post 路徑：{path}")
+                raise ValueError(Text("service.post_path_refused", path=str(path)))
             paths.append(path)
 
         staging = confined_path(root, Path(f".post-purge-{uuid.uuid4().hex}.tmp"))
@@ -483,10 +485,10 @@ class ArchiveService:
     ) -> tuple[str, Path]:
         body = payload.get("body")
         if not isinstance(body, dict):
-            raise ValueError("Fan Card 回應缺少 body")
+            raise ValueError(Text("service.fancard_body_missing"))
         plan = body.get("plan")
         if not isinstance(plan, dict) or not plan.get("creatorId"):
-            raise ValueError("Fan Card 回應缺少 plan.creatorId")
+            raise ValueError(Text("service.fancard_creator_missing"))
         creator_id = str(plan["creatorId"])
         transactions = body.get("supportTransactions") or []
         months = sorted({
@@ -494,13 +496,13 @@ class ArchiveService:
             if isinstance(item, dict) and re.fullmatch(r"\d{4}-\d{2}", str(item.get("targetMonth") or ""))
         })
         if not months:
-            raise ValueError("Fan Card 回應缺少有效 targetMonth")
+            raise ValueError(Text("service.fancard_month_missing"))
         # The API has no card-month field and this month's payment can appear days after the
         # creator switches cards, so the card belongs to the JST month it was captured in.
         captured_at = captured_at or now_iso()
         target_month = fanbox_month(captured_at)
         if target_month is None:
-            raise ValueError("Fan Card 擷取時間缺少 UTC offset")
+            raise ValueError(Text("service.fancard_offset_missing"))
         payment_seen = target_month in months
         encoded = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         fingerprint = hashlib.sha256(encoded).hexdigest()
@@ -759,10 +761,10 @@ class ArchiveService:
             current += 1
             publish(phase, total, item)
 
-        publish("scan", None, "掃描封存驗證項目")
+        publish("scan", None, Text("verify.item_scan"))
         if not root.exists():
-            issues.append(VerificationIssue(path=str(root), reason="備份目錄不存在"))
-            advance("consistency", 1, "備份目錄")
+            issues.append(VerificationIssue(path=str(root), reason=Text("verify.issue_root_missing")))
+            advance("consistency", 1, Text("verify.item_archive_root"))
             return issues
 
         post_snapshots: list[tuple[Path, Post | None, Exception | None]] = []
@@ -791,7 +793,7 @@ class ArchiveService:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                     files = manifest.get("files") or {}
                     if not isinstance(files, dict):
-                        raise ValueError("files 欄位格式錯誤")
+                        raise ValueError(Text("verify.files_field_invalid"))
                     manifest_snapshots.append((
                         manifest_path, phase, prefix, label, None, list(files.items()),
                     ))
@@ -800,7 +802,7 @@ class ArchiveService:
                         manifest_path, phase, prefix, label, exc, [],
                     ))
 
-        scan_manifests("*/*/versions/v*/manifest.json", "versions", "歷史版本")
+        scan_manifests("*/*/versions/v*/manifest.json", "versions", Text("verify.subject_versions"))
         scan_manifests("*/fancards/*/versions/v*/manifest.json", "fancards", "Fan Card")
         scan_manifests("*/profile/versions/v*/manifest.json", "profiles", "Profile")
         incomplete_versions = list(self.db.incomplete_versions())
@@ -812,58 +814,59 @@ class ArchiveService:
             + len(incomplete_versions) + len(missing_versions)
         )
         total += 1 if total else 0  # the version/time audit step
-        publish("scan", total, f"已建立 {total} 個驗證項目")
+        publish("scan", total, Text("verify.item_scanned", count=total))
 
         for metadata, post, parse_error in post_snapshots:
             fallback_id = metadata.parent.name
             if parse_error is not None or post is None:
                 issues.append(VerificationIssue(
-                    path=str(metadata), reason=f"post.json 無法解析：{parse_error}",
+                    path=str(metadata), reason=Text("verify.issue_post_json_unreadable", error=error_text(parse_error)),
                 ))
                 advance("posts", total, f"Post {fallback_id}")
                 continue
-            advance("posts", total, f"Post {post.post_id} 中繼資料")
+            advance("posts", total, Text("verify.item_post_metadata", post_id=post.post_id))
             for asset in [*post.assets, *([post.cover] if post.cover else [])]:
                 if not asset.local_path or asset.status != AssetStatus.COMPLETED:
                     issues.append(VerificationIssue(
                         path=str(metadata.parent / (asset.local_path or asset.asset_id)),
-                        reason=f"資源尚未完成（{asset.status.value}）",
+                        reason=Text("verify.issue_asset_incomplete", status=asset.status.value),
                         post_id=post.post_id,
                         asset_id=asset.asset_id,
                     ))
-                    advance("posts", total, f"Post {post.post_id} 資源")
+                    advance("posts", total, Text("verify.item_post_assets", post_id=post.post_id))
                     continue
                 try:
                     path = confined_path(metadata.parent, Path(asset.local_path))
                 except ValueError:
                     issues.append(VerificationIssue(
-                        path=asset.local_path, reason="資源路徑超出投稿目錄",
+                        path=asset.local_path, reason=Text("verify.issue_asset_outside"),
                         post_id=post.post_id, asset_id=asset.asset_id,
                     ))
                     asset.status = AssetStatus.CORRUPT
                     self.db.set_asset(post.post_id, asset)
                     self.db.set_post_status(post.post_id, PostStatus.PARTIAL, "完整性驗證失敗")
-                    advance("posts", total, f"Post {post.post_id} 資源")
+                    advance("posts", total, Text("verify.item_post_assets", post_id=post.post_id))
                     continue
                 if not path.exists():
                     asset.status = AssetStatus.MISSING
-                    issues.append(VerificationIssue(path=str(path), reason="檔案遺失", post_id=post.post_id, asset_id=asset.asset_id))
+                    issues.append(VerificationIssue(path=str(path), reason=Text("verify.issue_file_missing"), post_id=post.post_id, asset_id=asset.asset_id))
                 elif asset.size is not None and path.stat().st_size != asset.size:
                     asset.status = AssetStatus.CORRUPT
-                    issues.append(VerificationIssue(path=str(path), reason="檔案大小不符", post_id=post.post_id, asset_id=asset.asset_id))
+                    issues.append(VerificationIssue(path=str(path), reason=Text("verify.issue_size_mismatch"), post_id=post.post_id, asset_id=asset.asset_id))
                 elif asset.sha256 and sha256_file(path) != asset.sha256:
                     asset.status = AssetStatus.CORRUPT
-                    issues.append(VerificationIssue(path=str(path), reason="SHA-256 不符", post_id=post.post_id, asset_id=asset.asset_id))
+                    issues.append(VerificationIssue(path=str(path), reason=Text("verify.issue_sha_mismatch"), post_id=post.post_id, asset_id=asset.asset_id))
                 if asset.status in {AssetStatus.MISSING, AssetStatus.CORRUPT}:
                     self.db.set_asset(post.post_id, asset)
                     self.db.set_post_status(post.post_id, PostStatus.PARTIAL, "完整性驗證失敗")
-                advance("posts", total, f"Post {post.post_id} 資源")
+                advance("posts", total, Text("verify.item_post_assets", post_id=post.post_id))
 
         for manifest_path, phase, prefix, label, parse_error, files in manifest_snapshots:
             if parse_error is not None:
-                reason_prefix = "manifest.json" if phase == "versions" else f"{prefix} manifest"
+                subject = "manifest.json" if phase == "versions" else Text("verify.subject_manifest", prefix=prefix)
                 issues.append(VerificationIssue(
-                    path=str(manifest_path), reason=f"{reason_prefix} 無法驗證：{parse_error}",
+                    path=str(manifest_path),
+                    reason=Text("verify.issue_manifest_unverifiable", subject=subject, error=error_text(parse_error)),
                 ))
                 advance(phase, total, label)
                 continue
@@ -872,34 +875,35 @@ class ArchiveService:
                 try:
                     path = confined_path(manifest_path.parent, Path(str(relative)))
                     if not path.exists():
-                        issues.append(VerificationIssue(path=str(path), reason=f"{prefix} 檔案遺失"))
+                        issues.append(VerificationIssue(path=str(path), reason=Text("verify.issue_manifest_file_missing", prefix=prefix)))
                     elif sha256_file(path) != str(expected):
-                        issues.append(VerificationIssue(path=str(path), reason=f"{prefix} SHA-256 不符"))
+                        issues.append(VerificationIssue(path=str(path), reason=Text("verify.issue_manifest_sha_mismatch", prefix=prefix)))
                 except (OSError, ValueError) as exc:
                     issues.append(VerificationIssue(
-                        path=str(manifest_path), reason=f"{prefix} manifest 無法驗證：{exc}",
+                        path=str(manifest_path), reason=Text("verify.issue_manifest_unverifiable",
+                            subject=Text("verify.subject_manifest", prefix=prefix), error=error_text(exc)),
                     ))
                 advance(phase, total, label)
 
         for row in incomplete_versions:
             issues.append(VerificationIssue(
                 path=str(row["local_path"]),
-                reason=f"版本尚未完成（{row['status']}）",
+                reason=Text("verify.issue_version_incomplete", status=str(row["status"])),
                 post_id=str(row["post_id"]),
             ))
-            advance("consistency", total, f"Post {row['post_id']} 一致性")
+            advance("consistency", total, Text("verify.item_post_consistency", post_id=str(row["post_id"])))
         for row in missing_versions:
             issues.append(VerificationIssue(
                 path=str(row["local_path"] or self.config.storage.database),
-                reason="資料庫標示為 completed，但缺少完成版本紀錄",
+                reason=Text("verify.issue_completed_without_version"),
                 post_id=str(row["post_id"]),
             ))
-            advance("consistency", total, f"Post {row['post_id']} 一致性")
+            advance("consistency", total, Text("verify.item_post_consistency", post_id=str(row["post_id"])))
         issues.extend(self._history_issues())
         if total == 0:
-            publish("scan", 0, "封存中沒有需要驗證的項目")
+            publish("scan", 0, Text("verify.item_nothing"))
         else:
-            advance("history", total, "版本與時間稽核")
+            advance("history", total, Text("verify.item_history"))
         return issues
 
     def _history_issues(self) -> list[VerificationIssue]:
@@ -910,8 +914,8 @@ class ArchiveService:
         return [
             VerificationIssue(
                 path=f"{finding.subject_type}/{finding.subject_id}",
-                reason=f"版本／時間稽核（{finding.code}）：{finding.issue}"
-                + ("可執行 repair-copy 在副本修復。" if finding.repairability == "automatic" else ""),
+                reason=Text("verify.issue_history_repairable" if finding.repairability == "automatic"
+                            else "verify.issue_history", code=finding.code, issue=finding.issue),
                 post_id=finding.subject_id if finding.subject_type == "post" else None,
             )
             for finding in report.findings if finding.severity == "error"

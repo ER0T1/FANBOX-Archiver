@@ -12,7 +12,7 @@ from typing import Any, Callable
 from ..archive_lock import ArchiveLock
 from ..config import AppConfig
 from ..database import Database
-from ..i18n import Text, decode_text, error_text
+from ..i18n import Text, decode_text, decode_texts, encode_texts, error_text
 from ..service import ArchiveService
 from .backup import BackupRequest, BackupUseCase
 from .events import BackupCancelled, BackupEvent, CancellationToken, EventSink
@@ -223,7 +223,8 @@ class BackupJobManager:
                         job_id, BackupEvent("verify_progress", data),
                     )
                 )
-                issue_values = [issue.model_dump(mode="json") for issue in issues[:500]]
+                # Python mode keeps each reason as ``Text`` so the reader can show it in its language.
+                issue_values = [issue.model_dump() for issue in issues[:500]]
                 self._record_event(job_id, BackupEvent(
                     "verify_finished", {"issue_count": len(issues), "shown": len(issue_values)},
                 ))
@@ -271,7 +272,7 @@ class BackupJobManager:
                         self.db.record_web_job_event(
                             job_id, "verify_progress", progress["timestamp"],
                             json.dumps(
-                                progress["data"], ensure_ascii=False, sort_keys=True,
+                                encode_texts(progress["data"]), ensure_ascii=False, sort_keys=True,
                             ),
                             coalesce_key="verify-progress",
                         )
@@ -331,7 +332,7 @@ class BackupJobManager:
                 self._progress_persisted_at[job_id] = current
             self.db.record_web_job_event(
                 job_id, event.kind, event.timestamp,
-                json.dumps(event.data, ensure_ascii=False, sort_keys=True),
+                json.dumps(encode_texts(event.data), ensure_ascii=False, sort_keys=True),
                 coalesce_key=coalesce_key,
             )
             self._persist_job(job)
@@ -347,7 +348,7 @@ class BackupJobManager:
             "finished_at": row["finished_at"],
             "updated_at": str(row["updated_at"]),
             "error": decode_text(row["error"]),
-            "result": json.loads(str(row["result_json"])) if row["result_json"] else None,
+            "result": decode_texts(json.loads(str(row["result_json"]))) if row["result_json"] else None,
             "event_count": int(row["event_count"]),
         }
         if include_events:
@@ -355,7 +356,7 @@ class BackupJobManager:
                 {
                     "kind": str(event["kind"]),
                     "timestamp": str(event["timestamp"]),
-                    "data": json.loads(str(event["data_json"])),
+                    "data": decode_texts(json.loads(str(event["data_json"]))),
                 }
                 for event in self.db.web_job_event_rows(value["job_id"])
             ]
@@ -370,7 +371,7 @@ class BackupJobManager:
             finished_at=job.finished_at,
             error=job.error.encode() if isinstance(job.error, Text) else job.error,
             result_json=(
-                json.dumps(job.result, ensure_ascii=False, sort_keys=True)
+                json.dumps(encode_texts(job.result), ensure_ascii=False, sort_keys=True)
                 if job.result is not None else None
             ),
         )

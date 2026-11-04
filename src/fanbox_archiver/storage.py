@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import json
 import os
 import tempfile
@@ -87,7 +89,7 @@ class BackupStorage:
 
     def absolute_asset_path(self, post: Post, asset: Asset, *, base: Path | None = None) -> Path:
         if not asset.local_path:
-            raise ValueError("資源尚未指派本機路徑")
+            raise ValueError(Text("storage.asset_path_missing"))
         return confined_path(base or self.post_dir(post), Path(asset.local_path))
 
     def assign_asset_paths(self, post: Post) -> None:

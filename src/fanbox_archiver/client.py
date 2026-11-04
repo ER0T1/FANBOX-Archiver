@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import os
 import time
 from dataclasses import dataclass
@@ -81,7 +83,7 @@ class FanboxClient:
         validate_url(url)
         path = urlparse(url).path.rstrip("/").split("/")
         if len(path) < 2 or path[-2] != "posts" or not path[-1].isdigit():
-            raise ValueError("投稿 URL 格式錯誤")
+            raise ValueError(Text("client.post_url_invalid"))
         return path[-1]
 
     def _get(self, path_or_url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -93,17 +95,17 @@ class FanboxClient:
         self._last_request = time.monotonic()
         response = self.http.get(url, params=params)
         if response.status_code == 401:
-            raise AuthenticationError("登入狀態已失效，請更新 FANBOX_COOKIE")
+            raise AuthenticationError(Text("client.auth_expired_cookie"))
         if response.status_code == 403:
-            raise AccessRestrictedError("目前帳號無權存取此內容")
+            raise AccessRestrictedError(Text("client.access_restricted"))
         if response.status_code == 404:
-            raise RemoteUnavailableError("遠端投稿不存在或目前無法取得")
+            raise RemoteUnavailableError(Text("client.remote_unavailable"))
         if response.status_code == 429:
-            raise RateLimitedError("FANBOX 回傳 429；已停止，請稍後再試")
+            raise RateLimitedError(Text("client.rate_limited"))
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict):
-            raise ValueError("API 回應格式不正確")
+            raise ValueError(Text("client.bad_response"))
         return payload
 
     def post(self, url_or_id: str):
@@ -149,10 +151,10 @@ class FanboxClient:
         """Normalize a Creator ID, creator URL, or post URL."""
         value = value.strip()
         if not value:
-            raise ValueError("Creator ID 不可為空")
+            raise ValueError(Text("client.creator_id_empty"))
         if "://" not in value:
             if any(char in value for char in "/?#@"):
-                raise ValueError("Creator ID 格式錯誤")
+                raise ValueError(Text("client.creator_id_invalid"))
             return value
         validate_url(value)
         parsed = urlparse(value)
@@ -160,13 +162,13 @@ class FanboxClient:
         if hostname.endswith(".fanbox.cc") and hostname not in {"www.fanbox.cc", "api.fanbox.cc"}:
             creator_id = hostname.removesuffix(".fanbox.cc")
             if not creator_id or parsed.path.rstrip("/"):
-                raise ValueError("創作者 URL 格式錯誤")
+                raise ValueError(Text("client.creator_url_invalid"))
             return creator_id
         parts = [part for part in parsed.path.split("/") if part]
         if not parts or not parts[0].startswith("@") or len(parts[0]) == 1:
-            raise ValueError("創作者 URL 格式錯誤")
+            raise ValueError(Text("client.creator_url_invalid"))
         if len(parts) > 1 and not (len(parts) == 3 and parts[1] == "posts" and parts[2].isdigit()):
-            raise ValueError("創作者 URL 格式錯誤")
+            raise ValueError(Text("client.creator_url_invalid"))
         return parts[0][1:]
 
     def creator_post_pages(self, creator_id: str) -> list[str]:

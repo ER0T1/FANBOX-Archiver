@@ -43,7 +43,8 @@ from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, set_display_timezone
 from .i18n import (
-    BASE_LOCALE, LANGUAGE_SETTINGS, Translator, localize, resolve_locale, system_locales, translate,
+    BASE_LOCALE, LANGUAGE_SETTINGS, Translator, error_text, localize, resolve_locale, system_locales,
+    translate,
 )
 
 
@@ -200,7 +201,7 @@ def load_config(path: Path) -> AppConfig:
 
 def handle_remote_error(exc: Exception) -> None:
     get_logger().error("%s: %s", type(exc).__name__, exc)
-    console.print(f"[red]{exc}[/red]")
+    console.print(f"[red]{shown(error_text(exc))}[/red]")
     raise typer.Exit(1) from exc
 
 
@@ -331,7 +332,7 @@ def import_html(
             ArchiveService(settings), post, download_assets=download_assets, force=force
         )
     except Exception as exc:
-        console.print(f"[red]{tr('cli.import.failed')}[/red]{exc}")
+        console.print(f"[red]{tr('cli.import.failed')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(1) from exc
     console.print(f"[green]{tr('cli.import.done')}[/green] {post.post_id}：{post.title}（{status.value}）")
 
@@ -468,7 +469,7 @@ def backup(
             include_fancard=fancard if creators else True,
         )
     except ValueError as exc:
-        console.print(f"[red]{tr('cli.backup.bad_arguments')}[/red]{exc}")
+        console.print(f"[red]{tr('cli.backup.bad_arguments')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(2) from exc
     except Exception as exc:
         handle_remote_error(exc)
@@ -483,7 +484,7 @@ def verify(
         console.print(f"[green]{tr('cli.verify.passed')}[/green]")
         return
     for issue in issues:
-        console.print(f"[red]{issue.reason}[/red] {issue.path}")
+        console.print(f"[red]{shown(issue.reason)}[/red] {issue.path}")
     raise typer.Exit(1)
 
 
@@ -569,7 +570,7 @@ def repair_copy(
         _use_translator(settings)
         result = ArchiveRepairer(settings).repair_copy(output)
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]{tr('cli.repair.failed')}[/red]{exc}")
+        console.print(f"[red]{tr('cli.repair.failed')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(1) from exc
     console.print(f"[green]{tr('cli.repair.created')}[/green]" + tr(
         "cli.repair.summary", applied=result.applied_actions, remaining=result.remaining_findings,
@@ -618,7 +619,7 @@ def serve(
     except KeyboardInterrupt:
         console.print("\n" + tr("cli.serve.stopped"))
     except Exception as exc:
-        console.print(f"[red]{tr('cli.serve.failed')}[/red]{exc}")
+        console.print(f"[red]{tr('cli.serve.failed')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(1) from exc
 
 
@@ -635,7 +636,7 @@ def clear_posts(
         cleanup_owned_archive(settings)
         count = ArchiveService(settings).clear_posts()
     except Exception as exc:
-        console.print(f"[red]{tr('cli.clear.failed')}[/red]{exc}")
+        console.print(f"[red]{tr('cli.clear.failed')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(1) from exc
     console.print(f"[green]{tr('cli.clear.done', count=count)}[/green]{tr('cli.clear.kept')}")
 
@@ -756,7 +757,7 @@ def retry(
             status = service.save(post, download_assets=True, force=True)
             console.print(f"{post_id}/v{int(row['version_number']):04d}: {status.value}")
         except Exception as exc:
-            console.print(f"[red]{post_id}/v{int(row['version_number']):04d}: {exc}[/red]")
+            console.print(f"[red]{post_id}/v{int(row['version_number']):04d}: {shown(error_text(exc))}[/red]")
 
 
 @app.command(help=_h("cli.help.cmd_status"))

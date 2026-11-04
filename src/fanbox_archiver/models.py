@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import hashlib
 import json
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, SkipValidation
 
 
 class PostStatus(StrEnum):
@@ -124,7 +124,8 @@ class CreatorProfile(BaseModel):
 
 class VerificationIssue(BaseModel):
     path: str
-    reason: str
+    # Not validated, so a translatable ``i18n.Text`` reason stays one.
+    reason: Annotated[str, SkipValidation]
     post_id: str | None = None
     asset_id: str | None = None
 

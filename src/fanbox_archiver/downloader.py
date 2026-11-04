@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text, error_text
+
 import hashlib
 import os
 import time
@@ -79,7 +81,7 @@ class AssetDownloader:
                     time.sleep(min(2 ** attempt, 10))
         asset.status = AssetStatus.FAILED
         asset.error = str(error)
-        raise DownloadError(str(error))
+        raise DownloadError(error_text(error))
 
     def _wait(self) -> None:
         remaining = self.interval - (time.monotonic() - self._last_request)
@@ -89,7 +91,7 @@ class AssetDownloader:
 
     def _stream(self, asset: Asset, part: Path, url: str | None = None, redirects: int = 0) -> None:
         if redirects > 3:
-            raise DownloadError("下載重新導向次數過多")
+            raise DownloadError(Text("download.too_many_redirects"))
         request_url = url or asset.url
         validate_url(request_url, download=True)
         existing = part.stat().st_size if self.resume and part.exists() else 0
@@ -101,9 +103,9 @@ class AssetDownloader:
                 headers["If-Range"] = validator
         with self.http.stream("GET", request_url, headers=headers) as response:
             if response.status_code in {401, 403}:
-                raise DownloadAuthorizationError(f"HTTP {response.status_code}：無權下載資源")
+                raise DownloadAuthorizationError(Text("download.unauthorized", status=str(response.status_code)))
             if response.status_code == 429:
-                raise DownloadRateLimitedError("HTTP 429：已停止本次備份，請稍後再試")
+                raise DownloadRateLimitedError(Text("download.rate_limited"))
             if response.status_code in {301, 302, 303, 307, 308}:
                 location = urljoin(request_url, response.headers.get("location", ""))
                 validate_url(location, download=True)
@@ -113,7 +115,7 @@ class AssetDownloader:
             if append:
                 content_range = response.headers.get("content-range", "")
                 if not content_range.startswith(f"bytes {existing}-"):
-                    raise DownloadError("伺服器回傳的續傳範圍不正確")
+                    raise DownloadError(Text("download.bad_range"))
             mode = "ab" if append else "wb"
             if not append:
                 existing = 0
@@ -121,7 +123,7 @@ class AssetDownloader:
             asset.last_modified = response.headers.get("last-modified")
             content_type = response.headers.get("content-type", "").lower()
             if "text/html" in content_type:
-                raise DownloadError("下載結果是 HTML 錯誤頁")
+                raise DownloadError(Text("download.html_error_page"))
             written = 0
             length = response.headers.get("content-length")
             total = (existing + int(length)) if length and append else (int(length) if length else None)
@@ -135,16 +137,16 @@ class AssetDownloader:
                 handle.flush()
                 os.fsync(handle.fileno())
             if length and written != int(length):
-                raise DownloadError(f"Content-Length 不符：預期 {length}，收到 {written}")
+                raise DownloadError(Text("download.length_mismatch", expected=length, received=written))
 
     @staticmethod
     def _validate(asset: Asset, path: Path) -> None:
         if not path.exists() or path.stat().st_size == 0:
-            raise DownloadError("下載檔案為空")
+            raise DownloadError(Text("download.empty"))
         with path.open("rb") as handle:
             prefix = handle.read(256).lstrip().lower()
         if prefix.startswith(b"<!doctype html") or prefix.startswith(b"<html"):
-            raise DownloadError("下載內容疑似 HTML 錯誤頁")
+            raise DownloadError(Text("download.looks_like_html"))
         if asset.type in {"image", "cover"}:
             try:
                 with Image.open(path) as image:
@@ -152,12 +154,12 @@ class AssetDownloader:
                 with Image.open(path) as image:
                     width, height = image.size
                 if asset.width and width != asset.width:
-                    raise DownloadError(f"圖片寬度不符：預期 {asset.width}，收到 {width}")
+                    raise DownloadError(Text("download.width_mismatch", expected=asset.width, received=width))
                 if asset.height and height != asset.height:
-                    raise DownloadError(f"圖片高度不符：預期 {asset.height}，收到 {height}")
+                    raise DownloadError(Text("download.height_mismatch", expected=asset.height, received=height))
                 asset.width, asset.height = width, height
             except UnidentifiedImageError as exc:
-                raise DownloadError("不是有效圖片") from exc
+                raise DownloadError(Text("download.not_an_image")) from exc
 
 
 def sha256_file(path: Path) -> str:

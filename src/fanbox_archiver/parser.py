@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import hashlib
 import json
 import re
@@ -163,7 +165,7 @@ class HtmlPostParser:
             match = re.search(r"/images/post/(\d+)/", str(anchors[0]["href"]))
             if match:
                 return match[1]
-        raise ValueError("無法從 HTML 判斷投稿 ID")
+        raise ValueError(Text("parser.post_id_unknown"))
 
     @staticmethod
     def _published(soup: BeautifulSoup) -> datetime | None:
@@ -269,7 +271,7 @@ class StructuredPostParser:
         if isinstance(body, dict) and isinstance(body.get("post"), dict):
             body = body["post"]
         if not isinstance(body, dict) or not body.get("id"):
-            raise ValueError("投稿資料缺少 body.id")
+            raise ValueError(Text("parser.body_id_missing"))
         post_type = str(body.get("type") or "unknown")
         assets: list[Asset] = []
         blocks: list[ContentBlock] = []
@@ -437,7 +439,7 @@ class StructuredPostParser:
     def _asset(item: dict[str, Any], kind: str, fallback: str) -> Asset:
         url = item.get("originalUrl") or item.get("url")
         if not url:
-            raise ValueError(f"資源 {fallback} 缺少原始下載 URL")
+            raise ValueError(Text("parser.asset_url_missing", asset=fallback))
         extension = str(item.get("extension") or "").lstrip(".")
         name = item.get("name")
         if name and extension and not str(name).casefold().endswith(f".{extension.casefold()}"):

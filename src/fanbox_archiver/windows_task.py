@@ -24,7 +24,7 @@ from typing import Any, Callable
 from xml.sax.saxutils import escape
 
 from .config import AppConfig, ScheduleConfig
-from .i18n import Text, error_text
+from .i18n import Text, error_text, resolve_locale, system_locales, translate
 from .schedule import next_run
 from .timestamps import display_zone
 
@@ -116,13 +116,13 @@ class TaskScheduler:
             path.write_text(xml, encoding="utf-16")
             result = self.runner(["schtasks", "/Create", "/TN", name, "/XML", str(path), "/F"])
         if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout or "schtasks 失敗").strip())
+            raise RuntimeError((result.stderr or result.stdout or "").strip() or Text("schedule.schtasks_failed"))
 
     def delete(self, name: str) -> None:
         if self.exists(name):
             result = self.runner(["schtasks", "/Delete", "/TN", name, "/F"])
             if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout or "schtasks 失敗").strip())
+                raise RuntimeError((result.stderr or result.stdout or "").strip() or Text("schedule.schtasks_failed"))
 
     def exists(self, name: str) -> bool:
         return self.runner(["schtasks", "/Query", "/TN", name]).returncode == 0
@@ -130,6 +130,11 @@ class TaskScheduler:
     def query_xml(self, name: str) -> str | None:
         result = self.runner(["schtasks", "/Query", "/TN", name, "/XML"])
         return result.stdout if result.returncode == 0 else None
+
+
+def _task_text(config: AppConfig, key: str) -> str:
+    # Shown in Windows Task Scheduler, outside any browser: the configured language, else the system's.
+    return translate(key, resolve_locale(config.display.language, system_locales()))
 
 
 def refresh_wake_task(
@@ -143,7 +148,7 @@ def refresh_wake_task(
     tasks.create(tasks.wake_task, task_xml(
         command=Path(desktop_exe), arguments=f'--scheduled-backup --config "{Path(config_path).resolve()}"',
         start=next_run(config.schedule, now), user=user or current_user(), schedule=config.schedule,
-        repeat=False, wake=True, description="FANBOX Archiver 在下一次自動備份時間喚醒電腦。由 FANBOX Archiver 管理。",
+        repeat=False, wake=True, description=_task_text(config, "schedule.task_wake"),
     ))
 
 
@@ -167,13 +172,13 @@ def sync_background_schedule(
         tasks.create(tasks.check_task, task_xml(
             command=command, arguments=arguments, start=check_start(schedule, now), user=user,
             schedule=schedule, repeat=True, wake=False,
-            description="FANBOX Archiver 自動備份背景檢查（每 15 分鐘與登入時）。由 FANBOX Archiver 管理，請在程式的設定頁修改。",
+            description=_task_text(config, "schedule.task_check"),
         ))
         if schedule.power == "wake":
             tasks.create(tasks.wake_task, task_xml(
                 command=command, arguments=arguments, start=next_run(schedule, now), user=user,
                 schedule=schedule, repeat=False, wake=True,
-                description="FANBOX Archiver 在下一次自動備份時間喚醒電腦。由 FANBOX Archiver 管理。",
+                description=_task_text(config, "schedule.task_wake"),
             ))
         else:
             tasks.delete(tasks.wake_task)

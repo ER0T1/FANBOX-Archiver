@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text, error_text
+
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -89,14 +91,14 @@ class SyncResult:
 
 class SyncStopped(RuntimeError):
     def __init__(self, result: SyncResult, reason: Exception):
-        super().__init__(str(reason))
+        super().__init__(error_text(reason))
         self.result = result
         self.reason = reason
 
 
 class SyncCancelled(RuntimeError):
     def __init__(self, result: SyncResult):
-        super().__init__("同步已取消")
+        super().__init__(Text("sync.cancelled"))
         self.result = result
 
 
@@ -124,7 +126,7 @@ class SyncService:
         by_id = {item.creator_id: item for item in creators}
         missing = [creator_id for creator_id in requested_ids if creator_id not in by_id]
         if missing:
-            raise ValueError(f"{', '.join(missing)} 不在目前支援清單中或帳號無權存取")
+            raise ValueError(Text("sync.creators_not_supported", creators=", ".join(missing)))
         return [by_id[creator_id] for creator_id in requested_ids]
 
     def plan_posts(
@@ -289,17 +291,17 @@ class SyncService:
                     on_item(item, status, False)
             except Exception as exc:
                 result.failure += 1
-                self.db.update_creator_sync(item.creator_id, error=str(exc))
+                self.db.update_creator_sync(item.creator_id, error=error_text(exc))
                 if on_item:
                     on_item(item, exc, False)
                 if isinstance(exc, AccessRestrictedError):
                     self.db.record_post_access_issue(
-                        item.creator_id, item.summary, PostStatus.RESTRICTED, str(exc)
+                        item.creator_id, item.summary, PostStatus.RESTRICTED, error_text(exc)
                     )
                     continue
                 if isinstance(exc, RemoteUnavailableError):
                     self.db.record_post_access_issue(
-                        item.creator_id, item.summary, PostStatus.UNAVAILABLE, str(exc)
+                        item.creator_id, item.summary, PostStatus.UNAVAILABLE, error_text(exc)
                     )
                     continue
                 if isinstance(exc, (
@@ -375,18 +377,15 @@ class SyncService:
             return scan
 
         if completed and cursor_before is not None:
-            scan.warnings.append(
-                f"@{creator_id} 的歷史回補狀態同時標記完成與 cursor={cursor_before}；"
-                "本次依 cursor 安全重掃。"
-            )
+            scan.warnings.append(Text("sync.backfill_conflict", creator_id=creator_id, cursor=str(cursor_before)))
         try:
             page_index = int(cursor_before) if cursor_before is not None else 1
         except ValueError:
             page_index = 1
-            scan.warnings.append(f"@{creator_id} 的歷史回補 cursor 無效；本次從第 2 頁安全重掃。")
+            scan.warnings.append(Text("sync.backfill_cursor_invalid", creator_id=creator_id))
         if page_index < 1:
             page_index = 1
-            scan.warnings.append(f"@{creator_id} 的歷史回補 cursor 小於 1；本次從第 2 頁安全重掃。")
+            scan.warnings.append(Text("sync.backfill_cursor_below_one", creator_id=creator_id))
         if page_index >= len(pages):
             scan.backfill_completed = True
             scan.stop_reason = "remote_exhausted"

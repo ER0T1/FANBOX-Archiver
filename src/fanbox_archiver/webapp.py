@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import MutableHeaders
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -171,6 +171,17 @@ class OpenFolderBody(BaseModel):
     target: FolderTarget
 
 
+def problem_text(exc: Exception) -> object:
+    """A settings problem for the UI: the validator's own (translatable) message, not pydantic's wrapper."""
+    if isinstance(exc, ValidationError):
+        messages: list[object] = []
+        for item in exc.errors():
+            original = (item.get("ctx") or {}).get("error")
+            messages.append(error_text(original) if isinstance(original, BaseException) else item.get("msg", ""))
+        return messages[0] if len(messages) == 1 else messages
+    return error_text(exc)
+
+
 def create_app(
     config: AppConfig, *, config_path: Path | None = None, run_scheduler: bool = False,
 ) -> FastAPI:
@@ -222,8 +233,10 @@ def create_app(
 
     @app.exception_handler(StarletteHTTPException)
     async def localized_http_error(request: Request, exc: StarletteHTTPException):
-        return JSONResponse({"detail": localize(exc.detail, request_locale(request))},
-                            status_code=exc.status_code, headers=getattr(exc, "headers", None))
+        detail = localize(exc.detail, request_locale(request))
+        if isinstance(detail, list):  # several validation problems (see problem_text)
+            detail = "；".join(str(item) for item in detail)
+        return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=getattr(exc, "headers", None))
     app.state.reader = reader
     app.state.jobs = jobs
     app.state.auth_service = auth_service
@@ -391,7 +404,7 @@ def create_app(
                 updated = app.state.config.with_editable_patch(patch)
             AppConfig.save_editable(app.state.config_path, updated, patch)
         except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=error_text(exc)) from exc
+            raise HTTPException(status_code=422, detail=problem_text(exc)) from exc
         schedule_changed = updated.schedule != app.state.config.schedule
         timezone_changed = updated.display != app.state.config.display
         app.state.config = updated
@@ -440,7 +453,7 @@ def create_app(
         try:
             schedule = ScheduleConfig.model_validate({**app.state.config.schedule.model_dump(), **values})
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=error_text(exc)) from exc
+            raise HTTPException(status_code=422, detail=problem_text(exc)) from exc
         if schedule.start_date is None:
             schedule.start_date = datetime.now(display_zone().tz).date()
         runs = upcoming(schedule, datetime.now(UTC), 3)

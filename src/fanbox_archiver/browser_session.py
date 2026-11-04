@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import re
 import time
 from dataclasses import dataclass
@@ -48,7 +50,7 @@ class BrowserPostSession:
 
     def __enter__(self) -> "BrowserPostSession":
         if not self.profile_dir.exists():
-            raise BrowserLoginError("找不到專用瀏覽器設定檔；請先執行 `fanbox-archiver auth login`")
+            raise BrowserLoginError(Text("session.profile_missing"))
         try:
             self._playwright = sync_playwright().start()
             self._context = self._playwright.chromium.launch_persistent_context(
@@ -60,7 +62,7 @@ class BrowserPostSession:
             return self
         except PlaywrightError as exc:
             self.__exit__()
-            raise BrowserLoginError(f"無法啟動背景 FANBOX 工作階段：{exc}") from exc
+            raise BrowserLoginError(Text("session.start_failed", error=str(exc))) from exc
 
     def __exit__(self, *_: object) -> None:
         if self._context is not None:
@@ -82,7 +84,7 @@ class BrowserPostSession:
 
     def fetch(self, post_id: str) -> dict[str, Any]:
         if self._page is None:
-            raise BrowserLoginError("背景 FANBOX 工作階段尚未啟動")
+            raise BrowserLoginError(Text("session.not_started"))
         remaining = self.request_interval - (time.monotonic() - self._last_request)
         if remaining > 0:
             time.sleep(remaining)
@@ -109,7 +111,7 @@ class BrowserPostSession:
             )
             self._last_request = time.monotonic()
         except PlaywrightError as exc:
-            raise BrowserLoginError(f"背景 FANBOX 投稿請求失敗：{exc}") from exc
+            raise BrowserLoginError(Text("session.post_request_failed", error=str(exc))) from exc
         return _decode_api_result(result)
 
     def fetch_fancard(self, creator_id: str) -> dict[str, Any]:
@@ -123,9 +125,9 @@ class BrowserPostSession:
             response = self._page.request.get(url, timeout=60_000)
             self._last_request = time.monotonic()
         except PlaywrightError as exc:
-            raise BrowserLoginError(f"背景 FANBOX 資源請求失敗：{exc}") from exc
+            raise BrowserLoginError(Text("session.asset_request_failed", error=str(exc))) from exc
         if response.status != 200:
-            raise BrowserLoginError(f"Fan Card 圖片請求回傳 HTTP {response.status}")
+            raise BrowserLoginError(Text("session.fancard_image_http", status=str(response.status)))
         return response.body(), str(response.headers.get("content-type") or "application/octet-stream")
 
     def _fetch_json(self, url: str) -> dict[str, Any]:
@@ -149,7 +151,7 @@ class BrowserPostSession:
             )
             self._last_request = time.monotonic()
         except PlaywrightError as exc:
-            raise BrowserLoginError(f"背景 FANBOX API 請求失敗：{exc}") from exc
+            raise BrowserLoginError(Text("session.api_request_failed", error=str(exc))) from exc
         return _decode_api_result(result)
 
     def _wait(self) -> None:
@@ -165,23 +167,23 @@ def _decode_api_result(result: dict[str, Any]) -> dict[str, Any]:
 
     status = int(result.get("status") or 0)
     if status == 401:
-        raise AuthenticationError("登入狀態已失效，請重新執行 `fanbox-archiver auth login`")
+        raise AuthenticationError(Text("session.auth_expired"))
     if status == 403:
-        raise AccessRestrictedError("目前帳號無權存取此內容")
+        raise AccessRestrictedError(Text("client.access_restricted"))
     if status == 404:
-        raise RemoteUnavailableError("遠端投稿不存在或目前無法取得")
+        raise RemoteUnavailableError(Text("client.remote_unavailable"))
     if status == 429:
-        raise RateLimitedError("FANBOX 回傳 429；已停止，請稍後再試")
+        raise RateLimitedError(Text("client.rate_limited"))
     if status != 200:
-        raise BrowserLoginError(f"FANBOX 頁面內請求回傳 HTTP {status}")
+        raise BrowserLoginError(Text("session.page_request_http", status=str(status)))
     try:
         import json
 
         payload = json.loads(str(result.get("text") or ""))
     except (TypeError, ValueError) as exc:
-        raise BrowserLoginError("FANBOX 投稿回應不是有效 JSON") from exc
+        raise BrowserLoginError(Text("session.response_not_json")) from exc
     if not isinstance(payload, dict):
-        raise BrowserLoginError("FANBOX 投稿回應格式不正確")
+        raise BrowserLoginError(Text("session.response_invalid"))
     return payload
 
 
@@ -214,7 +216,7 @@ def interactive_login(
     except BrowserLoginError:
         raise
     except PlaywrightError as exc:
-        raise BrowserLoginError(f"無法啟動專用 {channel} 工作階段：{exc}") from exc
+        raise BrowserLoginError(Text("session.channel_start_failed", channel=channel, error=str(exc))) from exc
 
 
 def profile_cookie_header(profile_dir: Path, *, channel: str = "chrome") -> str:
@@ -239,7 +241,7 @@ def profile_auth_material(profile_dir: Path, *, channel: str = "chrome") -> Brow
                 context.close()
     except PlaywrightError as exc:
         raise BrowserLoginError(
-            "無法開啟 FANBOX 專用瀏覽器設定檔；請確認登入視窗已關閉後重試"
+            Text("session.profile_open_failed")
         ) from exc
     return BrowserAuthMaterial(cookies_to_header(cookies), user_agent)
 
@@ -254,7 +256,7 @@ def fetch_post_payload(
     """Fetch post.info inside a real FANBOX page with the saved browser session."""
     validate_url(post_url)
     if not profile_dir.exists():
-        raise BrowserLoginError("找不到專用瀏覽器設定檔；請先執行 `fanbox-archiver auth login`")
+        raise BrowserLoginError(Text("session.profile_missing"))
     try:
         with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(
@@ -291,7 +293,7 @@ def fetch_post_payload(
             finally:
                 context.close()
     except PlaywrightError as exc:
-        raise BrowserLoginError(f"瀏覽器工作階段請求失敗：{exc}") from exc
+        raise BrowserLoginError(Text("session.request_failed", error=str(exc))) from exc
     return _decode_api_result(result)
 
 
@@ -318,7 +320,7 @@ def profile_is_authenticated(profile_dir: Path, *, channel: str = "chrome") -> b
             finally:
                 context.close()
     except PlaywrightError as exc:
-        raise BrowserLoginError(f"無法驗證專用瀏覽器工作階段：{exc}") from exc
+        raise BrowserLoginError(Text("session.verify_failed", error=str(exc))) from exc
     return int(result.get("status") or 0) == 200 and '"body"' in str(result.get("text") or "")
 
 
@@ -344,7 +346,7 @@ def clear_profile_authentication(profile_dir: Path, *, channel: str = "chrome") 
                 context.close()
     except PlaywrightError as exc:
         raise BrowserLoginError(
-            "無法清除 FANBOX 工作階段；請先關閉登入視窗後重試"
+            Text("session.clear_failed")
         ) from exc
 
 
@@ -369,9 +371,9 @@ def _wait_for_authentication(
     last_status: int | None = None
     while time.monotonic() < deadline:
         if should_cancel is not None and should_cancel():
-            raise BrowserLoginCancelled("登入已取消")
+            raise BrowserLoginCancelled(Text("session.login_cancelled"))
         if not context.pages:
-            raise BrowserLoginError("登入視窗已關閉，但尚未確認 FANBOX 登入成功")
+            raise BrowserLoginError(Text("session.login_window_closed"))
         try:
             page = context.pages[-1]
             if ".fanbox.cc" not in page.url and not page.url.startswith("https://www.fanbox.cc"):
@@ -397,7 +399,7 @@ def _wait_for_authentication(
             pass
         for _ in range(20):
             if should_cancel is not None and should_cancel():
-                raise BrowserLoginCancelled("登入已取消")
+                raise BrowserLoginCancelled(Text("session.login_cancelled"))
             time.sleep(.1)
-    suffix = f"（最後 HTTP 狀態：{last_status}）" if last_status is not None else ""
-    raise BrowserLoginError(f"等待 FANBOX 登入逾時{suffix}")
+    raise BrowserLoginError(Text("session.login_timeout_status", status=str(last_status))
+                            if last_status is not None else Text("session.login_timeout"))

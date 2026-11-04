@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -29,9 +31,9 @@ def validate_url(url: str, *, download: bool = False) -> str:
         # https://creator-id.fanbox.cc/posts/123.
         host_allowed = hostname in ALLOWED_PAGE_HOSTS or hostname.endswith(".fanbox.cc")
     if parsed.scheme != "https" or not hostname or not host_allowed:
-        raise ValueError(f"不允許的 URL 主機或協定：{parsed.scheme}://{parsed.hostname or ''}")
+        raise ValueError(Text("security.url_not_allowed", url=f"{parsed.scheme}://{parsed.hostname or ''}"))
     if parsed.username or parsed.password:
-        raise ValueError("URL 不可包含登入資訊")
+        raise ValueError(Text("security.url_credentials"))
     return url
 
 
@@ -52,6 +54,6 @@ def confined_path(root: Path, relative: Path) -> Path:
     root = root.resolve()
     target = (root / relative).resolve()
     if target != root and root not in target.parents:
-        raise ValueError("偵測到目錄穿越路徑")
+        raise ValueError(Text("security.path_traversal"))
     return target
 

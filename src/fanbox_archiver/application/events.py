@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..i18n import Text
+
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from threading import Event
@@ -50,4 +52,4 @@ class CancellationToken:
 
     def raise_if_cancelled(self) -> None:
         if self.cancelled:
-            raise BackupCancelled("備份已由使用者取消")
+            raise BackupCancelled(Text("backup.cancelled"))

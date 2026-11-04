@@ -349,3 +349,28 @@ def test_retry_of_a_job_known_only_from_database(tmp_path: Path):
         assert manager.retry("missing") is None
     finally:
         manager.close()
+
+
+def test_verify_issues_and_progress_stay_translatable_after_reload(tmp_path: Path):
+    from fanbox_archiver.i18n import Text
+
+    app_config = config(tmp_path)
+    broken = app_config.storage.output_dir / "alice" / "123" / "post.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{", encoding="utf-8")
+    manager = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        job_id = manager.submit_verify()["job_id"]
+        finished = manager.wait(job_id)
+    finally:
+        manager.close()
+    assert finished["result"]["issues"][0]["reason"].startswith("post.json 無法解析：")
+    reloaded = BackupJobManager(app_config, use_case_factory=SuccessfulUseCase)
+    try:
+        stored = reloaded._row_snapshot(reloaded.db.web_job_row(job_id), include_events=True)
+    finally:
+        reloaded.close()
+    reason = stored["result"]["issues"][0]["reason"]
+    assert isinstance(reason, Text) and reason.localized("qps-ploc").startswith("［post.json 無法解析：")
+    items = [event["data"].get("item") for event in stored["events"] if event["kind"] == "verify_progress"]
+    assert items and isinstance(items[-1], Text)

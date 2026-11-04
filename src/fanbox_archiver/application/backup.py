@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..i18n import Text, error_text
+
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -139,7 +141,7 @@ class BackupUseCase:
                     return BackupOutcome(run_id, plan, None, False)
 
                 if include_fancard and not use_profile:
-                    raise RuntimeError("單獨拉取 Fan Card 需要先以專用瀏覽器完成登入")
+                    raise RuntimeError(Text("backup.fancard_needs_login"))
 
                 needs_session = use_profile and (
                     include_fancard or (bool(plan.selected) and not selected_posts)
@@ -195,7 +197,7 @@ class BackupUseCase:
                                 creator_id=item.creator_id,
                                 post_id=item.summary.post_id,
                                 status=(type(status).__name__ if isinstance(status, Exception) else status.value),
-                                error=str(status) if isinstance(status, Exception) else None,
+                                error=error_text(status) if isinstance(status, Exception) else None,
                                 unchanged=unchanged,
                                 **progress,
                             )
@@ -236,7 +238,7 @@ class BackupUseCase:
             plan = result.plan
             self._finish(archive, run_id, plan, result)
             finished = True
-            self._emit("job_failed", run_id=run_id, error=str(stopped.reason))
+            self._emit("job_failed", run_id=run_id, error=error_text(stopped.reason))
             raise stopped.reason
         except SyncCancelled as stopped:
             result = stopped.result
@@ -244,7 +246,7 @@ class BackupUseCase:
             self._finish(archive, run_id, plan, result)
             finished = True
             self._emit("job_cancelled", run_id=run_id)
-            raise BackupCancelled("備份已由使用者取消") from stopped
+            raise BackupCancelled(Text("backup.cancelled")) from stopped
         except BackupCancelled:
             if not finished and not request.dry_run:
                 self._finish_failure(archive, run_id, plan, result)
@@ -253,7 +255,7 @@ class BackupUseCase:
         except Exception as exc:
             if not finished and not request.dry_run:
                 self._finish_failure(archive, run_id, plan, result)
-            self._emit("job_failed", run_id=run_id, error=str(exc))
+            self._emit("job_failed", run_id=run_id, error=error_text(exc))
             raise
 
     def _archive_profiles(
@@ -301,7 +303,7 @@ class BackupUseCase:
                     creator.creator_id, exc,
                 )
                 self._emit(
-                    "profile_warning", creator_id=creator.creator_id, message=str(exc)
+                    "profile_warning", creator_id=creator.creator_id, message=error_text(exc)
                 )
                 results[creator.creator_id] = "warning"
         return results
@@ -343,7 +345,7 @@ class BackupUseCase:
                 else:
                     self._emit(
                         "warning", creator_id=creator.creator_id,
-                        message="創作者未提供自訂 Fan Card 卡面，將只保存方案資料。",
+                        message=Text("backup.fancard_no_image"),
                     )
                 status, path = archive.save_fancard(payload, image_data, content_type)
                 self._emit(
@@ -358,7 +360,7 @@ class BackupUseCase:
                 )
                 self._emit(
                     "warning", creator_id=creator.creator_id,
-                    message=f"Fan Card 保存失敗：{exc}",
+                    message=Text("backup.fancard_failed", error=error_text(exc)),
                 )
 
     def _finish(
