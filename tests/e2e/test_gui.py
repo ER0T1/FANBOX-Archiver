@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import json
 import os
 import re
 import socket
@@ -897,3 +898,70 @@ def test_static_site_defaults_to_the_exported_theme_but_keeps_its_own_toggle(pag
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
     page.reload()
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
+
+
+def test_custom_color_editor_syncs_controls_warns_saves_and_round_trips(
+    page: Page, live_gui, tmp_path: Path,
+) -> None:
+    base_url, config_path, jobs = live_gui
+    jobs.hold_backup = False
+    page.emulate_media(color_scheme="light")
+    page.goto(base_url, wait_until="networkidle")
+    page.get_by_role("button", name="設定", exact=True).click()
+    save = page.get_by_role("button", name="儲存設定", exact=True)
+    expect(save).to_be_enabled(timeout=5_000)
+    editor = page.locator(".color-editor")
+    expect(editor.get_by_role("button", name="亮色配色")).to_have_attribute("aria-pressed", "true")
+
+    accent = editor.locator(".color-row").filter(has_text="強調色").first
+    accent.locator("summary").click()
+    hex_input = accent.get_by_label("強調色 Hex")
+    hex_input.fill("#0055aa")
+    expect(accent.locator(".color-badge")).to_have_text("已自訂")
+    assert editor.locator(".color-preview").evaluate("e => e.style.getPropertyValue('--accent')") == "#0055aa"
+    expect(accent.get_by_label("R數值", exact=True)).to_have_value("0")
+    expect(accent.get_by_label("G數值", exact=True)).to_have_value("85")
+    expect(accent.get_by_label("B數值", exact=True)).to_have_value("170")
+    accent.get_by_label("B數值", exact=True).fill("255")
+    accent.get_by_label("B數值", exact=True).dispatch_event("change")
+    expect(hex_input).to_have_value("#0055ff")
+    hex_input.fill("#zz")
+    expect(hex_input).to_have_attribute("aria-invalid", "true")
+    hex_input.blur()
+    expect(hex_input).to_have_value("#0055ff")
+
+    text_row = editor.locator(".color-row").nth(3)  # 文字
+    text_row.locator("summary").click()
+    text_row.get_by_label("文字 Hex").fill("#f4f6f9")
+    expect(editor.locator(".color-warnings")).to_contain_text("文字／背景")
+    editor.get_by_role("button", name="取消未儲存修改").click()
+    expect(editor.locator(".color-warnings")).to_be_hidden()
+    expect(editor.locator(".color-row").filter(has_text="強調色").first.locator(".color-badge")).to_have_text("預設")
+
+    accent = editor.locator(".color-row").filter(has_text="強調色").first
+    accent.locator("summary").click()
+    accent.get_by_label("強調色 Hex").fill("#0055aa")
+    with page.expect_download() as download:
+        editor.get_by_role("button", name="匯出配色").click()
+    exported = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
+    assert exported["format"] == "fanbox-archiver-colors" and exported["light"] == {"accent": "#0055aa"}
+
+    save.click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert AppConfig.load(config_path).display.colors.light == {"accent": "#0055aa"}
+    page.wait_for_function(
+        "getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#0055aa'",
+    )
+
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"format": "fanbox-archiver-colors", "light": {"accent": "url(x)"}}', encoding="utf-8")
+    editor = page.locator(".color-editor")
+    editor.locator('input[type="file"]').set_input_files(str(bad))
+    expect(editor.locator(".color-feedback")).to_contain_text("無法匯入")
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"format": "fanbox-archiver-colors", "version": 1,
+                                "light": {}, "dark": {"bg": "#000000"}}), encoding="utf-8")
+    editor.locator('input[type="file"]').set_input_files(str(good))
+    expect(editor.locator(".color-feedback")).to_contain_text("已匯入")
+    editor.get_by_role("button", name="暗色配色").click()
+    expect(editor.locator(".color-row").first.locator(".color-badge")).to_have_text("已自訂")

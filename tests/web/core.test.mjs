@@ -91,3 +91,18 @@ test("fan card perk status classes reject unknown API values", () => {
   assert.equal(ui.perkStatusClass("unavailable"), "perk-status status-unavailable");
   assert.equal(ui.perkStatusClass("unexpected value"), "perk-status status-unknown");
 });
+
+test("colour helpers compute WCAG contrast and validate imported palettes", () => {
+  assert.equal(ui.contrastRatio("#000000", "#ffffff").toFixed(2), "21.00");
+  assert.equal(ui.contrastRatio("#ffffff", "#ffffff").toFixed(2), "1.00");
+  const keys = ["bg", "accent"];
+  const parsed = ui.parseColorExport(JSON.stringify({format: "fanbox-archiver-colors", version: 1,
+    light: {accent: "#AA00FF"}, dark: {}}), keys);
+  assert.equal(parsed.light.accent, "#aa00ff");
+  assert.throws(() => ui.parseColorExport("{", keys), /JSON/);
+  assert.throws(() => ui.parseColorExport(JSON.stringify({light: {}}), keys), /配色檔/);
+  assert.throws(() => ui.parseColorExport(JSON.stringify({format: "fanbox-archiver-colors",
+    light: {"font-family": "#000000"}}), keys), /不支援/);
+  assert.throws(() => ui.parseColorExport(JSON.stringify({format: "fanbox-archiver-colors",
+    light: {accent: "url(x)"}}), keys), /#RRGGBB/);
+});

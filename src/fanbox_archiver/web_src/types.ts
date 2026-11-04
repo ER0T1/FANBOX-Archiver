@@ -339,10 +339,16 @@ namespace FanboxUI {
 
   export type ThemeSetting = "system" | "dark" | "light";
 
+  export type ColorMode = "light" | "dark";
+  /** CSS variable name (without "--") → "#rrggbb". */
+  export type ColorSet = Record<string, string>;
+  export type ThemeColorSettings = Record<ColorMode, ColorSet>;
+
   export interface DisplaySettings {
     /** "system" or an IANA zone name. */
     timezone: string;
     theme: ThemeSetting;
+    colors: ThemeColorSettings;
   }
 
   export interface DisplayInfo {
@@ -370,6 +376,7 @@ namespace FanboxUI {
     writable: boolean;
     display: DisplayInfo;
     timezones: {common: string[]; all: string[]};
+    theme_colors: {keys: string[]; defaults: ThemeColorSettings};
   }
 
   export type FolderTarget = "archive" | "archive_logs" | "desktop_logs";

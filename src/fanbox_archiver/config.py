@@ -8,7 +8,7 @@ import re
 import tempfile
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StorageConfig(BaseModel):
@@ -56,6 +56,21 @@ class BackupDefaultsConfig(BaseModel):
     include_fancard: bool = True
 
 
+class ThemeColors(BaseModel):
+    """Custom colour overrides per mode; names outside the allowlist or non-#rrggbb values are refused."""
+
+    model_config = ConfigDict(extra="forbid")
+    light: dict[str, str] = Field(default_factory=dict)
+    dark: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("light", "dark")
+    @classmethod
+    def validate_colors(cls, value: dict[str, str]) -> dict[str, str]:
+        from .theme import normalize_colors
+
+        return normalize_colors(value)
+
+
 class DisplayConfig(BaseModel):
     """How times are shown and how schedule times are read: ``system`` or an IANA zone.
 
@@ -65,6 +80,7 @@ class DisplayConfig(BaseModel):
 
     timezone: str = "system"
     theme: Literal["system", "dark", "light"] = "system"
+    colors: ThemeColors = Field(default_factory=ThemeColors)
 
     @property
     def css_theme(self) -> str:

@@ -8,14 +8,15 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .config import AppConfig, ScheduleConfig
+from .config import AppConfig, ScheduleConfig, ThemeColors
+from .theme import THEME_COLOR_KEYS, THEME_DEFAULTS, custom_theme_css
 from . import __version__
 from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
@@ -125,6 +126,7 @@ class DisplayConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timezone: str | None = Field(None, max_length=64)
     theme: Literal["system", "dark", "light"] | None = None
+    colors: ThemeColors | None = None
 
 
 class LoggingConfigPatch(BaseModel):
@@ -223,6 +225,12 @@ def create_app(
         return HTMLResponse(home_html.replace("__FANBOX_TIMEZONE__", display_zone().name)
                             .replace("__FANBOX_THEME__", app.state.config.display.css_theme))
 
+    @app.get("/theme.css", include_in_schema=False)
+    async def theme_css():
+        colors = app.state.config.display.colors
+        return Response(custom_theme_css(colors.light, colors.dark), media_type="text/css",
+                        headers={"Cache-Control": "no-store"})
+
     @app.get("/api/health")
     async def health():
         return {"status": "ok"}
@@ -250,6 +258,7 @@ def create_app(
             "writable": app.state.config_path is not None,
             "display": display_info(),
             "timezones": {"common": list(COMMON_TIMEZONES), "all": list(timezone_names())},
+            "theme_colors": {"keys": list(THEME_COLOR_KEYS), "defaults": THEME_DEFAULTS},
         }
 
     def remember_auth(state: str) -> None:

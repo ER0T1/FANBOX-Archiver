@@ -187,6 +187,7 @@ namespace FanboxUI {
       schedule.actions);
     const timezone = timezoneControl(data, blocked);
     const theme = themeControl(data, blocked);
+    const colors = colorEditor(data);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const authBusy = auth.state === "checking";
@@ -222,7 +223,7 @@ namespace FanboxUI {
       }, backup_defaults: {
         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
         include_fancard: defaultFancard.input.checked,
-      }, schedule: scheduleSection.read(), display: {timezone: timezone.read(), theme: theme.read()}, markdown: {
+      }, schedule: scheduleSection.read(), display: {timezone: timezone.read(), theme: theme.read(), colors: colors.read()}, markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -249,6 +250,7 @@ namespace FanboxUI {
         h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node))),
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT & LOGGING"), h("h2", {}, "輸出與紀錄"),
       theme.node,
+      colors.node,
       timezone.node,
       h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
         h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),

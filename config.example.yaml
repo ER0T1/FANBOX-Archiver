@@ -44,6 +44,9 @@ schedule:
 display:
   timezone: system
   theme: system
+  colors:
+    light: {}
+    dark: {}
 logging:
   level: INFO
   write_to_file: true

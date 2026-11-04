@@ -549,7 +549,39 @@ async def test_theme_setting_is_saved_and_rendered_into_the_page(tmp_path: Path)
         assert invalid.status_code == 422
         saved = await client.patch("/api/config", headers=token, json={"display": {"theme": "dark"}})
         assert saved.status_code == 200
-        assert saved.json()["editable"]["display"] == {"timezone": config.display.timezone, "theme": "dark"}
+        assert saved.json()["editable"]["display"]["theme"] == "dark"
+        assert saved.json()["editable"]["display"]["timezone"] == config.display.timezone
         assert '<html lang="zh-Hant" data-theme="dark">' in (await client.get("/")).text
 
     assert type(config).load(config_path).display.theme == "dark"
+
+
+@pytest.mark.anyio
+async def test_custom_colors_are_validated_saved_and_served_as_css(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    type(config).save_editable(config_path, config, {})
+    app = create_app(config, config_path=config_path)
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        home = (await client.get("/")).text
+        assert '<link id="custom-theme" rel="stylesheet" href="/theme.css">' in home
+        settings = (await client.get("/api/config")).json()
+        assert settings["theme_colors"]["keys"][:2] == ["bg", "surface"]
+        assert settings["theme_colors"]["defaults"]["dark"]["accent"] == "#ff983f"
+        empty = await client.get("/theme.css")
+        assert empty.headers["content-type"].startswith("text/css") and "--" not in empty.text
+
+        rejected = await client.patch("/api/config", headers=token, json={"display": {"colors": {
+            "light": {"accent": "#000000;}*{background:url(https://example.test)"}, "dark": {}}}})
+        assert rejected.status_code == 422
+        saved = await client.patch("/api/config", headers=token, json={"display": {"colors": {
+            "light": {"accent": "#0055AA"}, "dark": {"bg": "#000000"}}}})
+        assert saved.status_code == 200
+        css = (await client.get("/theme.css")).text
+
+    assert ':root[data-theme="light"]{--accent:#0055aa;}' in css
+    assert ':root[data-theme="dark"]{--bg:#000000;}' in css
+    reloaded = type(config).load(config_path).display.colors
+    assert (reloaded.light, reloaded.dark) == ({"accent": "#0055aa"}, {"bg": "#000000"})

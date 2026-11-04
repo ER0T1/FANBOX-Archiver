@@ -449,6 +449,8 @@ namespace FanboxUI {
         // A preview that was never saved is undone whenever the page reloads its settings.
         applyTheme(data.editable.display.theme);
         savedTheme = document.documentElement.dataset.theme ?? "auto";
+        // Re-read the generated custom-colour stylesheet so a saved palette applies at once.
+        document.getElementById("custom-theme")?.setAttribute("href", `/theme.css?v=${Date.now()}`);
         app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
           patch => saveSettingsForm(patch),
           () => void loadSettings("", false),
