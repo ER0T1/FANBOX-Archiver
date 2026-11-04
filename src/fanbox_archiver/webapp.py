@@ -2,22 +2,24 @@ from __future__ import annotations
 
 import os
 import secrets
+from contextvars import ContextVar
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import AppConfig, ScheduleConfig, ThemeColors
 from .theme import THEME_COLOR_KEYS, THEME_DEFAULTS, custom_theme_css
-from .i18n import browser_script, resolve_locale
+from .i18n import BASE_LOCALE, Text, browser_script, error_text, localize, resolve_locale
 from . import __version__
 from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
@@ -35,6 +37,16 @@ from .timestamps import (
 from .windows_task import DESKTOP_EXE_ENV, sync_background_schedule
 from .client import FanboxClient
 from .reader import ArchiveReader, ReaderNotFound
+
+
+# The language of the request being answered: interface text in JSON responses (``Text`` from
+# the core, e.g. sign-in status, schedule summary, error details) is shown in it.
+_RESPONSE_LOCALE: ContextVar[str] = ContextVar("fanbox_response_locale", default=BASE_LOCALE)
+
+
+class LocalizedJSONResponse(JSONResponse):
+    def render(self, content: object) -> bytes:
+        return super().render(localize(content, _RESPONSE_LOCALE.get()))
 
 
 class SecurityHeadersMiddleware:
@@ -199,7 +211,19 @@ def create_app(
         finally:
             app.state.scheduler.stop()
 
-    app = FastAPI(title="FANBOX Archiver", version=__version__, lifespan=lifespan)
+    async def response_language(request: Request) -> None:
+        # Runs in the request's own task, so the response rendered later sees this value.
+        _RESPONSE_LOCALE.set(request_locale(request))
+
+    app = FastAPI(
+        title="FANBOX Archiver", version=__version__, lifespan=lifespan,
+        default_response_class=LocalizedJSONResponse, dependencies=[Depends(response_language)],
+    )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def localized_http_error(request: Request, exc: StarletteHTTPException):
+        return JSONResponse({"detail": localize(exc.detail, request_locale(request))},
+                            status_code=exc.status_code, headers=getattr(exc, "headers", None))
     app.state.reader = reader
     app.state.jobs = jobs
     app.state.auth_service = auth_service
@@ -210,7 +234,7 @@ def create_app(
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
     app.state.legacy_site = LegacySiteCleanup()
-    app.state.background = {"state": "unavailable", "message": "背景排程只在 Windows 桌面版提供；目前只會在程式開著時執行。"}
+    app.state.background = {"state": "unavailable", "message": Text("schedule.background_unavailable")}
 
     def sync_background() -> None:
         app.state.background = sync_background_schedule(
@@ -265,7 +289,7 @@ def create_app(
         token: Annotated[str | None, Header(alias="X-Fanbox-Token")] = None,
     ) -> None:
         if token is None or not secrets.compare_digest(token, session_token):
-            raise HTTPException(status_code=403, detail="工作階段權杖無效")
+            raise HTTPException(status_code=403, detail=Text("server.token_invalid"))
 
     @app.get("/api/config")
     async def get_config():
@@ -292,14 +316,14 @@ def create_app(
         if active:
             return {
                 "state": "checking", "source": "profile",
-                "message": "請在專用 Chrome 視窗完成登入。",
+                "message": Text("server.auth_login_waiting"),
                 "can_login": False, "can_logout": False,
                 "externally_managed": False, "job": active,
             }
         if app.state.jobs.has_active():
             return {
                 "state": "locked", "source": "profile",
-                "message": "備份或驗證執行中，暫停登入檢查；工作結束後自動恢復。",
+                "message": Text("server.auth_locked"),
                 "can_login": False, "can_logout": False,
                 "externally_managed": False, "job": None,
                 "last_known": app.state.last_auth,
@@ -314,11 +338,11 @@ def create_app(
     )
     async def auth_login(body: LoginBody):
         if app.state.jobs.has_active():
-            raise HTTPException(status_code=409, detail="工作執行期間無法開啟登入視窗")
+            raise HTTPException(status_code=409, detail=Text("server.login_blocked"))
         try:
             return app.state.auth_jobs.start(timeout_seconds=body.timeout_seconds)
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
 
     @app.get(
         "/api/auth/login/{job_id}", dependencies=[Depends(require_mutation_token)]
@@ -326,7 +350,7 @@ def create_app(
     async def auth_login_job(job_id: str):
         job = app.state.auth_jobs.get(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="找不到登入工作")
+            raise HTTPException(status_code=404, detail=Text("server.login_job_missing"))
         return job
 
     @app.post(
@@ -336,26 +360,26 @@ def create_app(
     async def auth_login_cancel(job_id: str):
         job = app.state.auth_jobs.cancel(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="找不到登入工作")
+            raise HTTPException(status_code=404, detail=Text("server.login_job_missing"))
         return job
 
     @app.post("/api/auth/logout", dependencies=[Depends(require_mutation_token)])
     async def auth_logout():
         if app.state.jobs.has_active() or app.state.auth_jobs.active():
-            raise HTTPException(status_code=409, detail="工作執行期間無法登出")
+            raise HTTPException(status_code=409, detail=Text("server.logout_blocked"))
         try:
             status = await run_in_threadpool(app.state.auth_service.logout)
             remember_auth(status.state)
             return status.as_dict()
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
 
     @app.patch("/api/config", dependencies=[Depends(require_mutation_token)])
     async def patch_config(body: ConfigPatch):
         if app.state.config_path is None:
-            raise HTTPException(status_code=409, detail="伺服器未指定可寫入的設定檔")
+            raise HTTPException(status_code=409, detail=Text("server.config_not_writable"))
         if app.state.jobs.has_active():
-            raise HTTPException(status_code=409, detail="工作執行期間無法修改設定")
+            raise HTTPException(status_code=409, detail=Text("server.config_blocked"))
         patch = body.model_dump(exclude_none=True)
         try:
             if "schedule" in patch:
@@ -367,7 +391,7 @@ def create_app(
                 updated = app.state.config.with_editable_patch(patch)
             AppConfig.save_editable(app.state.config_path, updated, patch)
         except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=error_text(exc)) from exc
         schedule_changed = updated.schedule != app.state.config.schedule
         timezone_changed = updated.display != app.state.config.display
         app.state.config = updated
@@ -390,11 +414,11 @@ def create_app(
     async def open_diagnostics_folder(body: OpenFolderBody):
         path = diagnostics.folder_path(app.state.config, body.target)
         if path is None:
-            raise HTTPException(status_code=404, detail="桌面日誌只在桌面版提供")
+            raise HTTPException(status_code=404, detail=Text("server.desktop_logs_only"))
         if not path.is_dir():
-            raise HTTPException(status_code=404, detail="資料夾尚不存在")
+            raise HTTPException(status_code=404, detail=Text("server.folder_missing"))
         if not diagnostics.can_open_folders():
-            raise HTTPException(status_code=501, detail="此系統無法開啟資料夾")
+            raise HTTPException(status_code=501, detail=Text("server.folder_unsupported"))
         await run_in_threadpool(diagnostics.open_folder, path)
         return {"opened": body.target}
 
@@ -416,7 +440,7 @@ def create_app(
         try:
             schedule = ScheduleConfig.model_validate({**app.state.config.schedule.model_dump(), **values})
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=error_text(exc)) from exc
         if schedule.start_date is None:
             schedule.start_date = datetime.now(display_zone().tz).date()
         runs = upcoming(schedule, datetime.now(UTC), 3)
@@ -427,7 +451,7 @@ def create_app(
         try:
             return await run_in_threadpool(app.state.scheduler.run_now)
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
 
     @app.get("/api/jobs")
     async def list_jobs(
@@ -445,13 +469,13 @@ def create_app(
     async def get_job(job_id: str):
         job = app.state.jobs.get(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="找不到工作")
+            raise HTTPException(status_code=404, detail=Text("server.job_missing"))
         return job
 
     @app.post("/api/jobs/backup", status_code=202, dependencies=[Depends(require_mutation_token)])
     async def start_backup(body: BackupJobBody):
         if app.state.auth_jobs.active():
-            raise HTTPException(status_code=409, detail="登入工作執行期間無法開始備份")
+            raise HTTPException(status_code=409, detail=Text("server.backup_blocked_by_login"))
         try:
             raw_creators = [*body.creators]
             if body.creator:
@@ -460,7 +484,7 @@ def create_app(
                 FanboxClient.creator_id(value) for value in raw_creators
             ))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=error_text(exc)) from exc
         try:
             base_scope = (
                 "supporting" if not creators else
@@ -477,16 +501,16 @@ def create_app(
                 include_fancard=body.include_fancard,
             ))
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
 
     @app.post("/api/jobs/verify", status_code=202, dependencies=[Depends(require_mutation_token)])
     async def start_verify():
         if app.state.auth_jobs.active():
-            raise HTTPException(status_code=409, detail="登入工作執行期間無法開始驗證")
+            raise HTTPException(status_code=409, detail=Text("server.verify_blocked_by_login"))
         try:
             return app.state.jobs.submit_verify()
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
 
     @app.post(
         "/api/jobs/{job_id}/cancel", dependencies=[Depends(require_mutation_token)]
@@ -495,9 +519,9 @@ def create_app(
         try:
             job = app.state.jobs.cancel(job_id)
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
         if job is None:
-            raise HTTPException(status_code=404, detail="找不到工作")
+            raise HTTPException(status_code=404, detail=Text("server.job_missing"))
         return job
 
     @app.post(
@@ -508,9 +532,9 @@ def create_app(
         try:
             job = app.state.jobs.retry(job_id)
         except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=error_text(exc)) from exc
         if job is None:
-            raise HTTPException(status_code=404, detail="找不到工作")
+            raise HTTPException(status_code=404, detail=Text("server.job_missing"))
         return job
 
     @app.get("/api/creators")
@@ -522,14 +546,14 @@ def create_app(
         try:
             return reader.creator(creator_id)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
 
     @app.get("/api/creators/{creator_id}/avatar")
     async def creator_avatar(creator_id: str):
         try:
             item = reader.creator_avatar(creator_id)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
         return FileResponse(
             item.path, media_type=item.media_type, filename=item.filename,
             content_disposition_type="inline",
@@ -542,21 +566,21 @@ def create_app(
         try:
             return reader.creator_profile(creator_id, version=version)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
 
     @app.get("/api/creators/{creator_id}/profile/versions")
     async def creator_profile_versions(creator_id: str):
         try:
             return {"items": reader.creator_profile_versions(creator_id)}
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
 
     @app.get("/api/creators/{creator_id}/profile/versions/{version}/cover")
     async def creator_profile_cover(creator_id: str, version: int):
         try:
             item = reader.creator_profile_cover(creator_id, version)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
         return FileResponse(
             item.path, media_type=item.media_type, filename=item.filename,
             content_disposition_type="inline",
@@ -569,7 +593,7 @@ def create_app(
         try:
             item = reader.creator_profile_item_image(creator_id, version, item_index)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
         return FileResponse(
             item.path, media_type=item.media_type, filename=item.filename,
             content_disposition_type="inline",
@@ -588,14 +612,14 @@ def create_app(
         try:
             return reader.fancard(creator_id, target_month, version=version)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
 
     @app.get("/api/fancards/{creator_id}/{target_month}/versions/{version}/image")
     async def fancard_image(creator_id: str, target_month: str, version: int):
         try:
             item = reader.fancard_image(creator_id, target_month, version)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
         return FileResponse(
             item.path, media_type=item.media_type, filename=item.filename,
             content_disposition_type="inline",
@@ -628,14 +652,14 @@ def create_app(
             )
             return item
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
 
     @app.get("/api/posts/{post_id}/versions/{version}/media/{asset_id}")
     async def media(post_id: str, version: int, asset_id: str):
         try:
             item = reader.media(post_id, version, asset_id)
         except ReaderNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail=error_text(exc)) from exc
         disposition = "inline" if item.media_type.startswith(("image/", "video/", "audio/")) else "attachment"
         return FileResponse(
             item.path, media_type=item.media_type, filename=item.filename,

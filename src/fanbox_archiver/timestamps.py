@@ -17,6 +17,8 @@ from functools import lru_cache
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
+from .i18n import Text
+
 SYSTEM = "system"
 DEVELOPMENT_TIMEZONE = "Asia/Taipei"
 TAIPEI = ZoneInfo(DEVELOPMENT_TIMEZONE)
@@ -73,7 +75,7 @@ def _offset_zone() -> DisplayZone:
         name, zone = "UTC", timezone(timedelta(seconds=seconds))
     else:
         zone = ZoneInfo(name)
-    return DisplayZone(SYSTEM, name, zone, "無法辨識電腦的時區名稱，暫以目前的 UTC 時差顯示；可在設定頁改選時區。")
+    return DisplayZone(SYSTEM, name, zone, Text("settings.timezone_offset_notice"))
 
 
 def resolve_timezone(setting: str, *, system_name: Callable[[], str | None] | None = None) -> DisplayZone:

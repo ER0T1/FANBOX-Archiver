@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from ..config import AppConfig
 from ..database import Database
+from ..i18n import Text, decode_text
 from .. import power
 from ..schedule import count_between, describe, latest_due, next_run
 from ..timestamps import display_zone, format_display, parse_instant
@@ -88,7 +89,7 @@ class BackupScheduler:
                 if state["deferred_due"] != due_iso:
                     self.db.set_schedule_state(
                         deferred_due=due_iso,
-                        note=f"{format_display(due)} 的排程遇到使用電池中，將於接上電源後執行。",
+                        note=Text("schedule.note_on_battery", time=format_display(due)).encode(),
                     )
                 return "deferred"
             jobs = self.get_jobs()
@@ -96,7 +97,7 @@ class BackupScheduler:
                 if state["deferred_due"] != due_iso:
                     self.db.set_schedule_state(
                         deferred_due=due_iso,
-                        note=f"{format_display(due)} 的排程遇到其他工作執行中，將於該工作結束後執行。",
+                        note=Text("schedule.note_busy", time=format_display(due)).encode(),
                     )
                 return "deferred"
             try:
@@ -105,11 +106,11 @@ class BackupScheduler:
                 return "deferred"
             missed = count_between(schedule, handled, due)
             if missed > 1:
-                note = f"錯過 {missed} 次排程，已補跑最近一次（{format_display(due)}）。"
+                note = Text("schedule.note_missed", count=missed, time=format_display(due)).encode()
             elif state["deferred_due"] == due_iso:
-                note = f"{format_display(due)} 的排程曾延後，已於可以執行時補跑。"
+                note = Text("schedule.note_deferred_run", time=format_display(due)).encode()
             elif (now - due).total_seconds() > max(120.0, self.interval * 4):
-                note = f"已補跑錯過的排程（{format_display(due)}）。"
+                note = Text("schedule.note_caught_up", time=format_display(due)).encode()
             else:
                 note = None
             self.db.set_schedule_state(
@@ -121,7 +122,7 @@ class BackupScheduler:
     def run_now(self) -> dict[str, Any]:
         """Run the scheduled backup once immediately; the schedule itself is unchanged."""
         if self.is_busy():
-            raise RuntimeError("登入工作執行期間無法開始備份")
+            raise RuntimeError(Text("server.backup_blocked_by_login"))
         return self.get_jobs().submit(self._request(self.get_config()))
 
     def status(self) -> dict[str, Any]:
@@ -143,7 +144,7 @@ class BackupScheduler:
             "next_run_at": next_run(schedule, self.clock()).isoformat() if schedule.enabled else None,
             "last_due_at": state["last_due_at"] if state else None,
             "deferred_due": state["deferred_due"] if state else None,
-            "note": state["note"] if state else None,
+            "note": decode_text(state["note"]) if state else None,
             "last_job": last_job,
         }
 

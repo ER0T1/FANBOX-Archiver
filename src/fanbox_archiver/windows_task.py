@@ -24,6 +24,7 @@ from typing import Any, Callable
 from xml.sax.saxutils import escape
 
 from .config import AppConfig, ScheduleConfig
+from .i18n import Text, error_text
 from .schedule import next_run
 from .timestamps import display_zone
 
@@ -152,14 +153,14 @@ def sync_background_schedule(
 ) -> dict[str, Any]:
     """Make the Windows tasks match the saved schedule; report the outcome for the UI."""
     if os.name != "nt" or not desktop_exe or config_path is None:
-        return {"state": "unavailable", "message": "背景排程只在 Windows 桌面版提供；目前只會在程式開著時執行。"}
+        return {"state": "unavailable", "message": Text("schedule.background_unavailable")}
     tasks = tasks or TaskScheduler()
     schedule = config.schedule
     try:
         if not schedule.enabled:
             tasks.delete(tasks.wake_task)
             tasks.delete(tasks.check_task)
-            return {"state": "removed", "message": "自動備份未啟用，已移除 Windows 背景排程。"}
+            return {"state": "removed", "message": Text("schedule.background_removed")}
         user = user or current_user()
         command = Path(desktop_exe)
         arguments = f'--scheduled-backup --config "{Path(config_path).resolve()}"'
@@ -177,6 +178,6 @@ def sync_background_schedule(
         else:
             tasks.delete(tasks.wake_task)
     except (OSError, RuntimeError) as exc:
-        return {"state": "error", "message": f"無法更新 Windows 背景排程：{exc}"}
-    wake = "；會在排程時間喚醒電腦" if schedule.power == "wake" else ""
-    return {"state": "registered", "message": f"已設定 Windows 背景排程：程式關閉時每 15 分鐘檢查一次{wake}。"}
+        return {"state": "error", "message": Text("schedule.background_failed", error=error_text(exc))}
+    registered = "schedule.background_registered_wake" if schedule.power == "wake" else "schedule.background_registered"
+    return {"state": "registered", "message": Text(registered)}

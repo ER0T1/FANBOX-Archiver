@@ -150,6 +150,8 @@ def test_active_job_is_recovered_as_interrupted(tmp_path: Path):
         assert restored is not None
         assert restored["status"] == "interrupted"
         assert "不會自動重新執行" in restored["error"]
+        # Stored with its key, so the reader can show it in the viewer's language.
+        assert restored["error"].localized("qps-ploc").startswith("［伺服器重新啟動")
         assert [event["kind"] for event in restored["events"]] == [
             "job_started", "job_interrupted",
         ]

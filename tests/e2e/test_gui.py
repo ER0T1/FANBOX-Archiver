@@ -20,6 +20,7 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.application import AuthStatus
+from fanbox_archiver.i18n import Text
 from fanbox_archiver.models import ContentBlock, CreatorProfile, CreatorProfileItem, Post
 from fanbox_archiver.service import ArchiveService
 from fanbox_archiver.webapp import create_app
@@ -274,7 +275,7 @@ def live_gui(tmp_path: Path):
     app = create_app(config, config_path=config_path)
     class SignedOutAuth:
         def check(self):
-            return AuthStatus("signed_out", "none", "尚未建立 FANBOX 登入工作階段。", True, False)
+            return AuthStatus("signed_out", "none", Text("auth.signed_out"), True, False)
 
     app.state.auth_service = SignedOutAuth()
     app.state.jobs.close()
@@ -1252,11 +1253,8 @@ _UNTRANSLATED = """(skip) => {
   }
   return [...found];
 }"""
-# Archived content, plus server-provided text (Fan Card benefits, creator status, sign-in status
-# messages) that is converted with the Python messages in a later batch.
-_NOT_YET = (".perk-section, .post-card strong, .post-tags, .body-text, .profile-about, .link-grid span, "
-            ".creator-card .badge, .backup-auth-notice p, .account-message, .schedule-background dd, "
-            ".schedule-note")
+# Archived content (posts, tags, profile text and links) is never translated.
+_NOT_YET = ".post-card strong, .post-tags, .body-text, .profile-about, .link-grid span"
 
 
 def _untranslated(page: Page) -> list[str]:

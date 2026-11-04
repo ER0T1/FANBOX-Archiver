@@ -616,3 +616,30 @@ async def test_custom_colors_are_validated_saved_and_served_as_css(tmp_path: Pat
     assert ':root[data-theme="dark"]{--bg:#000000;}' in css
     reloaded = type(config).load(config_path).display.colors
     assert (reloaded.light, reloaded.dark) == ({"accent": "#0055aa"}, {"bg": "#000000"})
+
+
+@pytest.mark.anyio
+async def test_server_text_follows_the_request_language(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    config.display.language = "qps-ploc"  # type: ignore[assignment]
+    transport = httpx.ASGITransport(app=create_app(config))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        missing = await client.get("/api/creators/nobody")
+        assert missing.status_code == 404
+        assert missing.json()["detail"].startswith("［找不到創作者")
+        creators = (await client.get("/api/creators")).json()["items"]
+        assert creators and all(item["status"].startswith("［") for item in creators)
+        schedule = (await client.get("/api/schedule")).json()
+        assert schedule["summary"].startswith("［每天")
+        assert schedule["background"]["message"].startswith("［背景排程")
+        token = await client.get("/")
+        assert token.status_code == 200
+        forbidden = await client.get("/api/auth/status")
+        assert forbidden.status_code == 403 and forbidden.json()["detail"].startswith("［")
+
+    config.display.language = "auto"  # type: ignore[assignment]
+    transport = httpx.ASGITransport(app=create_app(config))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        plain = await client.get("/api/creators/nobody", headers={"Accept-Language": "en-US"})
+        assert plain.json()["detail"] == "找不到創作者"  # no English catalog yet: base language
+        assert (await client.get("/api/schedule")).json()["summary"].startswith("每天")

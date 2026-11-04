@@ -181,3 +181,24 @@ def test_cli_messages_follow_the_language(tmp_path: Path):
     assert bad_id.exit_code == 2 and "［投稿 ID 必須是數字。" in bad_id.output
     plain = runner.invoke(app, ["versions", "abc", "--config", str(path)])
     assert "投稿 ID 必須是數字。" in plain.output and "［" not in plain.output
+
+
+def test_core_text_keeps_its_key_for_later_translation():
+    import copy
+    import pickle
+
+    from fanbox_archiver.i18n import Text, decode_text, error_text, localize
+
+    weekday = Text("schedule.weekday_2")
+    summary = Text("schedule.summary_every_weeks", count=2, weekday=weekday, time="03:00", zone="Asia/Taipei")
+    assert summary == "每 2 週的週三 03:00（Asia/Taipei）"  # it is the base-language string
+    assert summary.localized(PSEUDO_LOCALE).startswith("［每 2 週的［週三")
+    for clone in (copy.deepcopy(summary), pickle.loads(pickle.dumps(summary))):
+        assert isinstance(clone, Text) and clone.localized(PSEUDO_LOCALE) == summary.localized(PSEUDO_LOCALE)
+    stored = summary.encode()
+    assert stored.startswith("i18n:") and decode_text(stored).localized(PSEUDO_LOCALE) == summary.localized(PSEUDO_LOCALE)
+    assert decode_text("舊的純文字") == "舊的純文字" and decode_text(None) is None
+    assert decode_text("i18n:{broken") == "i18n:{broken"
+    assert error_text(RuntimeError(summary)) is summary and error_text(ValueError("x")) == "x"
+    tree = localize({"items": [{"status": Text("creators.status_synced")}], "count": 3}, PSEUDO_LOCALE)
+    assert tree["items"][0]["status"].startswith("［同步完成") and tree["count"] == 3

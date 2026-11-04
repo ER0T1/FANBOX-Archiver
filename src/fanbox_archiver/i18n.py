@@ -170,6 +170,81 @@ class Translator:
         return translate(key, self.locale, **params)
 
 
+class Text(str):
+    """Interface text produced where the reader's language is unknown (core code, background work).
+
+    It *is* the base-language string, so logs, comparisons and existing callers keep working, and
+    it remembers its key and parameters so a boundary that knows the language (the web server, the
+    CLI) can show it translated with :func:`localize`. Parameters may themselves be ``Text``.
+    """
+
+    key: str
+    params: dict[str, object]
+
+    def __new__(cls, key: str, /, **params: object) -> Text:
+        self = super().__new__(cls, translate(key, BASE_LOCALE, **params))
+        self.key = key
+        self.params = params
+        return self
+
+    def __reduce__(self):  # copy/deepcopy/pickle rebuild from the key, not the rendered text
+        return (_rebuild_text, (self.key, self.params))
+
+    def localized(self, locale: str) -> str:
+        return translate(self.key, locale, **{name: localize(value, locale) for name, value in self.params.items()})
+
+    def encode(self) -> str:
+        """A string for storage that :func:`decode_text` turns back into ``Text``."""
+        return STORED_TEXT_PREFIX + json.dumps(_dump_text(self), ensure_ascii=False)
+
+
+STORED_TEXT_PREFIX = "i18n:"
+
+
+def _rebuild_text(key: str, params: dict[str, object]) -> Text:
+    return Text(key, **params)
+
+
+def _dump_text(value: object) -> object:
+    if isinstance(value, Text):
+        return {"$key": value.key, "params": {name: _dump_text(item) for name, item in value.params.items()}}
+    return value
+
+
+def _load_text(value: object) -> object:
+    if isinstance(value, dict) and isinstance(value.get("$key"), str):
+        params = value.get("params") if isinstance(value.get("params"), dict) else {}
+        return Text(value["$key"], **{name: _load_text(item) for name, item in params.items()})
+    return value
+
+
+def decode_text(value: object) -> object:
+    """Undo :meth:`Text.encode`; anything else (older plain text, None) is returned unchanged."""
+    if isinstance(value, str) and value.startswith(STORED_TEXT_PREFIX):
+        try:
+            loaded = _load_text(json.loads(value[len(STORED_TEXT_PREFIX):]))
+        except ValueError:
+            return value
+        return loaded if isinstance(loaded, Text) else value
+    return value
+
+
+def error_text(exc: BaseException) -> str:
+    """An exception's message, keeping it translatable when it was raised with ``Text``."""
+    return exc.args[0] if len(exc.args) == 1 and isinstance(exc.args[0], Text) else str(exc)
+
+
+def localize(value: object, locale: str) -> object:
+    """``value`` with every ``Text`` (also inside dicts, lists and tuples) shown in ``locale``."""
+    if isinstance(value, Text):
+        return value.localized(locale)
+    if isinstance(value, dict):
+        return {name: localize(item, locale) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [localize(item, locale) for item in value]
+    return value
+
+
 def browser_payload(locale: str) -> dict[str, object]:
     """What the dynamic reader loads as ``window.FanboxI18n``."""
     return {"locale": locale, "intl": intl_locale(locale), "base": BASE_LOCALE,

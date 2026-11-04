@@ -11,6 +11,7 @@ from urllib.parse import quote
 from .config import AppConfig
 from .database import Database
 from .fancard_perks import normalize_fancard_perks
+from .i18n import Text
 from .models import Asset, CreatorProfile, Post
 from .security import confined_path
 
@@ -214,7 +215,7 @@ class ArchiveReader:
                 "post_count": int(row["post_count"] or 0),
                 "completed_count": int(row["completed_count"] or 0),
                 "last_sync": row["last_sync"],
-                "status": str(row["status"]),
+                "status": row["status"],  # Text: shown in the reader's language
                 "avatar_url": f"/api/creators/{quote(creator_id, safe='')}/avatar" if row["icon_path"] else None,
                 "profile_available": bool(row["profile_version_count"]),
                 "profile_version_count": int(row["profile_version_count"]),
@@ -228,7 +229,7 @@ class ArchiveReader:
             None,
         )
         if item is None:
-            raise ReaderNotFound("找不到創作者")
+            raise ReaderNotFound(Text("reader.creator_missing"))
         cards = self.list_fancards(creator=creator_id)
         item["fancard_count"] = len(cards)
         item["fanbox_url"] = f"https://www.fanbox.cc/@{creator_id}"
@@ -275,7 +276,7 @@ class ArchiveReader:
 
     def creator_profile_versions(self, creator_id: str) -> list[dict[str, Any]]:
         if self.db.creator_row(creator_id) is None:
-            raise ReaderNotFound("找不到創作者")
+            raise ReaderNotFound(Text("reader.creator_missing"))
         return [
             {
                 "number": int(row["version_number"]),
@@ -289,7 +290,7 @@ class ArchiveReader:
     def creator_profile_cover(self, creator_id: str, version: int) -> MediaFile:
         row, _ = self._load_profile(creator_id, version)
         if not row["cover_path"]:
-            raise ReaderNotFound("此 Profile 沒有橫幅")
+            raise ReaderNotFound(Text("reader.profile_banner_missing"))
         return self._local_media(Path(str(row["cover_path"])), f"{creator_id}-cover")
 
     def creator_profile_item_image(
@@ -297,22 +298,22 @@ class ArchiveReader:
     ) -> MediaFile:
         row, profile = self._load_profile(creator_id, version)
         if item_index < 0 or item_index >= len(profile.profile_items):
-            raise ReaderNotFound("找不到 Profile 圖片")
+            raise ReaderNotFound(Text("reader.profile_image_missing"))
         item = profile.profile_items[item_index]
         if not item.image_path:
-            raise ReaderNotFound("此 Profile Item 沒有本機圖片")
+            raise ReaderNotFound(Text("reader.profile_item_image_missing"))
         version_root = Path(str(row["local_path"])).resolve()
         try:
             version_root.relative_to(self.root)
             path = confined_path(version_root, Path(item.image_path))
         except ValueError as exc:
-            raise ReaderNotFound("Profile 圖片路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.profile_image_unsafe")) from exc
         return self._local_media(path, f"{creator_id}-profile-{item_index + 1}")
 
     def creator_avatar(self, creator_id: str) -> MediaFile:
         row = self.db.creator_row(creator_id)
         if row is None or not row["icon_path"]:
-            raise ReaderNotFound("找不到創作者頭像")
+            raise ReaderNotFound(Text("reader.avatar_missing"))
         return self._local_media(Path(str(row["icon_path"])), f"{creator_id}-avatar")
 
     def list_fancards(self, *, query: str = "", creator: str = "") -> list[dict[str, Any]]:
@@ -395,7 +396,7 @@ class ArchiveReader:
     def fancard_image(self, creator_id: str, target_month: str, version: int) -> MediaFile:
         row, _ = self._load_fancard(creator_id, target_month, version)
         if not row["image_path"]:
-            raise ReaderNotFound("此 Fan Card 沒有卡面")
+            raise ReaderNotFound(Text("reader.fancard_image_missing"))
         return self._local_media(
             Path(str(row["image_path"])), f"{creator_id}-{target_month}-card"
         )
@@ -462,15 +463,15 @@ class ArchiveReader:
             None,
         )
         if not asset or not asset.local_path:
-            raise ReaderNotFound("找不到指定資源")
+            raise ReaderNotFound(Text("reader.asset_missing"))
         version_root = Path(str(row["local_path"])).resolve()
         try:
             version_root.relative_to(self.root)
             path = confined_path(version_root, Path(asset.local_path))
         except ValueError as exc:
-            raise ReaderNotFound("資源路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.asset_unsafe")) from exc
         if not path.is_file():
-            raise ReaderNotFound("資源檔案不存在")
+            raise ReaderNotFound(Text("reader.asset_file_missing"))
         media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         return MediaFile(path, asset.original_name or path.name, media_type)
 
@@ -515,7 +516,7 @@ class ArchiveReader:
             "post_id": target_post_id,
             "creator_id": creator_id,
             "creator_name": str(user.get("name") or creator_id),
-            "title": str(info.get("title") or block.name or "FANBOX 投稿"),
+            "title": str(info.get("title") or block.name or Text("reader.embed_title")),
             "excerpt": str(info.get("excerpt") or block.text or ""),
             "published_at": info.get("publishedDatetime"),
             "fee_required": fee if isinstance(fee, int) else None,
@@ -526,7 +527,7 @@ class ArchiveReader:
 
     def _load_post(self, post_id: str, version: int | None) -> tuple[Any, Post]:
         if not post_id.isdigit():
-            raise ReaderNotFound("投稿 ID 無效")
+            raise ReaderNotFound(Text("reader.post_id_invalid"))
         rows = self.db.version_rows(post_id)
         if version is None:
             candidates = [row for row in rows if row["status"] == "completed"]
@@ -534,18 +535,18 @@ class ArchiveReader:
         else:
             row = next((item for item in rows if int(item["version_number"]) == version), None)
         if row is None:
-            raise ReaderNotFound("找不到投稿版本")
+            raise ReaderNotFound(Text("reader.post_version_missing"))
         source = Path(str(row["json_path"] or ""))
         try:
             source.resolve().relative_to(self.root)
         except ValueError as exc:
-            raise ReaderNotFound("投稿資料路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.post_data_unsafe")) from exc
         if not source.is_file():
-            raise ReaderNotFound("投稿資料檔案不存在")
+            raise ReaderNotFound(Text("reader.post_data_missing"))
         try:
             post = Post.model_validate_json(source.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise ReaderNotFound("投稿資料無法讀取") from exc
+            raise ReaderNotFound(Text("reader.post_data_unreadable")) from exc
         return row, post
 
     def _load_profile(
@@ -559,25 +560,25 @@ class ArchiveReader:
                 (item for item in rows if int(item["version_number"]) == version), None
             )
         if row is None:
-            raise ReaderNotFound("找不到 Profile 版本")
+            raise ReaderNotFound(Text("reader.profile_version_missing"))
         source = Path(str(row["json_path"] or "")).resolve()
         try:
             source.relative_to(self.root)
         except ValueError as exc:
-            raise ReaderNotFound("Profile 資料路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.profile_data_unsafe")) from exc
         if not source.is_file():
-            raise ReaderNotFound("Profile 資料檔案不存在")
+            raise ReaderNotFound(Text("reader.profile_data_missing"))
         try:
             profile = CreatorProfile.model_validate_json(source.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise ReaderNotFound("Profile 資料無法讀取") from exc
+            raise ReaderNotFound(Text("reader.profile_data_unreadable")) from exc
         return row, profile
 
     def _load_fancard(
         self, creator_id: str, target_month: str, version: int | None,
     ) -> tuple[Any, dict[str, Any]]:
         if not re.fullmatch(r"\d{4}-\d{2}", target_month):
-            raise ReaderNotFound("Fan Card 月份無效")
+            raise ReaderNotFound(Text("reader.fancard_month_invalid"))
         with self.db.connect() as db:
             rows = list(db.execute(
                 "SELECT * FROM fancard_versions WHERE creator_id=? AND target_month=? "
@@ -590,21 +591,21 @@ class ArchiveReader:
         else:
             row = next((item for item in rows if int(item["version_number"]) == version), None)
         if row is None:
-            raise ReaderNotFound("找不到 Fan Card 版本")
+            raise ReaderNotFound(Text("reader.fancard_version_missing"))
         source = Path(str(row["local_path"])).resolve() / "fancard.json"
         try:
             source.relative_to(self.root)
         except ValueError as exc:
-            raise ReaderNotFound("Fan Card 資料路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.fancard_data_unsafe")) from exc
         if not source.is_file():
-            raise ReaderNotFound("Fan Card 資料檔案不存在")
+            raise ReaderNotFound(Text("reader.fancard_data_missing"))
         try:
             payload = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise ReaderNotFound("Fan Card 資料無法讀取") from exc
+            raise ReaderNotFound(Text("reader.fancard_data_unreadable")) from exc
         body = payload.get("body")
         if not isinstance(body, dict):
-            raise ReaderNotFound("Fan Card 資料格式無效")
+            raise ReaderNotFound(Text("reader.fancard_data_invalid"))
         return row, body
 
     def _fancard_summary(self, row: Any) -> dict[str, Any]:
@@ -634,9 +635,9 @@ class ArchiveReader:
         try:
             resolved.relative_to(self.root)
         except ValueError as exc:
-            raise ReaderNotFound("資源路徑不安全") from exc
+            raise ReaderNotFound(Text("reader.asset_unsafe")) from exc
         if not resolved.is_file():
-            raise ReaderNotFound("資源檔案不存在")
+            raise ReaderNotFound(Text("reader.asset_file_missing"))
         media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
         return MediaFile(resolved, resolved.name or fallback_name, media_type)
 

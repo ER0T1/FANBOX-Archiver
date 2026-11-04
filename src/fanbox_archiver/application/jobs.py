@@ -12,6 +12,7 @@ from typing import Any, Callable
 from ..archive_lock import ArchiveLock
 from ..config import AppConfig
 from ..database import Database
+from ..i18n import Text, decode_text, error_text
 from ..service import ArchiveService
 from .backup import BackupRequest, BackupUseCase
 from .events import BackupCancelled, BackupEvent, CancellationToken, EventSink
@@ -57,7 +58,7 @@ class BackupJobManager:
     manager reports itself busy and never marks the other process's job interrupted.
     """
 
-    EXTERNAL_BUSY = "背景排程備份執行中，完成後才能開始新的工作"
+    EXTERNAL_BUSY = Text("jobs.external_busy")
 
     _FINISHED_IN_MEMORY = 10
     _ACTIVE = frozenset({"queued", "running", "cancelling"})
@@ -91,7 +92,7 @@ class BackupJobManager:
 
     def _submit_locked(self, kind: str, request: Any) -> dict[str, Any]:
         if any(job.status in self._ACTIVE for job in self._jobs.values()):
-            raise RuntimeError("已有備份工作正在執行")
+            raise RuntimeError(Text("jobs.already_running"))
         if self._external_busy():
             raise RuntimeError(self.EXTERNAL_BUSY)
         job_id = uuid.uuid4().hex
@@ -149,7 +150,7 @@ class BackupJobManager:
                 row = self.db.web_job_row(job_id)
                 return self._row_snapshot(row, include_events=True) if row is not None else None
             if job.kind != "backup" and job.status in {"queued", "running", "cancelling"}:
-                raise RuntimeError("此類工作不支援中途取消")
+                raise RuntimeError(Text("jobs.cannot_cancel"))
             if job.status in {"queued", "running"}:
                 job.cancellation.cancel()
                 job.status = "cancelling"
@@ -162,7 +163,7 @@ class BackupJobManager:
             job = self._jobs.get(job_id)
             if job is not None:
                 if job.status in self._ACTIVE:
-                    raise RuntimeError("工作仍在執行，無法重試")
+                    raise RuntimeError(Text("jobs.cannot_retry_running"))
                 return self._submit_locked(job.kind, job.request)
         row = self.db.web_job_row(job_id)
         if row is None:
@@ -253,11 +254,11 @@ class BackupJobManager:
         except BackupCancelled as exc:
             with self._lock:
                 job.status = "cancelled"
-                job.error = str(exc)
+                job.error = error_text(exc)
         except Exception as exc:
             with self._lock:
                 job.status = "failed"
-                job.error = str(exc)
+                job.error = error_text(exc)
         finally:
             with self._lock:
                 if job.kind == "verify" and job.status != "completed":
@@ -345,7 +346,7 @@ class BackupJobManager:
             "started_at": row["started_at"],
             "finished_at": row["finished_at"],
             "updated_at": str(row["updated_at"]),
-            "error": row["error"],
+            "error": decode_text(row["error"]),
             "result": json.loads(str(row["result_json"])) if row["result_json"] else None,
             "event_count": int(row["event_count"]),
         }
@@ -367,7 +368,7 @@ class BackupJobManager:
             updated_at=job.updated_at,
             started_at=job.started_at,
             finished_at=job.finished_at,
-            error=job.error,
+            error=job.error.encode() if isinstance(job.error, Text) else job.error,
             result_json=(
                 json.dumps(job.result, ensure_ascii=False, sort_keys=True)
                 if job.result is not None else None

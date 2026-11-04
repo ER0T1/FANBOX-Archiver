@@ -42,7 +42,9 @@ from .legacy_site import cleanup_owned_archive
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, set_display_timezone
-from .i18n import BASE_LOCALE, LANGUAGE_SETTINGS, Translator, resolve_locale, system_locales, translate
+from .i18n import (
+    BASE_LOCALE, LANGUAGE_SETTINGS, Translator, localize, resolve_locale, system_locales, translate,
+)
 
 
 if os.name == "nt":
@@ -71,6 +73,11 @@ _translator = Translator(BASE_LOCALE)
 
 def tr(key: str, /, **params: object) -> str:
     return _translator(key, **params)
+
+
+def shown(value: object) -> str:
+    """Core text (``Text``) in this run's language; other values as they are."""
+    return str(localize(value, _translator.locale))
 
 
 def _set_locale(locale: str) -> None:
@@ -211,7 +218,7 @@ def verify_login(settings: AppConfig, browser: str | None = None) -> None:
         if status.state == "authenticated":
             console.print(f"[green]{tr('cli.auth.valid')}[/green]")
             return
-        console.print(f"[red]{status.message}[/red]")
+        console.print(f"[red]{shown(status.message)}[/red]")
         raise typer.Exit(1)
     cookie = get_cookie(settings, browser)
     if not cookie:
@@ -304,7 +311,7 @@ def creators(
     for row in rows:
         table.add_row(
             str(row["creator_id"]), str(row["name"]), str(row["post_count"]),
-            format_local_time(row["last_sync"]), str(row["status"]), str(row["url"]),
+            format_local_time(row["last_sync"]), shown(row["status"]), str(row["url"]),
         )
     console.print(table)
 

@@ -11,9 +11,9 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta, tzinfo
 
 from .config import ScheduleConfig
+from .i18n import Text
 from .timestamps import display_zone
 
-_WEEKDAYS = ("一", "二", "三", "四", "五", "六", "日")
 # Occurrences are at most a month apart, so a few hundred steps cover any search.
 _MAX_STEPS = 500
 
@@ -95,7 +95,7 @@ def next_run(schedule: ScheduleConfig, after: datetime, zone: tzinfo | None = No
         if occurrence > after:
             return occurrence
         day += timedelta(days=1)
-    raise RuntimeError("排程無法計算下一次執行時間")
+    raise RuntimeError(Text("schedule.next_run_failed"))
 
 
 def latest_due(schedule: ScheduleConfig, now: datetime, zone: tzinfo | None = None) -> datetime | None:
@@ -140,15 +140,17 @@ def count_between(
     return count
 
 
-def describe(schedule: ScheduleConfig, zone_name: str | None = None) -> str:
+def describe(schedule: ScheduleConfig, zone_name: str | None = None) -> Text:
     """Human-readable summary, e.g. 每 2 週的週三 03:00（Asia/Taipei）."""
-    at = f"{schedule.time}（{zone_name or display_zone().name}）"
+    at = {"time": schedule.time, "zone": zone_name or display_zone().name}
     if schedule.frequency == "daily":
-        period = "每天" if schedule.interval == 1 else f"每 {schedule.interval} 天"
-        return f"{period} {at}"
+        if schedule.interval == 1:
+            return Text("schedule.summary_daily", **at)
+        return Text("schedule.summary_every_days", count=schedule.interval, **at)
     if schedule.frequency == "weekly":
-        day = f"週{_WEEKDAYS[schedule.weekday]}"
-        period = f"每{day}" if schedule.interval == 1 else f"每 {schedule.interval} 週的{day}"
-        return f"{period} {at}"
-    short = "；該月沒有這一天時於月底執行" if schedule.month_day > 28 else ""
-    return f"每月 {schedule.month_day} 日 {at}{short}"
+        weekday = Text(f"schedule.weekday_{schedule.weekday}")
+        if schedule.interval == 1:
+            return Text("schedule.summary_weekly", weekday=weekday, **at)
+        return Text("schedule.summary_every_weeks", count=schedule.interval, weekday=weekday, **at)
+    end = "schedule.summary_monthly_end" if schedule.month_day > 28 else "schedule.summary_monthly"
+    return Text(end, day=schedule.month_day, **at)

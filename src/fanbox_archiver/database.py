@@ -10,6 +10,7 @@ from typing import Iterator
 
 from .models import Asset, AssetStatus, Post, PostStatus
 from .client import PostSummary
+from .i18n import Text
 
 
 SCHEMA = """
@@ -627,15 +628,15 @@ class Database:
         for row in rows:
             post_count = int(row["post_count"] or 0)
             if row["last_error"]:
-                status = "部分失敗"
+                status = Text("creators.status_partial_failure")
             elif post_count == 0:
-                status = "尚未備份"
+                status = Text("creators.status_not_backed_up")
             elif row["backfill_completed"] and row["last_success_at"]:
-                status = "同步完成"
+                status = Text("creators.status_synced")
             elif row["last_success_at"]:
-                status = "歷史回補中"
+                status = Text("creators.status_backfilling")
             else:
-                status = "已有本機資料"
+                status = Text("creators.status_local")
             result.append({
                 "creator_id": str(row["creator_id"]),
                 "name": str(row["name"]),
@@ -768,7 +769,7 @@ class Database:
             ))
             for row in rows:
                 job_id = str(row["job_id"])
-                message = "伺服器重新啟動，先前工作已中斷；不會自動重新執行。"
+                message = Text("jobs.interrupted_by_restart").encode()
                 db.execute(
                     "UPDATE web_jobs SET status='interrupted',updated_at=?,finished_at=?,error=? "
                     "WHERE job_id=?",

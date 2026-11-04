@@ -4,6 +4,8 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
+
+from ..i18n import Text, error_text
 from datetime import UTC, datetime
 from threading import Event, Lock
 from typing import Any, Callable
@@ -50,19 +52,19 @@ class AuthenticationService:
                     profile, channel=self.config.auth.browser_channel
                 )
             except BrowserLoginError as exc:
-                return AuthStatus("error", "profile", str(exc), True, True)
+                return AuthStatus("error", "profile", error_text(exc), True, True)
             if authenticated:
                 return AuthStatus(
-                    "authenticated", "profile", "專用瀏覽器工作階段有效。", True, True
+                    "authenticated", "profile", Text("auth.profile_valid"), True, True
                 )
             return AuthStatus(
-                "expired", "profile", "專用瀏覽器工作階段已失效，請重新登入。", True, True
+                "expired", "profile", Text("auth.profile_expired"), True, True
             )
 
         cookie = os.environ.get("FANBOX_COOKIE", "").strip()
         if not cookie:
             return AuthStatus(
-                "signed_out", "none", "尚未建立 FANBOX 登入工作階段。", True, False
+                "signed_out", "none", Text("auth.signed_out"), True, False
             )
         try:
             with FanboxClient(
@@ -73,14 +75,14 @@ class AuthenticationService:
                 authenticated = client.verify_auth()
         except Exception as exc:
             return AuthStatus(
-                "error", "environment", f"無法檢查外部管理的登入狀態：{type(exc).__name__}",
+                "error", "environment", Text("auth.external_check_failed", error=type(exc).__name__),
                 True, False, True,
             )
         return AuthStatus(
             "authenticated" if authenticated else "expired",
             "environment",
-            ("外部 FANBOX_COOKIE 有效。" if authenticated else
-             "外部 FANBOX_COOKIE 已失效；請在啟動環境中更新或移除。"),
+            (Text("auth.external_valid") if authenticated else
+             Text("auth.external_expired")),
             True, False, True,
         )
 
@@ -98,13 +100,13 @@ class AuthenticationService:
     def logout(self) -> AuthStatus:
         if not self.config.auth.profile_dir.exists():
             if os.environ.get("FANBOX_COOKIE", "").strip():
-                raise RuntimeError("登入由 FANBOX_COOKIE 外部管理，無法由應用程式撤銷")
+                raise RuntimeError(Text("auth.external_cannot_logout"))
             return self.check()
         clear_profile_authentication(
             self.config.auth.profile_dir, channel=self.config.auth.browser_channel
         )
         return AuthStatus(
-            "signed_out", "profile", "已清除專用 FANBOX 工作階段。", True, False
+            "signed_out", "profile", Text("auth.logged_out"), True, False
         )
 
 
@@ -121,7 +123,7 @@ class AuthenticationJobManager:
     def start(self, *, timeout_seconds: int = 600) -> dict[str, Any]:
         with self._lock:
             if self._job and self._job["status"] in {"queued", "running", "cancelling"}:
-                raise RuntimeError("登入視窗已在執行")
+                raise RuntimeError(Text("auth.login_running"))
             self._cancel = Event()
             self._job = {
                 "job_id": uuid.uuid4().hex,
