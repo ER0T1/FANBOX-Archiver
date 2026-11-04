@@ -27,7 +27,7 @@ class MediaFile:
 
 
 class ArchiveReader:
-    """Read archive data on demand without generating a static site."""
+    """Read archive data on demand for the dynamic reader."""
 
     def __init__(self, config: AppConfig):
         self.root = config.storage.output_dir.resolve()

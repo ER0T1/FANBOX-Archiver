@@ -64,7 +64,7 @@ def database_schema_version(database: Path) -> int | None:
     return int(row[0]) if row and row[0] is not None else None
 
 
-def collect(config: AppConfig, config_path: Path | None) -> dict:
+def collect(config: AppConfig, config_path: Path | None, notices: list[str] | tuple[str, ...] = ()) -> dict:
     desktop = bool(os.environ.get(DESKTOP_EXE_ENV))
     folders = {target: folder_path(config, target) for target in ("archive", "archive_logs", "desktop_logs")}
     info = {
@@ -87,6 +87,8 @@ def collect(config: AppConfig, config_path: Path | None) -> dict:
         },
         "folders": {target: bool(path and path.is_dir()) for target, path in folders.items()},
         "can_open_folders": can_open_folders(),
+        # Things the user may want to act on, e.g. old static-site files that were not removed.
+        "notices": list(notices),
     }
     info["text"] = diagnostics_text(info)
     return info
@@ -111,4 +113,5 @@ def diagnostics_text(info: dict) -> str:
     ]
     if paths["desktop_logs"]:
         lines.append(f"桌面日誌：{paths['desktop_logs']}")
+    lines.extend(f"提示：{notice}" for notice in info.get("notices", []))
     return "\n".join(lines) + "\n"

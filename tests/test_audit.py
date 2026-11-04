@@ -594,9 +594,7 @@ def test_repair_copy_moves_misfiled_fancard_into_capture_month(tmp_path: Path, m
     assert (alice / "2026-11/fancard.md").read_bytes() == (
         alice / "2026-11/versions/v0002/fancard.md"
     ).read_bytes()
-    site = destination / "_site/fancards/alice"
-    assert (site / "2026-11/v0002.html").is_file()
-    assert not (site / "2026-10/v0002.html").exists()
+    assert not (destination / "_site").exists()  # the removed static site is never copied
     report = json.loads((destination / result.report).read_text(encoding="utf-8"))
     assert [item["finding_code"] for item in report["applied"]] == ["fancard_month"]
 

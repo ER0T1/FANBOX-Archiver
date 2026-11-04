@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fanbox-archiver"
-version = "1.3.45-alpha"
+version = "1.3.46-alpha"
 description = "A conservative, local pixivFANBOX backup CLI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -38,7 +38,6 @@ fanbox-archiver = "fanbox_archiver.cli:app"
 packages = ["src/fanbox_archiver"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/fanbox_archiver/site_assets" = "fanbox_archiver/site_assets"
 "src/fanbox_archiver/web_assets" = "fanbox_archiver/web_assets"
 "src/fanbox_archiver/locales" = "fanbox_archiver/locales"
 

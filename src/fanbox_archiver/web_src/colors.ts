@@ -216,7 +216,7 @@ namespace FanboxUI {
 
     const node = h("section", {class: "settings-section color-editor"}, h("h3", {}, "自訂配色"),
       h("p", {class: "settings-section-description"},
-        "只能調整下列顏色，未自訂的顏色沿用內建值；亮色與暗色各一組。儲存後套用到動態閱讀器與桌面程式，不套用到匯出的靜態網站。"),
+        "只能調整下列顏色，未自訂的顏色沿用內建值；亮色與暗色各一組。儲存後套用到動態閱讀器與桌面程式。"),
       h("div", {class: "color-mode-switch", role: "group", "aria-label": "編輯哪一組配色"}, ...modeButtons),
       preview, warnings, rows,
       h("div", {class: "color-actions"},

@@ -26,7 +26,6 @@ PYTHON_RULES = (
 BYPASS = re.compile(r"\bTAIPEI\b")
 FRONTEND_FILES = (
     *sorted((PACKAGE / "web_src").glob("*.ts")),
-    *sorted((PACKAGE / "site_assets").glob("*.js")),
     *sorted((PACKAGE / "web_assets").glob("*.js")),
 )
 MARKUP_FILES = (*FRONTEND_FILES, *sorted((PACKAGE / "web_assets").glob("*.html")))

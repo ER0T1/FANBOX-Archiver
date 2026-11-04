@@ -1,4 +1,4 @@
-"""Interface translation catalogs shared by the CLI, the dynamic reader and exported static sites.
+"""Interface translation catalogs shared by the CLI and the dynamic reader / desktop app.
 
 Boundaries (see the Anytype i18n decision):
 
@@ -168,7 +168,7 @@ class Translator:
 
 
 def browser_payload(locale: str) -> dict[str, object]:
-    """What the dynamic reader and static site load as ``window.FanboxI18n``."""
+    """What the dynamic reader loads as ``window.FanboxI18n``."""
     return {"locale": locale, "intl": intl_locale(locale), "base": BASE_LOCALE,
             "messages": catalog(locale)}
 

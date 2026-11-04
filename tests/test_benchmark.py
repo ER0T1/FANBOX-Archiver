@@ -32,8 +32,6 @@ def test_synthetic_benchmark_covers_data_paths_and_query_plans(tmp_path: Path):
     assert result["timings_ms"]["frontend_first_render"] is None
     assert result["timings_ms"]["sqlite"]["list_median"] > 0
     assert result["timings_ms"]["reader"]["list_median"] > 0
-    assert result["static_index"]["first_rendered"] >= 12
-    assert result["static_index"]["reuse_reused"] >= 12
     assert set(result["query_plans"]) == {"list", "creator_list", "search"}
     assert all(result["query_plans"].values())
     assert any("idx_posts_published" in step for step in result["query_plans"]["list"])

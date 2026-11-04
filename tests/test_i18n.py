@@ -36,8 +36,7 @@ def test_base_catalog_is_well_formed():
 
 
 def _used_keys() -> set[str]:
-    sources = [*(PACKAGE / "web_src").glob("*.ts"), PACKAGE / "site_assets" / "app.js",
-               PACKAGE / "cli.py", PACKAGE / "indexer.py"]
+    sources = [*(PACKAGE / "web_src").glob("*.ts"), PACKAGE / "cli.py"]
     keys: set[str] = set()
     for path in sources:
         text = path.read_text(encoding="utf-8")
@@ -51,9 +50,9 @@ def _used_keys() -> set[str]:
     return keys
 
 
-def test_every_key_used_by_the_ui_cli_and_static_site_exists():
+def test_every_key_used_by_the_ui_and_cli_exists():
     used = _used_keys()
-    assert {"nav.posts", "posts.total", "static.nav_posts", "cli.status.last_run", "search.creators"} <= used
+    assert {"nav.posts", "posts.total", "cli.status.last_run", "search.creators"} <= used
     assert sorted(used - set(catalog(BASE_LOCALE))) == []
 
 

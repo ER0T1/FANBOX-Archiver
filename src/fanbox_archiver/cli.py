@@ -8,7 +8,6 @@ import sys
 import webbrowser
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote
 
 import typer
 from pydantic import ValidationError
@@ -37,7 +36,7 @@ from .database import Database
 from .diagnostics import open_folder
 from .windows_task import DESKTOP_EXE_ENV, refresh_wake_task
 from .logging_setup import configure_logging, get_logger
-from .indexer import IndexBuilder
+from .legacy_site import cleanup_owned_archive
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, set_display_timezone
@@ -362,6 +361,8 @@ def backup(
             f"posts:{','.join(posts)}" if posts else
             f"creators:{','.join(creators)}" if creators else "supporting"
         )
+        if not dry_run:
+            cleanup_owned_archive(settings)
         _run_backup(
             settings, creators=creators, posts=posts, dry_run=dry_run,
             max_posts=max_posts, browser=browser, scope=scope,
@@ -439,6 +440,7 @@ def schedule_run(
         # The desktop app (or another background run) owns this archive and schedules itself.
         log.info("封存正由 FANBOX Archiver 使用中，略過本次背景排程檢查。")
         return
+    cleanup_owned_archive(settings, lock)
     manager = BackupJobManager(settings, archive_lock=lock)
     try:
         scheduler = BackupScheduler(
@@ -483,34 +485,18 @@ def repair_copy(
     console.print(f"修復前後差異與完整驗證報告：{result.report}（驗證問題 {result.verify_issue_count} 項）")
 
 
-@app.command("index")
+@app.command("index", hidden=True)
 def build_index(
-    force: Annotated[bool, typer.Option("--force", help="忽略頁面指紋並完整重建索引")] = False,
-    check: Annotated[bool, typer.Option("--check", help="只驗證現有索引，不重建")] = False,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    force: Annotated[bool, typer.Option("--force", hidden=True)] = False,
+    check: Annotated[bool, typer.Option("--check", hidden=True)] = False,
+    config: Annotated[Path, typer.Option("--config", "-c", hidden=True)] = Path("config.yaml"),
 ) -> None:
-    """建立或驗證可直接以瀏覽器開啟的離線閱讀索引。"""
-    builder = IndexBuilder(load_config(config))
-    if check:
-        issues = builder.check()
-        if not issues:
-            console.print("[green]索引驗證通過。[/green]")
-            return
-        for issue in issues:
-            console.print(f"[red]{issue}[/red]")
-        raise typer.Exit(1)
-    try:
-        result = builder.build(force=force)
-    except Exception as exc:
-        console.print(f"[red]索引建置失敗：[/red]{exc}")
-        raise typer.Exit(1) from exc
-    console.print(
-        f"[green]索引已建立。[/green]產生 {result.rendered} 頁，沿用 {result.reused} 頁，"
-        f"警告 {len(result.warnings)} 項。"
-    )
-    console.print(str(result.index_path))
-    for warning in result.warnings:
-        console.print(f"[yellow]{warning}[/yellow]")
+    """已移除：離線靜態網站自 v1.3.46-alpha 起不再提供。"""
+    # Kept only so old scripts and scheduled tasks get a clear message instead of "no such command".
+    del force, check, config
+    console.print("[red]離線靜態網站已移除，`index` 指令不再提供。[/red]")
+    console.print("請改用 `fanbox-archiver serve`（或 Windows 桌面版）閱讀封存；可攜閱讀請使用各投稿資料夾中的 Markdown。")
+    raise typer.Exit(1)
 
 
 @app.command()
@@ -519,7 +505,7 @@ def serve(
     open_browser: Annotated[bool, typer.Option("--open/--no-open", help="啟動後以預設瀏覽器開啟")] = True,
     config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
 ) -> None:
-    """啟動動態本機閱讀器；不需預先執行 index。"""
+    """啟動動態本機閱讀器。"""
     settings = load_config(config)
     try:
         import threading
@@ -555,26 +541,26 @@ def clear_posts(
         console.print("已取消。")
         raise typer.Exit()
     try:
+        cleanup_owned_archive(settings)
         count = ArchiveService(settings).clear_posts()
-        result = IndexBuilder(settings).build(force=True)
     except Exception as exc:
         console.print(f"[red]清除 Post 失敗：[/red]{exc}")
         raise typer.Exit(1) from exc
     console.print(f"[green]已清除 {count} 篇 Post。[/green]Fan Card、創作者與登入資料均已保留。")
-    console.print(f"索引已重建：{result.index_path}")
 
 
 @app.command("open")
 def open_archive(
-    post: Annotated[str | None, typer.Option("--post", help="開啟指定投稿 ID 的最新版閱讀頁")] = None,
+    post: Annotated[str | None, typer.Option("--post", help="開啟指定投稿 ID 最新版的資料夾")] = None,
     version: Annotated[int | None, typer.Option("--version", min=1, help="搭配 --post 開啟指定版本")] = None,
-    creator: Annotated[str | None, typer.Option("--creator", help="在索引中篩選指定 Creator ID")] = None,
-    fancard: Annotated[str | None, typer.Option("--fancard", help="開啟指定 Creator ID 的 Fan Card")] = None,
+    creator: Annotated[str | None, typer.Option("--creator", help="開啟指定 Creator ID 的資料夾")] = None,
+    fancard: Annotated[str | None, typer.Option("--fancard", help="開啟指定 Creator ID 的 Fan Card 資料夾")] = None,
     month: Annotated[str | None, typer.Option("--month", help="搭配 --fancard 指定 YYYY-MM 月份")] = None,
-    folder: Annotated[bool, typer.Option("--folder", help="改以檔案總管開啟對應的備份目錄")] = False,
+    folder: Annotated[bool, typer.Option("--folder", hidden=True)] = False,
     config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
 ) -> None:
-    """以預設瀏覽器開啟本機索引、投稿或 Fan Card。"""
+    """以檔案總管開啟封存、投稿版本、創作者或 Fan Card 的資料夾（內含 Markdown 與原始檔）。"""
+    del folder  # folders are the only target since the static site was removed; kept for old scripts
     settings = load_config(config)
     root = settings.storage.output_dir.resolve()
     if version is not None and not post:
@@ -598,55 +584,38 @@ def open_archive(
         console.print("[red]Fan Card 需要安全的 Creator ID 與 --month YYYY-MM。[/red]")
         raise typer.Exit(2)
 
-    if folder:
-        target_folder = root
-        database = ArchiveService(settings).db
-        if post:
-            rows = database.version_rows(post)
-            selected = next((row for row in rows if version == int(row["version_number"])), None) if version else (rows[-1] if rows else None)
-            if selected:
-                target_folder = Path(str(selected["local_path"])).resolve()
-            else:
-                console.print(f"[red]找不到投稿版本：[/red]{post}")
-                raise typer.Exit(1)
-        elif fancard:
-            selected = database.latest_fancard_version(fancard, month or "")
-            if selected:
-                target_folder = Path(str(selected["local_path"])).resolve()
-            else:
-                console.print(f"[red]找不到 Fan Card：[/red]{fancard}/{month}")
-                raise typer.Exit(1)
-        elif creator:
-            safe_creator = safe_filename(creator)
-            if safe_creator != creator:
-                console.print("[red]Creator ID 含有不安全字元。[/red]")
-                raise typer.Exit(2)
-            target_folder = confined_path(root, Path(safe_creator))
-        try:
-            target_folder.relative_to(root)
-        except ValueError as exc:
-            console.print("[red]資料庫中的本機路徑超出備份根目錄。[/red]")
-            raise typer.Exit(1) from exc
-        if not target_folder.is_dir():
-            console.print(f"[red]找不到備份目錄：[/red]{target_folder}")
-            raise typer.Exit(1)
-        open_folder(target_folder)
-        return
-
-    target = root / "index.html"
-    fragment = ""
+    target_folder = root
+    database = ArchiveService(settings).db
     if post:
-        name = f"v{version:04d}.html" if version else "latest.html"
-        target = confined_path(root, Path("_site") / "posts" / post / name)
+        rows = database.version_rows(post)
+        selected = next((row for row in rows if version == int(row["version_number"])), None) if version else (rows[-1] if rows else None)
+        if selected:
+            target_folder = Path(str(selected["local_path"])).resolve()
+        else:
+            console.print(f"[red]找不到投稿版本：[/red]{post}")
+            raise typer.Exit(1)
     elif fancard:
-        target = confined_path(root, Path("_site") / "fancards" / str(safe_card_creator) / str(month) / "latest.html")
+        selected = database.latest_fancard_version(fancard, month or "")
+        if selected:
+            target_folder = Path(str(selected["local_path"])).resolve()
+        else:
+            console.print(f"[red]找不到 Fan Card：[/red]{fancard}/{month}")
+            raise typer.Exit(1)
     elif creator:
-        fragment = f"#view=posts&creator={quote(creator, safe='')}"
-    if not target.is_file():
-        console.print(f"[red]找不到閱讀頁：[/red]{target}")
-        console.print("請先執行 `fanbox-archiver index`。")
+        safe_creator = safe_filename(creator)
+        if safe_creator != creator:
+            console.print("[red]Creator ID 含有不安全字元。[/red]")
+            raise typer.Exit(2)
+        target_folder = confined_path(root, Path(safe_creator))
+    try:
+        target_folder.relative_to(root)
+    except ValueError as exc:
+        console.print("[red]資料庫中的本機路徑超出備份根目錄。[/red]")
+        raise typer.Exit(1) from exc
+    if not target_folder.is_dir():
+        console.print(f"[red]找不到備份目錄：[/red]{target_folder}")
         raise typer.Exit(1)
-    webbrowser.open(target.as_uri() + fragment)
+    open_folder(target_folder)
 
 
 @app.command()

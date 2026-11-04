@@ -47,7 +47,7 @@ namespace FanboxUI {
     system: "跟隨系統（Windows 深淺色）", dark: "暗色", light: "亮色",
   };
 
-  /** Applies a theme to this page the same way the server does on load (the static site calls "system" "auto"). */
+  /** Applies a theme to this page the same way the server does on load ("system" is rendered as "auto"). */
   export function applyTheme(theme: ThemeSetting): void {
     document.documentElement.dataset.theme = theme === "system" ? "auto" : theme;
   }
@@ -59,7 +59,7 @@ namespace FanboxUI {
       onChange: next => { choice = next as ThemeSetting; applyTheme(choice); }});
     const node = h("section", {class: "settings-section"}, h("h3", {}, "主題"),
       h("p", {class: "settings-section-description"},
-        "選擇後立即預覽，儲存後套用到動態閱讀器、桌面程式，以及之後匯出的靜態網站（靜態網站上仍可自行切換）。"),
+        "選擇後立即預覽，儲存後套用到動態閱讀器與桌面程式。"),
       h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "主題"), select)));
     return {node, read: () => choice};
   }
@@ -146,6 +146,7 @@ namespace FanboxUI {
     card.append(
       h("p", {class: "settings-section-description"},
         "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"),
+      ...(info.notices ?? []).map(text => h("p", {class: "notice"}, text)),
       h("div", {class: "settings-paths about-facts"},
         rows.map(([label, value]) => h("div", {}, h("span", {}, label), h("code", {}, value)))),
       h("div", {class: "account-actions about-actions"},

@@ -1090,7 +1090,7 @@ var FanboxUI;
                     feedback.textContent = `無法匯入：${error instanceof Error ? error.message : String(error)}`;
                 }
             } });
-        const node = FanboxUI.h("section", { class: "settings-section color-editor" }, FanboxUI.h("h3", {}, "自訂配色"), FanboxUI.h("p", { class: "settings-section-description" }, "只能調整下列顏色，未自訂的顏色沿用內建值；亮色與暗色各一組。儲存後套用到動態閱讀器與桌面程式，不套用到匯出的靜態網站。"), FanboxUI.h("div", { class: "color-mode-switch", role: "group", "aria-label": "編輯哪一組配色" }, ...modeButtons), preview, warnings, rows, FanboxUI.h("div", { class: "color-actions" }, FanboxUI.h("button", { type: "button", onclick: () => {
+        const node = FanboxUI.h("section", { class: "settings-section color-editor" }, FanboxUI.h("h3", {}, "自訂配色"), FanboxUI.h("p", { class: "settings-section-description" }, "只能調整下列顏色，未自訂的顏色沿用內建值；亮色與暗色各一組。儲存後套用到動態閱讀器與桌面程式。"), FanboxUI.h("div", { class: "color-mode-switch", role: "group", "aria-label": "編輯哪一組配色" }, ...modeButtons), preview, warnings, rows, FanboxUI.h("div", { class: "color-actions" }, FanboxUI.h("button", { type: "button", onclick: () => {
                 working[mode] = {};
                 render();
                 feedback.textContent = `${MODE_LABELS[mode]}已恢復內建值；按「儲存設定」後套用。`;
@@ -1149,7 +1149,7 @@ var FanboxUI;
         const select = FanboxUI.customSelect({ id: "display-theme", label: "主題", value: choice, disabled: blocked,
             options: Object.keys(THEME_LABELS).map(value => ({ value, label: THEME_LABELS[value] })),
             onChange: next => { choice = next; applyTheme(choice); } });
-        const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "主題"), FanboxUI.h("p", { class: "settings-section-description" }, "選擇後立即預覽，儲存後套用到動態閱讀器、桌面程式，以及之後匯出的靜態網站（靜態網站上仍可自行切換）。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "主題"), select)));
+        const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "主題"), FanboxUI.h("p", { class: "settings-section-description" }, "選擇後立即預覽，儲存後套用到動態閱讀器與桌面程式。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "主題"), select)));
         return { node, read: () => choice };
     }
     const LANGUAGE_LABELS = {
@@ -1218,7 +1218,7 @@ var FanboxUI;
                     show(error ? `無法開啟資料夾：${error}` : `已開啟「${label.replace("開啟", "")}」。`, Boolean(error));
                 } }, label);
         };
-        card.append(FanboxUI.h("p", { class: "settings-section-description" }, "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"), FanboxUI.h("div", { class: "settings-paths about-facts" }, rows.map(([label, value]) => FanboxUI.h("div", {}, FanboxUI.h("span", {}, label), FanboxUI.h("code", {}, value)))), FanboxUI.h("div", { class: "account-actions about-actions" }, folderButton("archive", "開啟封存資料夾", "封存資料夾不存在"), folderButton("archive_logs", "開啟封存日誌資料夾", "尚未產生日誌（需啟用「寫入檔案日誌」）"), info.paths.desktop_logs ? folderButton("desktop_logs", "開啟桌面日誌資料夾", "尚未產生桌面日誌") : null, FanboxUI.h("button", { type: "button", onclick: async () => {
+        card.append(FanboxUI.h("p", { class: "settings-section-description" }, "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"), ...(info.notices ?? []).map(text => FanboxUI.h("p", { class: "notice" }, text)), FanboxUI.h("div", { class: "settings-paths about-facts" }, rows.map(([label, value]) => FanboxUI.h("div", {}, FanboxUI.h("span", {}, label), FanboxUI.h("code", {}, value)))), FanboxUI.h("div", { class: "account-actions about-actions" }, folderButton("archive", "開啟封存資料夾", "封存資料夾不存在"), folderButton("archive_logs", "開啟封存日誌資料夾", "尚未產生日誌（需啟用「寫入檔案日誌」）"), info.paths.desktop_logs ? folderButton("desktop_logs", "開啟桌面日誌資料夾", "尚未產生桌面日誌") : null, FanboxUI.h("button", { type: "button", onclick: async () => {
                 show(await copyText(info.text) ? "診斷資訊已複製到剪貼簿。" : "無法複製；請手動選取上方文字。", false);
             } }, "複製診斷資訊")), feedback);
         return card;

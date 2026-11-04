@@ -20,7 +20,6 @@ from playwright.sync_api import Page, expect, sync_playwright
 
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.application import AuthStatus
-from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.models import ContentBlock, CreatorProfile, CreatorProfileItem, Post
 from fanbox_archiver.service import ArchiveService
 from fanbox_archiver.webapp import create_app
@@ -253,69 +252,6 @@ def _archive_fixture(tmp_path: Path) -> tuple[AppConfig, Path]:
         "supporterCardImageUrl": None,
     }}, None, None, captured_at="2026-10-15T03:00:00+00:00")
     return config, tmp_path / "config.yaml"
-
-
-def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tmp_path: Path):
-    config, _ = _archive_fixture(tmp_path)
-    IndexBuilder(config).build()
-    requests: list[str] = []
-    page.on("request", lambda request: requests.append(request.url))
-    index_url = (config.storage.output_dir / "index.html").as_uri()
-
-    page.set_viewport_size({"width": 1280, "height": 800})
-    page.goto(f"{index_url}#view=creators")
-    expect(page.locator("h1", has_text="創作者")).to_be_visible()
-    _expect_github_link(page, label_visible=True)
-    page.locator(".creator-card").filter(has_text="Alice").get_by_role("button", name="查看文章 →").click()
-    expect(page.get_by_role("button", name="全部 55", exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="奇數 27", exact=True)).to_be_visible()
-    page.get_by_role("button", name="奇數 27", exact=True).click()
-    expect(page.locator(".page-heading")).to_contain_text("27 筆符合目前條件")
-    expect(page.locator(".post-card").first).to_contain_text("奇數")
-    page.go_back()
-    expect(page.get_by_role("button", name="全部 55", exact=True)).to_have_attribute("aria-pressed", "true")
-    static_cards = page.locator(".post-card")
-    expect(static_cards).to_have_count(20)
-    expect(page.locator(".pagination")).to_contain_text("第 1 / 3 頁")
-    expect(static_cards.first).to_contain_text("投稿 00")  # pinned
-    expect(static_cards.nth(1)).to_contain_text("投稿 54")
-    page.get_by_role("button", name="時間排序：新到舊，按下切換").click()
-    expect(static_cards.first).to_contain_text("投稿 00")
-    expect(static_cards.nth(1)).to_contain_text("投稿 01")
-    assert "order=asc" in page.url
-    page.get_by_role("combobox", name="排序方式").select_option("title")
-    expect(page.get_by_role("button", name="時間排序只適用於發布或更新時間")).to_be_disabled()
-    page.goto(f"{index_url}#view=posts&sort=published-desc")
-    expect(static_cards.first).to_contain_text("投稿 54")
-    page.goto(f"{index_url}#view=creators")
-    expect(page.get_by_role("link", name="Creator Profile")).to_be_visible()
-    page.get_by_role("link", name="Creator Profile").click()
-    expect(page.get_by_role("heading", name="Alice", exact=True)).to_be_visible()
-    expect(page.get_by_text("離線保存的創作者介紹")).to_be_visible()
-
-    static_card_url = (
-        config.storage.output_dir / "_site/fancards/alice/2026-10/latest.html"
-    ).as_uri()
-    page.goto(static_card_url)
-    expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="加入 Discord 伺服器", exact=True)).to_be_visible()
-    expect(page.get_by_text("目前可使用", exact=True)).to_be_visible()
-    expect(page.get_by_text("Discord 連結可在帳號設定中編輯。", exact=False)).to_be_visible()
-    expect(page.get_by_role("link", name="在 FANBOX 開啟 Discord", exact=False)).to_have_attribute(
-        "href", "https://www.fanbox.cc/@alice/plans",
-    )
-
-    _expect_github_link(page, label_visible=True)
-
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(static_card_url)
-    expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
-    _expect_github_link(page, label_visible=False)
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    page.goto(f"{index_url}#view=posts")
-    _expect_github_link(page, label_visible=False)
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-    assert not any(url.startswith(("http://", "https://")) for url in requests)
 
 
 def _expect_github_link(page: Page, *, label_visible: bool) -> None:
@@ -903,21 +839,6 @@ def test_theme_setting_previews_saves_and_overrides_a_dark_system(page: Page, li
         assert fee.evaluate("element => getComputedStyle(element).backgroundColor") != "rgb(64, 54, 33)"
 
 
-def test_static_site_defaults_to_the_exported_theme_but_keeps_its_own_toggle(page: Page, tmp_path: Path):
-    config, _ = _archive_fixture(tmp_path)
-    config.display.theme = "dark"
-    IndexBuilder(config).build()
-    page.emulate_media(color_scheme="light")
-    index_url = (config.storage.output_dir / "index.html").as_uri()
-    page.goto(index_url)
-    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    toggle = page.locator("[data-theme-toggle]").first
-    toggle.click()  # dark → light
-    expect(page.locator("html")).to_have_attribute("data-theme", "light")
-    page.reload()
-    expect(page.locator("html")).to_have_attribute("data-theme", "light")
-
-
 def test_custom_color_editor_syncs_controls_warns_saves_and_round_trips(
     page: Page, live_gui, tmp_path: Path,
 ) -> None:
@@ -992,9 +913,7 @@ _OVERFLOWING = """() => [...document.querySelectorAll('body *')]
   .map(e => `${e.tagName}.${e.className} ${(e.textContent || '').trim().slice(0, 30)}`)"""
 
 
-def test_pseudo_locale_drives_dynamic_and_static_text_and_fits_narrow_screens(
-    page: Page, live_gui, tmp_path: Path,
-) -> None:
+def test_pseudo_locale_drives_dynamic_text_and_fits_narrow_screens(page: Page, live_gui) -> None:
     base_url, config_path, jobs = live_gui
     jobs.hold_backup = False
     token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
@@ -1022,18 +941,7 @@ def test_pseudo_locale_drives_dynamic_and_static_text_and_fits_narrow_screens(
     language = page.locator("#display-language")
     expect(language).to_contain_text("測試語系（Pseudo，僅限 config.yaml）", timeout=5_000)
 
-    config = AppConfig.load(config_path)
-    assert config.display.language == "qps-ploc"
-    IndexBuilder(config).build()
-    index_url = (config.storage.output_dir / "index.html").as_uri()
-    page.set_viewport_size({"width": 375, "height": 844})
-    page.goto(f"{index_url}#view=posts")
-    expect(page.locator(".sidebar nav")).to_contain_text("［文章")
-    expect(page.locator(".pagination")).to_contain_text("［第 1 / 3 頁")
-    expect(page.locator(".page-heading")).to_contain_text("［55 筆符合目前條件")
-    expect(page.get_by_role("combobox", name=re.compile("^［排序方式"))).to_be_visible()
-    assert page.evaluate(_NO_PAGE_OVERFLOW), page.evaluate(_OVERFLOWING)
-
+    assert AppConfig.load(config_path).display.language == "qps-ploc"
 
 def _hold(page: Page, pattern: str) -> list:
     """Hold matching requests (as if the server were slow) until the test releases them."""

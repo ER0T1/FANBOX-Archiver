@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from .config import AppConfig, StorageConfig
 from .database import Database, SCHEMA_VERSION
-from .indexer import IndexBuilder
+from .legacy_site import remove_legacy_static_site
 from .storage import BackupStorage
 from .timestamps import fanbox_month, parse_instant
 
@@ -917,6 +917,8 @@ class ArchiveRepairer:
         staging = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.repair.tmp")
         try:
             shutil.copytree(self.root, staging, copy_function=shutil.copy2)
+            # A copy never carries the removed static site (derived data) forward.
+            remove_legacy_static_site(staging)
             copied_database = staging / database_relative
             self._snapshot_database(copied_database)
             self._remap_paths(copied_database, self.root, staging)
@@ -942,11 +944,6 @@ class ArchiveRepairer:
                     "description": item.description,
                     "before": before[item.action_id], "after": self._subject_state(copied_config, item),
                 } for item in actions)
-            indexer = IndexBuilder(copied_config)
-            indexer.build(force=True)
-            index_issues = indexer.check()
-            if index_issues:
-                raise RuntimeError(f"修復副本的靜態索引驗證失敗：{len(index_issues)} 項。")
             remaining = ArchiveAuditor(copied_config).run()
             if any(item.repairability == "automatic" for item in remaining.findings):
                 raise RuntimeError("確定性修復後仍存在可自動修復問題。")

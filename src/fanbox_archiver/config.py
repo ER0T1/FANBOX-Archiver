@@ -74,8 +74,8 @@ class ThemeColors(BaseModel):
 class DisplayConfig(BaseModel):
     """How times are shown and how schedule times are read: ``system`` or an IANA zone.
 
-    ``theme`` is the colour mode of the reader and desktop app, and the default of exported
-    static sites; ``system`` follows the operating system's light/dark setting.
+    ``theme`` is the colour mode of the reader and desktop app; ``system`` follows the
+    operating system's light/dark setting.
 
     ``language`` picks the interface catalog: ``auto`` follows the system or browser language
     among the shipped catalogs, falling back to Traditional Chinese; ``qps-ploc`` is the
@@ -89,7 +89,7 @@ class DisplayConfig(BaseModel):
 
     @property
     def css_theme(self) -> str:
-        """The ``data-theme`` value shared with the static site (it calls ``system`` ``auto``)."""
+        """The page's ``data-theme`` value (``system`` is rendered as ``auto``)."""
         return "auto" if self.theme == "system" else self.theme
 
     @field_validator("timezone")

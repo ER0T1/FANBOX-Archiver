@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 import yaml
 
-from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.markdown import render_markdown
 from fanbox_archiver.models import Post
 from fanbox_archiver import timestamps
@@ -88,26 +87,6 @@ def test_markdown_front_matter_uses_taipei_offsets():
     assert metadata["captured_at"] == "2026-11-03T00:00:00+08:00"
 
 
-def test_static_index_dates_use_shared_contract():
-    assert IndexBuilder._date("2026-11-02T16:00:00+00:00") == "2026年11月03日 00:00"
-    assert IndexBuilder._date("2026-11-02T16:00:00") == "2026-11-02T16:00:00（時區未標示）"
-
-
-def test_static_site_records_its_zone_and_rerenders_when_it_changes(tmp_path):
-    from fanbox_archiver.config import AppConfig, StorageConfig
-    from fanbox_archiver.service import ArchiveService
-
-    config = AppConfig(storage=StorageConfig(output_dir=tmp_path / "out", database=tmp_path / "out" / "backup.db"))
-    ArchiveService(config).save(Post(
-        post_id="1", creator_id="alice", title="t", url="https://alice.fanbox.cc/posts/1",
-        published_at=datetime(2026, 11, 2, 15, 30, tzinfo=UTC),
-    ), download_assets=False)
-    timestamps.set_display_timezone("Asia/Tokyo")
-    IndexBuilder(config).build()
-    data = (config.storage.output_dir / "_site/data.js").read_text(encoding="utf-8")
-    assert '"timezone":"Asia/Tokyo"' in data
-    page = next((config.storage.output_dir / "_site").rglob("posts/**/*.html")).read_text(encoding="utf-8")
-    assert "2026年11月03日 00:30" in page
-    assert IndexBuilder(config).build().rendered == 0  # same zone: cached pages are reused
-    timestamps.set_display_timezone("Asia/Taipei")
-    assert IndexBuilder(config).build().rendered > 0  # new zone: every page is rendered again
+def test_display_dates_use_shared_contract():
+    assert timestamps.format_display("2026-11-02T16:00:00+00:00") == "2026年11月03日 00:00"
+    assert timestamps.format_display("2026-11-02T16:00:00") == "2026-11-02T16:00:00（時區未標示）"

@@ -24,6 +24,7 @@ from .application import (
     BackupScheduler,
 )
 from .archive_lock import ArchiveLock
+from .legacy_site import LegacySiteCleanup, cleanup_owned_archive
 from .database import Database
 from . import diagnostics
 from .diagnostics import FolderTarget
@@ -187,6 +188,12 @@ def create_app(
             app.state.scheduler.start()
             # Re-sync on every start so an upgrade or moved install keeps the task correct.
             await run_in_threadpool(sync_background)
+            # Remove the old static site once this server owns the archive and nothing is running;
+            # otherwise the next start tries again.
+            if not app.state.jobs.has_active():
+                app.state.legacy_site = await run_in_threadpool(
+                    cleanup_owned_archive, app.state.config, app.state.jobs.archive_lock,
+                )
         try:
             yield
         finally:
@@ -202,6 +209,7 @@ def create_app(
     app.state.session_token = session_token
     app.state.config = config
     app.state.config_path = config_path.resolve() if config_path else None
+    app.state.legacy_site = LegacySiteCleanup()
     app.state.background = {"state": "unavailable", "message": "背景排程只在 Windows 桌面版提供；目前只會在程式開著時執行。"}
 
     def sync_background() -> None:
@@ -375,7 +383,8 @@ def create_app(
 
     @app.get("/api/diagnostics", dependencies=[Depends(require_mutation_token)])
     async def get_diagnostics():
-        return await run_in_threadpool(diagnostics.collect, app.state.config, app.state.config_path)
+        return await run_in_threadpool(diagnostics.collect, app.state.config, app.state.config_path,
+                                       app.state.legacy_site.notices)
 
     @app.post("/api/diagnostics/open", dependencies=[Depends(require_mutation_token)])
     async def open_diagnostics_folder(body: OpenFolderBody):

@@ -402,6 +402,7 @@ namespace FanboxUI {
     paths: {config: string | null; archive: string; database: string; archive_logs: string; desktop_logs: string | null};
     folders: Record<FolderTarget, boolean>;
     can_open_folders: boolean;
+    notices: string[];
     text: string;
   }
 

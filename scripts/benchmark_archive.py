@@ -18,7 +18,6 @@ import httpx
 import uvicorn
 
 from fanbox_archiver.config import AppConfig, MarkdownConfig, StorageConfig
-from fanbox_archiver.indexer import IndexBuilder
 from fanbox_archiver.models import ContentBlock, Post
 from fanbox_archiver.reader import ArchiveReader
 from fanbox_archiver.service import ArchiveService
@@ -236,9 +235,6 @@ def run_benchmark(
     if len(parsed) != post_count:
         raise RuntimeError(f"expected {post_count} JSON posts, found {len(parsed)}")
 
-    builder = IndexBuilder(config)
-    first_build, static_first_ms = _elapsed_ms(builder.build)
-    reused_build, static_reuse_ms = _elapsed_ms(builder.build)
     api_timings = asyncio.run(_measure_api(config, repeats))
     frontend_ms = None if browser == "none" else _measure_frontend(config, browser, post_count)
 
@@ -263,17 +259,8 @@ def run_benchmark(
             "json_parse_all": json_parse_ms,
             "sqlite": _measure_sqlite(config, repeats),
             "reader": reader_timings,
-            "static_index_first": static_first_ms,
-            "static_index_reuse": static_reuse_ms,
             "api": api_timings,
             "frontend_first_render": frontend_ms,
-        },
-        "static_index": {
-            "first_rendered": first_build.rendered,
-            "first_reused": first_build.reused,
-            "reuse_rendered": reused_build.rendered,
-            "reuse_reused": reused_build.reused,
-            "warnings": len(reused_build.warnings),
         },
         "query_plans": _query_plans(config),
     }
@@ -290,7 +277,6 @@ def _print_summary(result: dict[str, Any], output: Path) -> None:
     print(f"Disk read / JSON parse: {timings['disk_read_all_json']:.3f} / {timings['json_parse_all']:.3f} ms")
     print(f"SQLite list / search: {timings['sqlite']['list_median']:.3f} / {timings['sqlite']['search_median']:.3f} ms")
     print(f"Reader list / search: {timings['reader']['list_median']:.3f} / {timings['reader']['search_median']:.3f} ms")
-    print(f"Static index first / reuse: {timings['static_index_first']:.3f} / {timings['static_index_reuse']:.3f} ms")
     print(f"API list / search: {timings['api']['list_median']:.3f} / {timings['api']['search_median']:.3f} ms")
     print(f"Frontend first render: {timings['frontend_first_render']} ms")
     print(f"JSON result: {output}")

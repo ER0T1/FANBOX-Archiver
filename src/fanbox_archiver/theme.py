@@ -13,7 +13,7 @@ THEME_COLOR_KEYS: tuple[str, ...] = (
     "bg", "surface", "surface-2", "text", "muted", "line", "accent", "accent-soft",
     "blue", "green", "yellow", "red", "purple",
 )
-# Older static-site names that must follow their status colour.
+# Older token names still used by some styles; they follow their status colour.
 THEME_COLOR_ALIASES = {"yellow": "amber", "red": "danger", "green": "success"}
 HEX_COLOR = re.compile(r"^#[0-9a-f]{6}$")
 
