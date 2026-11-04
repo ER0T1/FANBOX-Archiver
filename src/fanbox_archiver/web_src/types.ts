@@ -338,6 +338,8 @@ namespace FanboxUI {
   }
 
   export type ThemeSetting = "system" | "dark" | "light";
+  /** "qps-ploc" is the pseudo-locale for layout tests; only config.yaml turns it on. */
+  export type LanguageSetting = "auto" | "zh-Hant" | "qps-ploc";
 
   export type ColorMode = "light" | "dark";
   /** CSS variable name (without "--") → "#rrggbb". */
@@ -349,6 +351,7 @@ namespace FanboxUI {
     timezone: string;
     theme: ThemeSetting;
     colors: ThemeColorSettings;
+    language: LanguageSetting;
   }
 
   export interface DisplayInfo {

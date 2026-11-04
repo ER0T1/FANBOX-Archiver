@@ -64,6 +64,25 @@ namespace FanboxUI {
     return {node, read: () => choice};
   }
 
+  // Language names are shown in their own language. The pseudo-locale is listed only while
+  // config.yaml selects it, so saving the form never silently switches it off.
+  const LANGUAGE_LABELS: Record<LanguageSetting, string> = {
+    auto: "跟隨系統", "zh-Hant": "繁體中文", "qps-ploc": "測試語系（Pseudo，僅限 config.yaml）",
+  };
+
+  function languageControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): LanguageSetting} {
+    let choice: LanguageSetting = data.editable.display.language;
+    const values: LanguageSetting[] = choice === "qps-ploc" ? ["auto", "zh-Hant", "qps-ploc"] : ["auto", "zh-Hant"];
+    const select = customSelect({id: "display-language", label: "介面語言", value: choice, disabled: blocked,
+      options: values.map(value => ({value, label: LANGUAGE_LABELS[value]})),
+      onChange: next => { choice = next as LanguageSetting; }});
+    const node = h("section", {class: "settings-section"}, h("h3", {}, "介面語言"),
+      h("p", {class: "settings-section-description"},
+        `目前提供繁體中文；「跟隨系統」找不到支援的語言時使用繁體中文。投稿、創作者名稱與標籤等封存內容不會翻譯。儲存後重新整理頁面套用。目前生效：${currentLocale()}`),
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "介面語言"), select)));
+    return {node, read: () => choice};
+  }
+
   export interface AboutSectionActions {
     onOpen: (target: FolderTarget) => Promise<string | null>;
   }
@@ -187,6 +206,7 @@ namespace FanboxUI {
       schedule.actions);
     const timezone = timezoneControl(data, blocked);
     const theme = themeControl(data, blocked);
+    const language = languageControl(data, blocked);
     const colors = colorEditor(data);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
@@ -223,7 +243,7 @@ namespace FanboxUI {
       }, backup_defaults: {
         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
         include_fancard: defaultFancard.input.checked,
-      }, schedule: scheduleSection.read(), display: {timezone: timezone.read(), theme: theme.read(), colors: colors.read()}, markdown: {
+      }, schedule: scheduleSection.read(), display: {timezone: timezone.read(), theme: theme.read(), colors: colors.read(), language: language.read()}, markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -251,6 +271,7 @@ namespace FanboxUI {
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT & LOGGING"), h("h2", {}, "輸出與紀錄"),
       theme.node,
       colors.node,
+      language.node,
       timezone.node,
       h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
         h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),

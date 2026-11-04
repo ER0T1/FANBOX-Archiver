@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import AppConfig, ScheduleConfig, ThemeColors
 from .theme import THEME_COLOR_KEYS, THEME_DEFAULTS, custom_theme_css
+from .i18n import browser_script, resolve_locale
 from . import __version__
 from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
@@ -126,6 +127,7 @@ class DisplayConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timezone: str | None = Field(None, max_length=64)
     theme: Literal["system", "dark", "light"] | None = None
+    language: Literal["auto", "zh-Hant", "qps-ploc"] | None = None
     colors: ThemeColors | None = None
 
 
@@ -220,10 +222,22 @@ def create_app(
     app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
     @app.get("/", include_in_schema=False)
-    async def home():
-        # Zone and theme are read per request so a saved change applies on reload, with no flash.
+    async def home(request: Request):
+        # Zone, theme and language are read per request so a saved change applies on reload.
         return HTMLResponse(home_html.replace("__FANBOX_TIMEZONE__", display_zone().name)
-                            .replace("__FANBOX_THEME__", app.state.config.display.css_theme))
+                            .replace("__FANBOX_THEME__", app.state.config.display.css_theme)
+                            .replace("__FANBOX_LANG__", request_locale(request)))
+
+    def request_locale(request: Request) -> str:
+        # ``auto`` follows the browser (WebView2 sends the Windows display language).
+        header = request.headers.get("accept-language", "")
+        preferred = [part.split(";", 1)[0] for part in header.split(",")]
+        return resolve_locale(app.state.config.display.language, preferred)
+
+    @app.get("/i18n.js", include_in_schema=False)
+    async def i18n_script(request: Request):
+        return Response(browser_script(request_locale(request)), media_type="text/javascript",
+                        headers={"Cache-Control": "no-store"})
 
     @app.get("/theme.css", include_in_schema=False)
     async def theme_css():

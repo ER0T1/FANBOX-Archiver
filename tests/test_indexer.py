@@ -237,6 +237,29 @@ def test_index_uses_the_configured_theme_as_default_and_rebuilds_when_it_changes
     assert meta.format("dark") in (root / "_site/posts/123/v0001.html").read_text(encoding="utf-8")
 
 
+def test_static_export_ships_its_interface_catalog_offline(tmp_path: Path):
+    config, _ = archive_fixture(tmp_path)
+    root = config.storage.output_dir
+    IndexBuilder(config).build()
+    index = (root / "index.html").read_text(encoding="utf-8")
+    catalog = (root / "_site/assets/i18n.js").read_text(encoding="utf-8")
+    assert '<html lang="zh-Hant">' in index and "正在載入本機索引…" in index
+    # The catalog is a local script loaded before the app, never fetched from the network.
+    assert index.index('src="_site/assets/i18n.js"') < index.index('src="_site/assets/app.js"')
+    assert catalog.startswith("window.FanboxI18n = ") and '"static.nav_posts": "文章"' in catalog
+    assert "http" not in catalog.split('"messages"', 1)[0]
+    assert IndexBuilder(config).check() == []
+
+    config.display.language = "qps-ploc"
+    result = IndexBuilder(config).build()
+    index = (root / "index.html").read_text(encoding="utf-8")
+    assert '<html lang="qps-ploc">' in index and "［正在載入本機索引…" in index
+    assert '"static.nav_posts": "［文章' in (root / "_site/assets/i18n.js").read_text(encoding="utf-8")
+    # Reader pages hold archived content and stay untouched by a language change.
+    assert result.rendered == 0
+    assert '<html lang="zh-Hant">' in (root / "_site/posts/123/v0001.html").read_text(encoding="utf-8")
+
+
 def test_index_cli_build_and_check(tmp_path: Path):
     config, _ = archive_fixture(tmp_path)
     config_path = tmp_path / "config.yaml"

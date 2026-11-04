@@ -7,9 +7,36 @@ const source = readFileSync(
   new URL("../../src/fanbox_archiver/web_assets/core.js", import.meta.url),
   "utf8",
 );
-const context = vm.createContext({Intl});
+// The server serves /i18n.js with the zh-Hant catalog before core.js; mirror that here.
+const messages = JSON.parse(readFileSync(
+  new URL("../../src/fanbox_archiver/locales/zh-Hant.json", import.meta.url), "utf8"));
+delete messages.$comment;
+const warnings = [];
+const context = vm.createContext({
+  Intl, console: {warn: message => warnings.push(message)},
+  FanboxI18n: {locale: "zh-Hant", intl: "zh-Hant", base: "zh-Hant", messages},
+});
 vm.runInContext(source, context);
 const ui = context.FanboxUI;
+
+test("i18n translates, pluralises, formats numbers and reports missing keys once", () => {
+  assert.equal(ui.currentLocale(), "zh-Hant");
+  assert.equal(ui.t("nav.posts"), "投稿");
+  assert.equal(ui.t("posts.total", {count: 12345}), "12,345 篇備份");
+  assert.equal(ui.t("posts.card_meta", {creator: "Alice", post_id: "1000", count: 2}), "Alice · Post 1000 · 2 個版本");
+  assert.equal(ui.t("common.page_position", {page: 1}), "目前第 1 頁，共 {pages} 頁");
+  assert.equal(ui.feeLabel(0), "全體公開");
+  assert.equal(ui.feeLabel(1200), "¥1,200");
+  assert.equal(ui.feeLabel(null), "檔位未記錄");
+  assert.equal(ui.t("missing.key"), "missing.key");
+  assert.equal(ui.t("missing.key"), "missing.key");
+  assert.deepEqual(warnings, ["[i18n] missing key: missing.key"]);
+
+  ui.setI18nCatalog({locale: "qps-ploc", intl: "zh-Hant", base: "zh-Hant",
+    messages: {"posts.total": {other: "［{count} 篇備份····］"}}});
+  assert.equal(ui.t("posts.total", {count: 3}), "［3 篇備份····］");
+  ui.setI18nCatalog({locale: "zh-Hant", intl: "zh-Hant", base: "zh-Hant", messages});
+});
 
 test("TypeScript core creates independent initial state", () => {
   const first = ui.createInitialState();

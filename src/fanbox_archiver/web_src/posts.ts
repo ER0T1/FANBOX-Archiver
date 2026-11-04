@@ -21,14 +21,14 @@ namespace FanboxUI {
     },
     item.cover_url
       ? h("img", {class: "post-cover", src: item.cover_url, alt: "", loading: "lazy"})
-      : h("span", {class: "post-cover placeholder", "aria-hidden": "true"}, "POST"),
+      : h("span", {class: "post-cover placeholder", "aria-hidden": "true"}, t("posts.cover_placeholder")),
     h("span", {class: "post-main"},
       h("span", {class: "post-meta"}, formatDate(item.published_at),
-        item.is_pinned ? h("span", {class: "pin-badge"}, "置頂") : null,
+        item.is_pinned ? h("span", {class: "pin-badge"}, t("posts.pinned")) : null,
         h("span", {class: "fee-badge"}, feeLabel(item.fee_required))),
       h("strong", {}, item.title),
-      h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`),
-      item.tags.length ? h("span", {class: "post-tags", "aria-label": `標籤：${item.tags.join("、")}`},
+      h("small", {}, t("posts.card_meta", {creator: item.creator_name, post_id: item.post_id, count: item.version_count})),
+      item.tags.length ? h("span", {class: "post-tags", "aria-label": t("posts.tags_label", {tags: item.tags.join(t("posts.tag_separator"))})},
         item.tags.map(tag => h("span", {class: "post-tag"}, tag))) : null),
     h("span", {class: `badge status-${item.status}`}, item.status));
   }
@@ -36,20 +36,20 @@ namespace FanboxUI {
   export function renderPagination(
     data: Pick<Page<unknown>, "page" | "pages">,
     onPage: (page: number) => void,
-    label = "投稿分頁",
+    label = t("posts.pagination"),
   ): HTMLElement | null {
     if (data.pages <= 1) return null;
     const previous = h("button", {
       type: "button", disabled: data.page <= 1,
       onclick: () => onPage(data.page - 1),
-    }, "← 上一頁");
+    }, t("common.previous_page"));
     const next = h("button", {
       type: "button", disabled: data.page >= data.pages,
       onclick: () => onPage(data.page + 1),
-    }, "下一頁 →");
+    }, t("common.next_page"));
     const pageJump = h("details", {class: "page-jump"},
-      h("summary", {"aria-label": `目前第 ${data.page} 頁，共 ${data.pages} 頁`}, `${data.page} / ${data.pages}`),
-      h("div", {class: "page-menu", role: "listbox", "aria-label": "跳至頁數"},
+      h("summary", {"aria-label": t("common.page_position", {page: data.page, pages: data.pages})}, `${data.page} / ${data.pages}`),
+      h("div", {class: "page-menu", role: "listbox", "aria-label": t("common.page_jump")},
         Array.from({length: data.pages}, (_, index) => {
           const page = index + 1;
           return h("button", {
@@ -67,9 +67,10 @@ namespace FanboxUI {
     const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
     return h("section", {class: "page"},
       h("header", {class: "heading"}, h("div", {},
-        h("p", {class: "eyebrow"}, "POSTS"), h("h1", {}, "投稿"), h("p", {}, `${data.total} 篇備份`)),
-      actions.onOrder ? sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序") : null),
-      h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, "沒有符合條件的投稿。")),
+        h("p", {class: "eyebrow"}, t("posts.eyebrow")), h("h1", {}, t("posts.title")),
+        h("p", {}, t("posts.total", {count: data.total}))),
+      actions.onOrder ? sortToggle(actions.order ?? "desc", actions.onOrder, t("posts.sort_label")) : null),
+      h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, t("posts.empty"))),
       renderPagination(data, actions.onPage));
   }
 
@@ -91,8 +92,8 @@ namespace FanboxUI {
     return h("div", {class: "creator-posts"},
       filter,
       actions.onOrder ? h("div", {class: "list-toolbar"},
-        sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序")) : null,
-      h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, "沒有符合條件的投稿。")),
+        sortToggle(actions.order ?? "desc", actions.onOrder, t("posts.sort_label"))) : null,
+      h("div", {class: "post-list"}, cards.length ? cards : h("p", {class: "empty"}, t("posts.empty"))),
       renderPagination(data, actions.onPage, "創作者投稿分頁"));
   }
 

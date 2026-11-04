@@ -16,6 +16,7 @@ from .database import Database
 from .downloader import sha256_file
 from .fancard_perks import normalize_fancard_perks
 from .models import CreatorProfile, Post
+from .i18n import BASE_LOCALE, Translator, browser_script, resolve_locale, system_locales
 from .security import confined_path, safe_filename
 from .storage import BackupStorage
 from .timestamps import display_zone, format_display
@@ -47,6 +48,8 @@ class IndexBuilder:
         self.db = Database(config.storage.database)
         self.package_assets = Path(__file__).with_name("site_assets")
         self.shared_assets = Path(__file__).with_name("web_assets")
+        # The export is offline: ``auto`` is fixed to the exporting computer's language.
+        self.locale = resolve_locale(config.display.language, system_locales())
 
     def build(self, *, force: bool = False) -> IndexBuildResult:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,7 @@ class IndexBuilder:
             for name in ("app.css", "app.js", "theme.js", "icons.svg"):
                 shutil.copy2(self.package_assets / name, assets / name)
             shutil.copy2(self.shared_assets / "design-tokens.css", assets / "design-tokens.css")
+            BackupStorage.atomic_write_text(assets / "i18n.js", browser_script(self.locale))
 
             for creator in creators:
                 page_rendered, page_reused, page_warnings, page_state = self._build_profile_pages(
@@ -179,7 +183,7 @@ class IndexBuilder:
             })
             self._validate_staging(staging, state_pages)
             BackupStorage.publish_version(staging, current_site)
-            BackupStorage.atomic_write_text(self.root / "index.html", self._index_html(creators, posts, self.config.display.css_theme))
+            BackupStorage.atomic_write_text(self.root / "index.html", self._index_html(creators, posts, self.config.display.css_theme, self.locale))
             return IndexBuildResult(rendered, reused, warnings, self.root / "index.html")
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
@@ -189,7 +193,7 @@ class IndexBuilder:
         issues: list[str] = []
         site = self.root / "_site"
         for path in (self.root / "index.html", site / "data.js", site / "build.json", site / "state.json",
-                     site / "assets/app.css", site / "assets/app.js",
+                     site / "assets/app.css", site / "assets/app.js", site / "assets/i18n.js",
                      site / "assets/design-tokens.css"):
             if not path.is_file():
                 issues.append(f"缺少索引檔案：{path}")
@@ -742,22 +746,24 @@ class IndexBuilder:
 <article>{body}</article><footer>此頁為本機備份，不代表遠端目前狀態。</footer></main></body></html>"""
 
     @staticmethod
-    def _index_html(creators: list[dict], posts: list[dict], default_theme: str) -> str:
+    def _index_html(creators: list[dict], posts: list[dict], default_theme: str,
+                    locale: str = BASE_LOCALE) -> str:
+        t = Translator(locale)
         fallback = "".join(
             f'<li><a href="{html.escape(str(item["latest_path"] or "#"), quote=True)}">{html.escape(item["title"])}</a> — {html.escape(item["creator_id"])}</li>'
             for item in posts[:100]
         )
         return f"""<!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="{html.escape(locale, quote=True)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
 <meta name="color-scheme" content="light dark"><meta name="fanbox-default-theme" content="{html.escape(default_theme, quote=True)}"><title>FANBOX Archive</title>
 <link rel="icon" href="data:,"><script src="_site/assets/theme.js"></script><link rel="stylesheet" href="_site/assets/app.css"><link rel="stylesheet" href="_site/assets/design-tokens.css"></head><body>
-<div id="app"><header class="topbar"><strong>FANBOX Archive</strong><span>正在載入本機索引…</span></header>
-<noscript><main class="noscript"><h1>本機備份</h1><p>JavaScript 已停用，以下顯示最近文章。</p><ul>{fallback}</ul></main></noscript></div>
-<script src="_site/data.js"></script><script src="_site/assets/app.js"></script></body></html>"""
+<div id="app"><header class="topbar"><strong>FANBOX Archive</strong><span>{html.escape(t("static.loading_index"))}</span></header>
+<noscript><main class="noscript"><h1>{html.escape(t("static.noscript_title"))}</h1><p>{html.escape(t("static.noscript_body"))}</p><ul>{fallback}</ul></main></noscript></div>
+<script src="_site/data.js"></script><script src="_site/assets/i18n.js"></script><script src="_site/assets/app.js"></script></body></html>"""
 
     def _validate_staging(self, staging: Path, pages: dict[str, str]) -> None:
-        for required in ("assets/app.css", "assets/app.js", "assets/theme.js",
+        for required in ("assets/app.css", "assets/app.js", "assets/theme.js", "assets/i18n.js",
                          "assets/design-tokens.css", "data.js", "build.json", "state.json"):
             if not confined_path(staging, Path(required)).is_file():
                 raise ValueError(f"索引建置缺少必要檔案：{required}")

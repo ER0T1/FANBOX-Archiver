@@ -41,6 +41,7 @@ from .indexer import IndexBuilder
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, set_display_timezone
+from .i18n import LANGUAGE_SETTINGS, Translator, resolve_locale, system_locales
 
 
 if os.name == "nt":
@@ -61,6 +62,24 @@ auth_app = typer.Typer(
 )
 app.add_typer(auth_app, name="auth")
 console = Console()
+# ``--lang`` overrides ``display.language`` for one invocation (e.g. ``--lang qps-ploc``).
+_language_override: str | None = None
+
+
+@app.callback()
+def main(
+    lang: Annotated[str | None, typer.Option(
+        "--lang", help="介面語言：auto、zh-Hant 或測試用 qps-ploc；預設讀取設定檔 display.language",
+    )] = None,
+) -> None:
+    global _language_override
+    if lang is not None and lang not in LANGUAGE_SETTINGS:
+        raise typer.BadParameter(f"不支援的語言：{lang}", param_hint="--lang")
+    _language_override = lang
+
+
+def translator(settings: AppConfig) -> Translator:
+    return Translator(resolve_locale(_language_override or settings.display.language, system_locales()))
 
 
 def format_local_time(value: object) -> str:
@@ -687,37 +706,45 @@ def status(
     config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
 ) -> None:
     """顯示本機備份資料庫統計。"""
-    database = ArchiveService(load_config(config)).db
+    settings = load_config(config)
+    t = translator(settings)
+    database = ArchiveService(settings).db
     stats = database.statistics()
     if not stats:
-        console.print("尚無備份紀錄。")
+        console.print(t("cli.status.empty"))
     else:
-        table = Table("項目", "數量", title="FANBOX Archiver")
+        # Statistic keys and job statuses are machine-readable and stay untranslated.
+        table = Table(t("cli.status.column_item"), t("cli.status.column_count"), title="FANBOX Archiver")
         for key, value in sorted(stats.items()):
             table.add_row(key, str(value))
         console.print(table)
     run = database.latest_run()
     if run:
-        run_kind = "預覽" if run["dry_run"] else "備份"
-        console.print(
-            f"最後執行（{run_kind}）：{format_local_time(run['finished_at'] or run['started_at'])}｜範圍 {run['scope']}｜"
-            f"成功 {run['success_count']}｜失敗 {run['failure_count']}"
-        )
+        console.print(t(
+            "cli.status.last_run",
+            kind=t("cli.status.kind_preview") if run["dry_run"] else t("cli.status.kind_backup"),
+            time=format_local_time(run["finished_at"] or run["started_at"]), scope=run["scope"],
+            success=run["success_count"], failure=run["failure_count"],
+        ), markup=False)
     successful = database.latest_successful_run()
     if successful:
-        console.print(f"最後成功備份：{format_local_time(successful['finished_at'])}｜範圍 {successful['scope']}")
+        console.print(t("cli.status.last_success", time=format_local_time(successful["finished_at"]),
+                        scope=successful["scope"]), markup=False)
     failures = database.recent_failures()
     if failures:
-        failure_table = Table("Post ID", "創作者", "狀態", "錯誤", title="最近失敗")
+        failure_table = Table("Post ID", t("cli.status.column_creator"), t("cli.status.column_status"),
+                              t("cli.status.column_error"), title=t("cli.status.failures_title"))
         for row in failures:
             failure_table.add_row(row["post_id"], row["creator_id"], row["status"], row["last_error"] or "-")
         console.print(failure_table)
     incomplete = database.incomplete_creator_rows()
     if incomplete:
-        creator_table = Table("Creator ID", "名稱", "回補游標", "最近檢查", "錯誤", title="尚未完成歷史回補")
+        creator_table = Table("Creator ID", t("cli.status.column_name"), t("cli.status.column_cursor"),
+                              t("cli.status.column_checked"), t("cli.status.column_error"),
+                              title=t("cli.status.incomplete_title"))
         for row in incomplete:
             creator_table.add_row(
-                row["creator_id"], row["name"], row["backfill_cursor"] or "起點",
+                row["creator_id"], row["name"], row["backfill_cursor"] or t("cli.status.cursor_start"),
                 format_local_time(row["last_recent_check_at"]), row["last_error"] or "-",
             )
         console.print(creator_table)

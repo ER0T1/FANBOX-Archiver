@@ -11,6 +11,22 @@
   // Hashes written before v1.3.31 combined key and direction, e.g. "published-desc".
   const LEGACY_SORTS = {"published-desc":["published"], "updated-desc":["updated"], "title-asc":["title"], "versions-desc":["versions"]};
 
+  // Interface text comes from assets/i18n.js, written next to this file at export time; the
+  // site never loads translations from the network. A missing key shows as the key itself.
+  const i18n = window.FanboxI18n || {locale:"zh-Hant", intl:"zh-Hant", messages:{}};
+  const numberFormat = new Intl.NumberFormat(i18n.intl || "zh-Hant");
+  const pluralRules = new Intl.PluralRules(i18n.intl || "zh-Hant");
+  function t(key, params = {}) {
+    let message = i18n.messages[key];
+    if (message === undefined) return key;
+    if (typeof message !== "string") message = message[pluralRules.select(Number(params.count || 0))] || message.other || key;
+    return message.replace(/\{([a-z_][a-z0-9_]*)\}/g, (match, name) => {
+      const value = params[name];
+      if (value === undefined) return match;
+      return typeof value === "number" ? numberFormat.format(value) : String(value);
+    });
+  }
+
   function node(tag, attrs = {}, ...children) {
     const element = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs)) {
@@ -90,21 +106,21 @@
     path.setAttribute("d", GITHUB_MARK);
     svg.append(path);
     return node("a", {class:"github-link", href:GITHUB_URL, target:"_blank", rel:"noopener noreferrer",
-      "aria-label":"GitHub 倉庫（另開新分頁）", title:"在 GitHub 查看原始碼"}, svg, node("span", {class:"github-label"}, "GitHub"));
+      "aria-label":t("header.github_label"), title:t("header.github_title")}, svg, node("span", {class:"github-label"}, "GitHub"));
   }
 
   function shell(content) {
-    const search = node("input", {type:"search", value:state.q, placeholder:"搜尋標題、ID、創作者、標籤…", "aria-label":"搜尋"});
+    const search = node("input", {type:"search", value:state.q, placeholder:t("static.search_placeholder"), "aria-label":t("static.search_label")});
     search.addEventListener("input", event => { state.q = event.target.value; state.page = 1; writeHash(); renderMain(); });
     const theme = node("button", {class:"icon-button", type:"button", "data-theme-toggle":""}, window.FanboxTheme.current() === "dark" ? "☾" : window.FanboxTheme.current() === "light" ? "☀" : "◐");
-    const menu = node("button", {class:"menu-button", type:"button", "aria-label":"開啟導覽", "aria-expanded":document.body.classList.contains("menu-open"), onclick:() => document.body.classList.toggle("menu-open")}, "☰");
+    const menu = node("button", {class:"menu-button", type:"button", "aria-label":t("static.open_menu"), "aria-expanded":document.body.classList.contains("menu-open"), onclick:() => document.body.classList.toggle("menu-open")}, "☰");
     const topbar = node("header", {class:"topbar"}, menu, node("a", {class:"brand", href:"index.html"}, "FANBOX Archive"), search, githubLink(), theme);
     const sidebar = node("aside", {class:"sidebar"},
-      node("nav", {"aria-label":"主要導覽"},
-        navButton("總覽", "overview", ""), navButton("文章", "posts", data.stats.posts || 0),
-        navButton("創作者", "creators", data.stats.creators || 0), navButton("Fan Card", "fancards", data.stats.fancards || 0),
-        navButton("異常項目", "issues", data.stats.issues || 0)),
-      node("div", {class:"sidebar-creators"}, node("h2", {}, "創作者"), ...data.creators.map(creator =>
+      node("nav", {"aria-label":t("static.nav_label")},
+        navButton(t("static.nav_overview"), "overview", ""), navButton(t("static.nav_posts"), "posts", data.stats.posts || 0),
+        navButton(t("static.nav_creators"), "creators", data.stats.creators || 0), navButton(t("static.nav_fancards"), "fancards", data.stats.fancards || 0),
+        navButton(t("static.nav_issues"), "issues", data.stats.issues || 0)),
+      node("div", {class:"sidebar-creators"}, node("h2", {}, t("static.sidebar_creators")), ...data.creators.map(creator =>
         node("button", {type:"button", onclick:() => {state.creator=creator.creator_id; state.tag=""; state.view="posts"; writeHash(); render();}},
           creator.avatar ? node("img", {class:"creator-avatar small", src:creator.avatar, alt:""}) : node("span", {class:"avatar-fallback small"}, creator.name.slice(0,1)),
           node("span", {}, creator.name), node("small", {}, creator.post_count))))
@@ -134,29 +150,29 @@
 
   function controls() {
     const resetPage = () => { state.page = 1; writeHash(); renderMain(); };
-    const creatorSelect = node("select", {"aria-label":"依創作者篩選", onchange:event => {state.creator=event.target.value; state.tag=""; resetPage();}},
-      node("option", {value:""}, "全部創作者"), ...data.creators.map(item => node("option", {value:item.creator_id}, item.name)));
+    const creatorSelect = node("select", {"aria-label":t("static.filter_creator"), onchange:event => {state.creator=event.target.value; state.tag=""; resetPage();}},
+      node("option", {value:""}, t("static.filter_creator_all")), ...data.creators.map(item => node("option", {value:item.creator_id}, item.name)));
     creatorSelect.value = state.creator;
-    const statusSelect = node("select", {"aria-label":"依狀態篩選", onchange:event => {state.status=event.target.value; resetPage();}},
-      node("option", {value:""}, "全部狀態"), ...["completed","partial","failed","restricted","unavailable","missing"].map(value => node("option", {value}, value)));
+    const statusSelect = node("select", {"aria-label":t("static.filter_status"), onchange:event => {state.status=event.target.value; resetPage();}},
+      node("option", {value:""}, t("static.filter_status_all")), ...["completed","partial","failed","restricted","unavailable","missing"].map(value => node("option", {value}, value)));
     statusSelect.value = state.status;
     const years = [...new Set(data.posts.map(post => displayYear(post.published_at)).filter(value => /^\d{4}$/.test(value)))].sort().reverse();
-    const yearSelect = node("select", {"aria-label":"依年份篩選", onchange:event => {state.year=event.target.value; resetPage();}},
-      node("option", {value:""}, "全部年份"), ...years.map(value => node("option", {value}, value)));
+    const yearSelect = node("select", {"aria-label":t("static.filter_year"), onchange:event => {state.year=event.target.value; resetPage();}},
+      node("option", {value:""}, t("static.filter_year_all")), ...years.map(value => node("option", {value}, value)));
     yearSelect.value = state.year;
-    const versionSelect = node("select", {"aria-label":"依版本數篩選", onchange:event => {state.versioned=event.target.value; resetPage();}},
-      node("option", {value:""}, "全部版本"), node("option", {value:"yes"}, "多版本文章"));
+    const versionSelect = node("select", {"aria-label":t("static.filter_versions"), onchange:event => {state.versioned=event.target.value; resetPage();}},
+      node("option", {value:""}, t("static.filter_versions_all")), node("option", {value:"yes"}, t("static.filter_versions_multi")));
     versionSelect.value = state.versioned;
-    const sortSelect = node("select", {"aria-label":"排序方式", onchange:event => {state.sort=event.target.value; resetPage();}},
-      node("option", {value:"published"}, "發布時間"), node("option", {value:"updated"}, "更新時間"),
-      node("option", {value:"title"}, "標題（A–Z）"), node("option", {value:"versions"}, "版本數（多到少）"));
+    const sortSelect = node("select", {"aria-label":t("static.sort_by"), onchange:event => {state.sort=event.target.value; resetPage();}},
+      node("option", {value:"published"}, t("static.sort_published")), node("option", {value:"updated"}, t("static.sort_updated")),
+      node("option", {value:"title"}, t("static.sort_title")), node("option", {value:"versions"}, t("static.sort_versions")));
     sortSelect.value = state.sort;
     const timeSort = TIME_SORTS.has(state.sort);
-    const orderLabel = state.order === "desc" ? "新到舊" : "舊到新";
+    const orderLabel = state.order === "desc" ? t("common.sort_desc") : t("common.sort_asc");
     const orderToggle = node("button", {class:"sort-toggle", type:"button", "data-order":state.order,
-      disabled:timeSort ? null : "", "aria-label":timeSort ? `時間排序：${orderLabel}，按下切換` : "時間排序只適用於發布或更新時間",
-      onclick:() => {state.order = state.order === "desc" ? "asc" : "desc"; resetPage();}}, state.order === "desc" ? "新到舊 ↓" : "舊到新 ↑");
-    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.tag=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published"; state.order="desc"; state.page=1; writeHash(); render();}}, "清除篩選");
+      disabled:timeSort ? null : "", "aria-label":timeSort ? t("common.sort_label", {label:t("common.sort_time"), order:orderLabel}) : t("static.sort_time_disabled"),
+      onclick:() => {state.order = state.order === "desc" ? "asc" : "desc"; resetPage();}}, state.order === "desc" ? t("common.sort_desc_button") : t("common.sort_asc_button"));
+    const clear = node("button", {class:"secondary", type:"button", onclick:() => {state.creator=""; state.tag=""; state.status=""; state.year=""; state.versioned=""; state.q=""; state.sort="published"; state.order="desc"; state.page=1; writeHash(); render();}}, t("static.clear_filters"));
     return node("div", {class:"controls"}, creatorSelect, statusSelect, yearSelect, versionSelect, sortSelect, orderToggle, clear);
   }
 
@@ -179,10 +195,10 @@
     const pages = Math.max(1, Math.ceil(total / pageSize));
     state.page = Math.min(state.page, pages);
     if (pages === 1) return null;
-    return node("nav", {class:"pagination", "aria-label":"文章分頁"},
-      node("button", {class:"secondary", type:"button", disabled:state.page === 1 ? "" : null, onclick:() => {state.page--; writeHash(); renderMain();}}, "← 上一頁"),
-      node("span", {}, `第 ${state.page} / ${pages} 頁`),
-      node("button", {class:"secondary", type:"button", disabled:state.page === pages ? "" : null, onclick:() => {state.page++; writeHash(); renderMain();}}, "下一頁 →"));
+    return node("nav", {class:"pagination", "aria-label":t("static.pagination")},
+      node("button", {class:"secondary", type:"button", disabled:state.page === 1 ? "" : null, onclick:() => {state.page--; writeHash(); renderMain();}}, t("common.previous_page")),
+      node("span", {}, t("static.page_position", {page:state.page, pages})),
+      node("button", {class:"secondary", type:"button", disabled:state.page === pages ? "" : null, onclick:() => {state.page++; writeHash(); renderMain();}}, t("common.next_page")));
   }
 
   function postCard(post) {
@@ -219,7 +235,7 @@
       node("div", {class:"tag-filter-options"},
         node("button", {type:"button", class:state.tag ? "" : "active", "aria-pressed":state.tag ? "false" : "true", onclick:() => {state.tag=""; state.page=1; writeHash(true); renderMain();}}, `全部 ${creatorPosts.length}`),
         ...(facets.length ? facets.map(([tag,count]) => node("button", {type:"button", class:state.tag === tag ? "active" : "", "aria-pressed":state.tag === tag ? "true" : "false", onclick:() => {state.tag=tag; state.page=1; writeHash(true); renderMain();}}, `${tag} ${count}`)) : [node("span", {class:"muted"}, "尚無已保存的投稿標籤")]))) : null;
-    return node("div", {}, heading("文章", `${items.length} 筆符合目前條件`), controls(), tagFilter, node("div", {class:"post-list"}, ...(pageItems.length ? pageItems.map(postCard) : [node("p", {class:"empty"}, "沒有符合條件的文章。")])), pagination(items.length, pageSize));
+    return node("div", {}, heading(t("static.posts_title"), t("static.posts_matching", {count:items.length})), controls(), tagFilter, node("div", {class:"post-list"}, ...(pageItems.length ? pageItems.map(postCard) : [node("p", {class:"empty"}, t("static.posts_empty"))])), pagination(items.length, pageSize));
   }
 
   function creatorsView() {

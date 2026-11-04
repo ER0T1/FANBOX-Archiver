@@ -965,3 +965,53 @@ def test_custom_color_editor_syncs_controls_warns_saves_and_round_trips(
     expect(editor.locator(".color-feedback")).to_contain_text("已匯入")
     editor.get_by_role("button", name="暗色配色").click()
     expect(editor.locator(".color-row").first.locator(".color-badge")).to_have_text("已自訂")
+
+
+_NO_PAGE_OVERFLOW = "document.documentElement.scrollWidth <= window.innerWidth"
+# Names the elements that stick out, so a failing layout check says what to fix.
+_OVERFLOWING = """() => [...document.querySelectorAll('body *')]
+  .filter(e => e.getBoundingClientRect().right > window.innerWidth + 0.5).slice(0, 8)
+  .map(e => `${e.tagName}.${e.className} ${(e.textContent || '').trim().slice(0, 30)}`)"""
+
+
+def test_pseudo_locale_drives_dynamic_and_static_text_and_fits_narrow_screens(
+    page: Page, live_gui, tmp_path: Path,
+) -> None:
+    base_url, config_path, jobs = live_gui
+    jobs.hold_backup = False
+    token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
+    assert token
+    saved = httpx.patch(f"{base_url}/api/config", headers={"X-Fanbox-Token": token.group(1)},
+                        json={"display": {"language": "qps-ploc"}})
+    assert saved.status_code == 200, saved.text
+
+    for width in (1280, 375):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.goto(base_url, wait_until="networkidle")
+        expect(page.locator("html")).to_have_attribute("lang", "qps-ploc")
+        expect(page.locator("#nav button[data-view=posts]")).to_have_text(re.compile(r"^［投稿·+］$"))
+        expect(page.locator(".heading h1")).to_have_text(re.compile(r"^［投稿"))
+        expect(page.locator(".heading")).to_contain_text("［55 篇備份")
+        expect(page.locator("#search")).to_have_attribute("placeholder", re.compile(r"^［搜尋"))
+        expect(page.locator(".pagination button").first).to_have_text(re.compile(r"^［← 上一頁"))
+        expect(page.locator(".post-card .fee-badge").first).to_have_text(re.compile(r"^［"))
+        # Archived titles and names are content, never translated or padded.
+        expect(page.locator(".post-card strong").first).to_have_text("投稿 54")
+        assert page.evaluate(_NO_PAGE_OVERFLOW), (width, page.evaluate(_OVERFLOWING))
+        assert page.locator(".topbar").evaluate("e => e.scrollWidth <= e.clientWidth"), width
+
+    page.get_by_role("button", name=re.compile("設定")).click()
+    language = page.locator("#display-language")
+    expect(language).to_contain_text("測試語系（Pseudo，僅限 config.yaml）", timeout=5_000)
+
+    config = AppConfig.load(config_path)
+    assert config.display.language == "qps-ploc"
+    IndexBuilder(config).build()
+    index_url = (config.storage.output_dir / "index.html").as_uri()
+    page.set_viewport_size({"width": 375, "height": 844})
+    page.goto(f"{index_url}#view=posts")
+    expect(page.locator(".sidebar nav")).to_contain_text("［文章")
+    expect(page.locator(".pagination")).to_contain_text("［第 1 / 3 頁")
+    expect(page.locator(".page-heading")).to_contain_text("［55 筆符合目前條件")
+    expect(page.get_by_role("combobox", name=re.compile("^［排序方式"))).to_be_visible()
+    assert page.evaluate(_NO_PAGE_OVERFLOW), page.evaluate(_OVERFLOWING)

@@ -76,11 +76,16 @@ class DisplayConfig(BaseModel):
 
     ``theme`` is the colour mode of the reader and desktop app, and the default of exported
     static sites; ``system`` follows the operating system's light/dark setting.
+
+    ``language`` picks the interface catalog: ``auto`` follows the system or browser language
+    among the shipped catalogs, falling back to Traditional Chinese; ``qps-ploc`` is the
+    pseudo-locale used only for layout testing.
     """
 
     timezone: str = "system"
     theme: Literal["system", "dark", "light"] = "system"
     colors: ThemeColors = Field(default_factory=ThemeColors)
+    language: Literal["auto", "zh-Hant", "qps-ploc"] = "auto"
 
     @property
     def css_theme(self) -> str:

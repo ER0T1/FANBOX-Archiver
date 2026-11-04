@@ -46,7 +46,7 @@ namespace FanboxUI {
   }
 
   export function feeLabel(value: number | null | undefined): string {
-    if (value === null || value === undefined) return "檔位未記錄";
-    return Number(value) <= 0 ? "全體公開" : `¥${Number(value).toLocaleString()}`;
+    if (value === null || value === undefined) return t("common.fee_unknown");
+    return Number(value) <= 0 ? t("common.fee_public") : t("common.fee_amount", {amount: Number(value)});
   }
 }

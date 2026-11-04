@@ -13,6 +13,7 @@ namespace FanboxUI {
     const nav: HTMLElement = navElement;
     const sessionToken = tokenMeta.content;
     setDisplayTimeZone(document.querySelector<HTMLMetaElement>('meta[name="fanbox-timezone"]')?.content);
+    applyI18n(document);
     const state = createInitialState();
     let jobTimer: number | undefined;
     let searchTimer: number | undefined;
@@ -82,7 +83,7 @@ namespace FanboxUI {
 
     async function loadPosts(): Promise<void> {
       state.current = null;
-      app.replaceChildren(h("p", {class: "empty"}, "正在讀取投稿…"));
+      app.replaceChildren(h("p", {class: "empty"}, t("common.loading_posts")));
       try {
         const params = new URLSearchParams({page: String(state.page), page_size: "20", order: state.postOrder});
         if (state.q) params.set("q", state.q);
@@ -107,7 +108,7 @@ namespace FanboxUI {
       const back = creatorContent && creatorId
         ? () => void loadCreator(creatorId, "posts") : () => void loadPosts();
       state.postNavigation = null;
-      target.replaceChildren(h("p", {class: "empty"}, "正在讀取投稿…"));
+      target.replaceChildren(h("p", {class: "empty"}, t("common.loading_posts")));
       try {
         const params = new URLSearchParams({order: state.postOrder});
         if (version !== null) params.set("version", String(version));

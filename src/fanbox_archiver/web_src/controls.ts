@@ -109,11 +109,11 @@ namespace FanboxUI {
   }
 
   export function sortToggle(
-    order: SortOrder, onChange: (order: SortOrder) => void, label = "時間排序",
+    order: SortOrder, onChange: (order: SortOrder) => void, label = t("common.sort_time"),
   ): HTMLButtonElement {
-    const text = order === "desc" ? "新到舊 ↓" : "舊到新 ↑";
+    const text = order === "desc" ? t("common.sort_desc_button") : t("common.sort_asc_button");
     return h("button", {type: "button", class: "sort-toggle", "data-order": order,
-      "aria-label": `${label}：${order === "desc" ? "新到舊" : "舊到新"}，按下切換`,
+      "aria-label": t("common.sort_label", {label, order: order === "desc" ? t("common.sort_desc") : t("common.sort_asc")}),
       onclick: () => onChange(order === "desc" ? "asc" : "desc")}, text) as HTMLButtonElement;
   }
 
@@ -149,12 +149,12 @@ namespace FanboxUI {
   export function setSearchState(search: HTMLInputElement, view: View, creatorTab: CreatorTab): void {
     search.disabled = ["backup", "maintenance", "settings"].includes(view)
       || (view === "creator" && creatorTab === "profile");
-    search.placeholder = view === "posts" ? "搜尋標題、Post ID 或創作者…"
-      : view === "creators" ? "搜尋創作者…"
-      : view === "creator" && creatorTab === "fancards" ? "搜尋月份…"
-      : view === "creator" && creatorTab === "posts" ? "搜尋此創作者的投稿…"
-      : view === "backup" ? "備份執行期間可繼續閱讀封存"
-      : view === "maintenance" ? "封存驗證與維護"
-      : view === "settings" ? "本機設定" : "創作者個人資料";
+    search.placeholder = t(view === "posts" ? "search.posts"
+      : view === "creators" ? "search.creators"
+      : view === "creator" && creatorTab === "fancards" ? "search.creator_fancards"
+      : view === "creator" && creatorTab === "posts" ? "search.creator_posts"
+      : view === "backup" ? "search.backup"
+      : view === "maintenance" ? "search.maintenance"
+      : view === "settings" ? "search.settings" : "search.creator_profile");
   }
 }

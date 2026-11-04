@@ -1,6 +1,81 @@
 "use strict";
 var FanboxUI;
 (function (FanboxUI) {
+    const placeholder = /\{([a-z_][a-z0-9_]*)\}/g;
+    let catalog = { locale: "zh-Hant", intl: "zh-Hant", base: "zh-Hant", messages: {} };
+    let numberFormat = new Intl.NumberFormat("zh-Hant");
+    let pluralRules = new Intl.PluralRules("zh-Hant");
+    const reported = new Set();
+    function setI18nCatalog(value) {
+        if (!value || typeof value !== "object")
+            return;
+        const data = value;
+        if (!data.messages || typeof data.messages !== "object")
+            return;
+        catalog = {
+            locale: String(data.locale || "zh-Hant"), intl: String(data.intl || "zh-Hant"),
+            base: String(data.base || "zh-Hant"), messages: data.messages,
+        };
+        try {
+            numberFormat = new Intl.NumberFormat(catalog.intl);
+            pluralRules = new Intl.PluralRules(catalog.intl);
+        }
+        catch {
+            numberFormat = new Intl.NumberFormat("zh-Hant");
+            pluralRules = new Intl.PluralRules("zh-Hant");
+        }
+    }
+    FanboxUI.setI18nCatalog = setI18nCatalog;
+    function currentLocale() {
+        return catalog.locale;
+    }
+    FanboxUI.currentLocale = currentLocale;
+    function formatNumber(value) {
+        return numberFormat.format(value);
+    }
+    FanboxUI.formatNumber = formatNumber;
+    function t(key, params = {}) {
+        let message = catalog.messages[key];
+        if (message === undefined) {
+            if (!reported.has(key)) {
+                reported.add(key);
+                globalThis.console?.warn?.(`[i18n] missing key: ${key}`);
+            }
+            return key;
+        }
+        if (typeof message !== "string") {
+            const count = Number(params.count ?? 0);
+            message = message[pluralRules.select(count)] ?? message.other ?? key;
+        }
+        return message.replace(placeholder, (match, name) => {
+            const value = params[name];
+            if (value === undefined)
+                return match;
+            return typeof value === "number" ? formatNumber(value) : value;
+        });
+    }
+    FanboxUI.t = t;
+    function applyI18n(root) {
+        if (!Object.keys(catalog.messages).length)
+            return;
+        for (const element of root.querySelectorAll("[data-i18n]")) {
+            const key = element.dataset.i18n;
+            if (key)
+                element.textContent = t(key);
+        }
+        for (const element of root.querySelectorAll("[data-i18n-attr]")) {
+            for (const pair of (element.dataset.i18nAttr ?? "").split(";")) {
+                const [attribute, key] = pair.split(":").map(part => part.trim());
+                if (attribute && key)
+                    element.setAttribute(attribute, t(key));
+            }
+        }
+    }
+    FanboxUI.applyI18n = applyI18n;
+    setI18nCatalog(globalThis.FanboxI18n);
+})(FanboxUI || (FanboxUI = {}));
+var FanboxUI;
+(function (FanboxUI) {
     function createInitialState() {
         return {
             view: "posts",
@@ -78,8 +153,8 @@ var FanboxUI;
     FanboxUI.humanBytes = humanBytes;
     function feeLabel(value) {
         if (value === null || value === undefined)
-            return "檔位未記錄";
-        return Number(value) <= 0 ? "全體公開" : `¥${Number(value).toLocaleString()}`;
+            return FanboxUI.t("common.fee_unknown");
+        return Number(value) <= 0 ? FanboxUI.t("common.fee_public") : FanboxUI.t("common.fee_amount", { amount: Number(value) });
     }
     FanboxUI.feeLabel = feeLabel;
 })(FanboxUI || (FanboxUI = {}));
@@ -212,10 +287,10 @@ var FanboxUI;
         return root;
     }
     FanboxUI.customSelect = customSelect;
-    function sortToggle(order, onChange, label = "時間排序") {
-        const text = order === "desc" ? "新到舊 ↓" : "舊到新 ↑";
+    function sortToggle(order, onChange, label = FanboxUI.t("common.sort_time")) {
+        const text = order === "desc" ? FanboxUI.t("common.sort_desc_button") : FanboxUI.t("common.sort_asc_button");
         return FanboxUI.h("button", { type: "button", class: "sort-toggle", "data-order": order,
-            "aria-label": `${label}：${order === "desc" ? "新到舊" : "舊到新"}，按下切換`,
+            "aria-label": FanboxUI.t("common.sort_label", { label, order: order === "desc" ? FanboxUI.t("common.sort_desc") : FanboxUI.t("common.sort_asc") }),
             onclick: () => onChange(order === "desc" ? "asc" : "desc") }, text);
     }
     FanboxUI.sortToggle = sortToggle;
@@ -250,13 +325,13 @@ var FanboxUI;
     function setSearchState(search, view, creatorTab) {
         search.disabled = ["backup", "maintenance", "settings"].includes(view)
             || (view === "creator" && creatorTab === "profile");
-        search.placeholder = view === "posts" ? "搜尋標題、Post ID 或創作者…"
-            : view === "creators" ? "搜尋創作者…"
-                : view === "creator" && creatorTab === "fancards" ? "搜尋月份…"
-                    : view === "creator" && creatorTab === "posts" ? "搜尋此創作者的投稿…"
-                        : view === "backup" ? "備份執行期間可繼續閱讀封存"
-                            : view === "maintenance" ? "封存驗證與維護"
-                                : view === "settings" ? "本機設定" : "創作者個人資料";
+        search.placeholder = FanboxUI.t(view === "posts" ? "search.posts"
+            : view === "creators" ? "search.creators"
+                : view === "creator" && creatorTab === "fancards" ? "search.creator_fancards"
+                    : view === "creator" && creatorTab === "posts" ? "search.creator_posts"
+                        : view === "backup" ? "search.backup"
+                            : view === "maintenance" ? "search.maintenance"
+                                : view === "settings" ? "search.settings" : "search.creator_profile");
     }
     FanboxUI.setSearchState = setSearchState;
 })(FanboxUI || (FanboxUI = {}));
@@ -426,21 +501,21 @@ var FanboxUI;
             onclick: () => onOpen(item.post_id),
         }, item.cover_url
             ? FanboxUI.h("img", { class: "post-cover", src: item.cover_url, alt: "", loading: "lazy" })
-            : FanboxUI.h("span", { class: "post-cover placeholder", "aria-hidden": "true" }, "POST"), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "post-meta" }, FanboxUI.formatDate(item.published_at), item.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, "置頂") : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(item.fee_required))), FanboxUI.h("strong", {}, item.title), FanboxUI.h("small", {}, `${item.creator_name} · Post ${item.post_id} · ${item.version_count} 個版本`), item.tags.length ? FanboxUI.h("span", { class: "post-tags", "aria-label": `標籤：${item.tags.join("、")}` }, item.tags.map(tag => FanboxUI.h("span", { class: "post-tag" }, tag))) : null), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status));
+            : FanboxUI.h("span", { class: "post-cover placeholder", "aria-hidden": "true" }, FanboxUI.t("posts.cover_placeholder")), FanboxUI.h("span", { class: "post-main" }, FanboxUI.h("span", { class: "post-meta" }, FanboxUI.formatDate(item.published_at), item.is_pinned ? FanboxUI.h("span", { class: "pin-badge" }, FanboxUI.t("posts.pinned")) : null, FanboxUI.h("span", { class: "fee-badge" }, FanboxUI.feeLabel(item.fee_required))), FanboxUI.h("strong", {}, item.title), FanboxUI.h("small", {}, FanboxUI.t("posts.card_meta", { creator: item.creator_name, post_id: item.post_id, count: item.version_count })), item.tags.length ? FanboxUI.h("span", { class: "post-tags", "aria-label": FanboxUI.t("posts.tags_label", { tags: item.tags.join(FanboxUI.t("posts.tag_separator")) }) }, item.tags.map(tag => FanboxUI.h("span", { class: "post-tag" }, tag))) : null), FanboxUI.h("span", { class: `badge status-${item.status}` }, item.status));
     }
     FanboxUI.renderPostCard = renderPostCard;
-    function renderPagination(data, onPage, label = "投稿分頁") {
+    function renderPagination(data, onPage, label = FanboxUI.t("posts.pagination")) {
         if (data.pages <= 1)
             return null;
         const previous = FanboxUI.h("button", {
             type: "button", disabled: data.page <= 1,
             onclick: () => onPage(data.page - 1),
-        }, "← 上一頁");
+        }, FanboxUI.t("common.previous_page"));
         const next = FanboxUI.h("button", {
             type: "button", disabled: data.page >= data.pages,
             onclick: () => onPage(data.page + 1),
-        }, "下一頁 →");
-        const pageJump = FanboxUI.h("details", { class: "page-jump" }, FanboxUI.h("summary", { "aria-label": `目前第 ${data.page} 頁，共 ${data.pages} 頁` }, `${data.page} / ${data.pages}`), FanboxUI.h("div", { class: "page-menu", role: "listbox", "aria-label": "跳至頁數" }, Array.from({ length: data.pages }, (_, index) => {
+        }, FanboxUI.t("common.next_page"));
+        const pageJump = FanboxUI.h("details", { class: "page-jump" }, FanboxUI.h("summary", { "aria-label": FanboxUI.t("common.page_position", { page: data.page, pages: data.pages }) }, `${data.page} / ${data.pages}`), FanboxUI.h("div", { class: "page-menu", role: "listbox", "aria-label": FanboxUI.t("common.page_jump") }, Array.from({ length: data.pages }, (_, index) => {
             const page = index + 1;
             return FanboxUI.h("button", {
                 type: "button", role: "option", "aria-selected": page === data.page,
@@ -455,7 +530,7 @@ var FanboxUI;
     FanboxUI.renderPagination = renderPagination;
     function renderPostListPage(data, actions) {
         const cards = data.items.map(item => renderPostCard(item, actions.onOpen));
-        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "POSTS"), FanboxUI.h("h1", {}, "投稿"), FanboxUI.h("p", {}, `${data.total} 篇備份`)), actions.onOrder ? FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序") : null), FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage));
+        return FanboxUI.h("section", { class: "page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, FanboxUI.t("posts.eyebrow")), FanboxUI.h("h1", {}, FanboxUI.t("posts.title")), FanboxUI.h("p", {}, FanboxUI.t("posts.total", { count: data.total }))), actions.onOrder ? FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, FanboxUI.t("posts.sort_label")) : null), FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("posts.empty"))), renderPagination(data, actions.onPage));
     }
     FanboxUI.renderPostListPage = renderPostListPage;
     function renderCreatorPostList(data, actions) {
@@ -466,7 +541,7 @@ var FanboxUI;
             "aria-pressed": actions.activeTag === facet.name ? "true" : "false",
             onclick: () => actions.onTag?.(facet.name),
         }, `${facet.name} ${facet.count}`)) : FanboxUI.h("span", { class: "tag-filter-empty" }, "尚無已保存的投稿標籤"))) : null;
-        return FanboxUI.h("div", { class: "creator-posts" }, filter, actions.onOrder ? FanboxUI.h("div", { class: "list-toolbar" }, FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, "投稿時間排序")) : null, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, "沒有符合條件的投稿。")), renderPagination(data, actions.onPage, "創作者投稿分頁"));
+        return FanboxUI.h("div", { class: "creator-posts" }, filter, actions.onOrder ? FanboxUI.h("div", { class: "list-toolbar" }, FanboxUI.sortToggle(actions.order ?? "desc", actions.onOrder, FanboxUI.t("posts.sort_label"))) : null, FanboxUI.h("div", { class: "post-list" }, cards.length ? cards : FanboxUI.h("p", { class: "empty" }, FanboxUI.t("posts.empty"))), renderPagination(data, actions.onPage, "創作者投稿分頁"));
     }
     FanboxUI.renderCreatorPostList = renderCreatorPostList;
     function richText(block) {
@@ -972,6 +1047,18 @@ var FanboxUI;
         const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "主題"), FanboxUI.h("p", { class: "settings-section-description" }, "選擇後立即預覽，儲存後套用到動態閱讀器、桌面程式，以及之後匯出的靜態網站（靜態網站上仍可自行切換）。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "主題"), select)));
         return { node, read: () => choice };
     }
+    const LANGUAGE_LABELS = {
+        auto: "跟隨系統", "zh-Hant": "繁體中文", "qps-ploc": "測試語系（Pseudo，僅限 config.yaml）",
+    };
+    function languageControl(data, blocked) {
+        let choice = data.editable.display.language;
+        const values = choice === "qps-ploc" ? ["auto", "zh-Hant", "qps-ploc"] : ["auto", "zh-Hant"];
+        const select = FanboxUI.customSelect({ id: "display-language", label: "介面語言", value: choice, disabled: blocked,
+            options: values.map(value => ({ value, label: LANGUAGE_LABELS[value] })),
+            onChange: next => { choice = next; } });
+        const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "介面語言"), FanboxUI.h("p", { class: "settings-section-description" }, `目前提供繁體中文；「跟隨系統」找不到支援的語言時使用繁體中文。投稿、創作者名稱與標籤等封存內容不會翻譯。儲存後重新整理頁面套用。目前生效：${FanboxUI.currentLocale()}`), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "介面語言"), select)));
+        return { node, read: () => choice };
+    }
     async function copyText(text) {
         try {
             await navigator.clipboard.writeText(text);
@@ -1060,6 +1147,7 @@ var FanboxUI;
         const scheduleSection = FanboxUI.renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked, schedule.actions);
         const timezone = timezoneControl(data, blocked);
         const theme = themeControl(data, blocked);
+        const language = languageControl(data, blocked);
         const colors = FanboxUI.colorEditor(data);
         const logLevel = FanboxUI.customSelect({ id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
             options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({ value: item, label: item })) });
@@ -1100,7 +1188,7 @@ var FanboxUI;
                     }, backup_defaults: {
                         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
                         include_fancard: defaultFancard.input.checked,
-                    }, schedule: scheduleSection.read(), display: { timezone: timezone.read(), theme: theme.read(), colors: colors.read() }, markdown: {
+                    }, schedule: scheduleSection.read(), display: { timezone: timezone.read(), theme: theme.read(), colors: colors.read(), language: language.read() }, markdown: {
                         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
                         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
                     }, logging: { level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -1109,7 +1197,7 @@ var FanboxUI;
                     feedback.textContent = `儲存失敗：${error}`;
                     feedback.hidden = false;
                 }
-            } }, FanboxUI.h("fieldset", { disabled: blocked }, FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), scheduleSection.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node))), FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "OUTPUT & LOGGING"), FanboxUI.h("h2", {}, "輸出與紀錄"), theme.node, colors.node, timezone.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel), keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node))), FanboxUI.h("div", { class: "settings-actions" }, FanboxUI.h("button", { type: "submit", class: "primary",
+            } }, FanboxUI.h("fieldset", { disabled: blocked }, FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), scheduleSection.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node))), FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "OUTPUT & LOGGING"), FanboxUI.h("h2", {}, "輸出與紀錄"), theme.node, colors.node, language.node, timezone.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel), keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node))), FanboxUI.h("div", { class: "settings-actions" }, FanboxUI.h("button", { type: "submit", class: "primary",
             disabled: !data.writable || blocked }, "儲存設定"), !data.writable ? FanboxUI.h("span", { class: "notice" }, "目前伺服器未指定可寫入的設定檔。") : null, blocked ? FanboxUI.h("span", { class: "notice" }, "工作結束後即可儲存設定。") : null, feedback)));
         return FanboxUI.h("section", { class: "page settings-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "LOCAL SETTINGS"), FanboxUI.h("h1", {}, "設定"), FanboxUI.h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))), message ? FanboxUI.h("p", { class: "settings-saved", role: "status" }, message) : null, FanboxUI.activeJobNotice(activeJob), FanboxUI.h("section", { class: `settings-card account-card tone-${authTone}` }, FanboxUI.h("div", { class: "account-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ACCOUNT & SIGN-IN"), FanboxUI.h("h2", {}, "帳號／登入")), FanboxUI.h("span", { class: `auth-badge ${authTone}` }, authLabel)), FanboxUI.h("p", { class: "account-message", role: "status", "aria-live": "polite" }, auth.message), lastKnown ? FanboxUI.h("p", { class: "account-last-known" }, lastKnown) : null, FanboxUI.h("p", { class: "settings-section-description" }, auth.source === "profile"
             ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
@@ -1515,6 +1603,7 @@ var FanboxUI;
         const nav = navElement;
         const sessionToken = tokenMeta.content;
         FanboxUI.setDisplayTimeZone(document.querySelector('meta[name="fanbox-timezone"]')?.content);
+        FanboxUI.applyI18n(document);
         const state = FanboxUI.createInitialState();
         let jobTimer;
         let searchTimer;
@@ -1581,7 +1670,7 @@ var FanboxUI;
         }
         async function loadPosts() {
             state.current = null;
-            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取投稿…"));
+            app.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_posts")));
             try {
                 const params = new URLSearchParams({ page: String(state.page), page_size: "20", order: state.postOrder });
                 if (state.q)
@@ -1607,7 +1696,7 @@ var FanboxUI;
             const back = creatorContent && creatorId
                 ? () => void loadCreator(creatorId, "posts") : () => void loadPosts();
             state.postNavigation = null;
-            target.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取投稿…"));
+            target.replaceChildren(FanboxUI.h("p", { class: "empty" }, FanboxUI.t("common.loading_posts")));
             try {
                 const params = new URLSearchParams({ order: state.postOrder });
                 if (version !== null)

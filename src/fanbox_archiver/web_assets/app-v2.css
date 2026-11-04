@@ -72,7 +72,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .tag-filter-options button.active { border-color:color-mix(in srgb,var(--accent) 65%,var(--line)); background:var(--accent-soft); color:var(--accent); font-weight:800; }
 .tag-filter-empty { align-self:center; color:var(--muted); font-size:.8rem; }
 .status-completed { color:var(--green); background:color-mix(in srgb,var(--green) 12%,var(--surface)); border-color:color-mix(in srgb,var(--green) 25%,var(--line)); }
-.pagination { display:flex; justify-content:center; align-items:center; gap:1rem; margin-top:1.6rem; }
+.pagination { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:.75rem 1rem; margin-top:1.6rem; }
 .sort-toggle { flex:0 0 auto; min-height:44px; padding:.58rem .85rem; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:10px; font-weight:750; white-space:nowrap; cursor:pointer; }
 .sort-toggle:hover,.sort-toggle:focus-visible { border-color:var(--accent); }
 .list-toolbar { display:flex; justify-content:flex-end; margin:0 0 1rem; }

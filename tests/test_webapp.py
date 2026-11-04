@@ -20,7 +20,7 @@ async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
         home = await client.get("/")
         assert home.status_code == 200
         assert "FANBOX Archive" in home.text
-        assert 'data-view="posts">投稿' in home.text
+        assert 'data-view="posts" data-i18n="nav.posts">投稿' in home.text
         assert 'data-view="fancards"' not in home.text
         assert "/assets/core.js" in home.text
         assert "/assets/design-tokens.css" in home.text
@@ -554,6 +554,37 @@ async def test_theme_setting_is_saved_and_rendered_into_the_page(tmp_path: Path)
         assert '<html lang="zh-Hant" data-theme="dark">' in (await client.get("/")).text
 
     assert type(config).load(config_path).display.theme == "dark"
+
+
+@pytest.mark.anyio
+async def test_language_setting_drives_the_page_and_catalog_script(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    type(config).save_editable(config_path, config, {})
+    app = create_app(config, config_path=config_path)
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        english = {"Accept-Language": "en-US,en;q=0.9"}
+        home = (await client.get("/", headers=english)).text
+        # "auto" with no shipped catalog for the browser language falls back to zh-Hant.
+        assert '<html lang="zh-Hant"' in home
+        assert home.index('src="/i18n.js"') < home.index('src="/assets/core.js"')
+        script = await client.get("/i18n.js", headers=english)
+        assert script.headers["content-type"].startswith("text/javascript")
+        assert script.headers["cache-control"] == "no-store"
+        assert '"nav.posts": "投稿"' in script.text and '"locale": "zh-Hant"' in script.text
+        assert (await client.get("/api/config")).json()["editable"]["display"]["language"] == "auto"
+
+        invalid = await client.patch("/api/config", headers=token, json={"display": {"language": "fr"}})
+        assert invalid.status_code == 422
+        saved = await client.patch("/api/config", headers=token, json={"display": {"language": "qps-ploc"}})
+        assert saved.status_code == 200
+        assert saved.json()["editable"]["display"]["theme"] == config.display.theme
+        assert '<html lang="qps-ploc"' in (await client.get("/")).text
+        assert '"nav.posts": "［投稿' in (await client.get("/i18n.js")).text
+
+    assert type(config).load(config_path).display.language == "qps-ploc"
 
 
 @pytest.mark.anyio

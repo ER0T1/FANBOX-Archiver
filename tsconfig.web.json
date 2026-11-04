@@ -12,6 +12,7 @@
   },
   "files": [
     "src/fanbox_archiver/web_src/types.ts",
+    "src/fanbox_archiver/web_src/i18n.ts",
     "src/fanbox_archiver/web_src/state.ts",
     "src/fanbox_archiver/web_src/format.ts",
     "src/fanbox_archiver/web_src/dom.ts",
