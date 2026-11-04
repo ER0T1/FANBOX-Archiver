@@ -21,7 +21,15 @@ from .storage import BackupStorage
 from .timestamps import display_zone, format_display
 
 
-TEMPLATE_VERSION = 15
+TEMPLATE_VERSION = 16
+GITHUB_REPOSITORY_URL = "https://github.com/ER0T1/FANBOX-Archiver"
+# Octicons mark-github (MIT), inlined so reader pages never load a remote icon.
+GITHUB_LINK_HTML = (
+    f'<a class="github-link" href="{GITHUB_REPOSITORY_URL}" target="_blank" rel="noopener noreferrer" '
+    'aria-label="GitHub 倉庫（另開新分頁）" title="在 GitHub 查看原始碼">'
+    '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>'
+    '<span class="github-label">GitHub</span></a>'
+)
 
 
 @dataclass(slots=True)
@@ -721,7 +729,7 @@ class IndexBuilder:
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
 <link rel="icon" href="data:,"><title>{html.escape(title)} · FANBOX Archive</title><script src="{asset_prefix}/theme.js"></script><link rel="stylesheet" href="{asset_prefix}/app.css"><link rel="stylesheet" href="{asset_prefix}/design-tokens.css"></head>
-<body class="reader-page"><header class="reader-header"><a href="{asset_prefix}/../../index.html">← 回到索引</a><div class="reader-header-actions"><span>私人本機備份</span><button class="icon-button" type="button" data-theme-toggle>◐</button></div></header>
+<body class="reader-page"><header class="reader-header"><a href="{asset_prefix}/../../index.html">← 回到索引</a><div class="reader-header-actions"><span>私人本機備份</span>{GITHUB_LINK_HTML}<button class="icon-button" type="button" data-theme-toggle>◐</button></div></header>
 <main class="reader"><p class="eyebrow">{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1>
 <p class="metadata">{html.escape(metadata)}</p>{navigation}<div class="reader-actions">{actions}</div>
 <article>{body}</article><footer>此頁為本機備份，不代表遠端目前狀態。</footer></main></body></html>"""

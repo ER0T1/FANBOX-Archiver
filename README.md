@@ -1,8 +1,10 @@
 # FANBOX Archiver
 
-**內部測試版本：v1.3.34-alpha（2026-11-04）**
+**內部測試版本：v1.3.40-alpha（2026-11-04）**
 
 FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備份工具，提供 Windows 桌面程式、瀏覽器 GUI 與命令列介面。它只保存目前登入帳號有權瀏覽的投稿，不會繞過付費牆、CAPTCHA、反自動化機制或其他存取限制。
+
+原始碼與問題回報：<https://github.com/ER0T1/FANBOX-Archiver>。動態閱讀器與離線靜態網站頂端的「GitHub」按鈕也連到這裡，只在點擊時開啟，頁面載入時不會連線。
 
 > pixivFANBOX 的介面並非穩定的公開 API，平台規範也可能限制自動化蒐集。請只在你有權備份且符合現行服務條款的範圍使用。本工具預設單一下載佇列、每次請求至少間隔 3 秒，遇到 401、403 或 429 會停止或回報，而非規避限制。
 
@@ -27,6 +29,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.40-alpha 更新重點
+
+- 動態閱讀器與離線靜態網站的頂端導覽新增「GitHub」按鈕，連到 <https://github.com/ER0T1/FANBOX-Archiver>（靜態網站的投稿／Fan Card 閱讀頁頂端也有）。桌面與平板寬度顯示圖示與「GitHub」文字，手機寬度只顯示圖示並保留可讀名稱；可用鍵盤聚焦並有清楚的焦點框。
+- 按鈕在新分頁開啟，設定 `rel="noopener noreferrer"`，不帶任何封存內容、查詢參數或本機路徑；圖示隨程式內嵌（Octicons，MIT），頁面載入時不會向 GitHub 或任何外部網站發出請求，靜態網站仍可完全離線瀏覽。
+- 靜態網站頁面版本更新，下次建置 `index` 時既有閱讀頁會自動重新產生以加入新按鈕。
+
 ## v1.3.39-alpha 更新重點
 
 - 修正關閉桌面程式（或「封存 → 變更封存位置」）後，本機伺服器仍在背景執行並持續鎖住封存的問題：sidecar 由啟動程式與實際伺服器兩層程序組成，先前只結束了外層。現在會結束整個程序樹，關閉後不再殘留，Windows 背景排程備份也不會因「程式正在使用封存」而被略過。桌面程式異常結束（例如被強制終止）時仍可能殘留，屬已知限制。
@@ -38,10 +46,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 新增「複製診斷資訊」：把上述版本、schema、系統、時區與路徑以純文字複製到剪貼簿，方便回報問題；不含 Cookie、權杖、帳號或任何登入資料。
 - 桌面程式正式版也會寫入日誌（`%LOCALAPPDATA%\local.fanbox-archiver.desktop\logs`）：記錄本機伺服器的啟動、結束與錯誤訊息，單檔上限約 1 MB，只保留最新 5 個檔案；背景排程備份啟動時也會記錄。先前只有開發版會寫入。
 - 新增 API：`GET /api/diagnostics` 與 `POST /api/diagnostics/open`（皆需工作階段權杖）。
-
-## v1.3.37-alpha 更新重點
-
-- 修正 `audit` 與 `verify` 遇到整個投稿（或 Creator Profile、Fan Card 月份）資料夾連同 `versions/` 一起遺失時會直接中止的問題：現在會繼續稽核，並把遺失的版本列為 `manifest_missing`（需人工判讀），不會嘗試自動重建。
 
 ## 安裝
 

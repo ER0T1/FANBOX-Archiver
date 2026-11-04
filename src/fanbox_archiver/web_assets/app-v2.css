@@ -28,6 +28,10 @@ a { color:var(--accent); }
 .topbar input:focus { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent); }
 .topbar input:disabled { opacity:.5; }
 .status { margin-left:auto; color:var(--green); font-size:.8rem; font-weight:750; }
+.github-link { display:inline-flex; align-items:center; gap:.4rem; padding:.5rem .75rem; color:var(--muted); border:1px solid var(--line); border-radius:10px; font-size:.85rem; font-weight:750; text-decoration:none; white-space:nowrap; }
+.github-link svg { width:18px; height:18px; fill:currentColor; flex:0 0 auto; }
+.github-link:hover,.github-link:focus-visible { color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 40%,var(--line)); }
+.github-link:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent); outline-offset:2px; }
 #app { width:min(calc(100% - (var(--gutter) * 2)),var(--container)); margin:auto; padding:2.25rem 0 5rem; }
 .page { width:100%; }
 .heading { display:flex; justify-content:space-between; align-items:end; gap:1rem; margin-bottom:1.6rem; }
@@ -424,6 +428,7 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
   .topbar nav button { padding:.55rem .25rem; }
   .topbar input { order:4; min-width:100%; }
   .status { font-size:.72rem; }
+  .github-link { padding:.45rem; }.github-label { display:none; }
   :root { --gutter:.85rem; }
   #app { padding:1.35rem 0 3.5rem; }
   .heading { align-items:flex-start; }

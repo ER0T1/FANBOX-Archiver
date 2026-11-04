@@ -264,6 +264,7 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
     page.set_viewport_size({"width": 1280, "height": 800})
     page.goto(f"{index_url}#view=creators")
     expect(page.locator("h1", has_text="創作者")).to_be_visible()
+    _expect_github_link(page, label_visible=True)
     page.locator(".creator-card").filter(has_text="Alice").get_by_role("button", name="查看文章 →").click()
     expect(page.get_by_role("button", name="全部 55", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="奇數 27", exact=True)).to_be_visible()
@@ -303,11 +304,31 @@ def test_static_archive_stays_offline_at_desktop_and_narrow_width(page: Page, tm
         "href", "https://www.fanbox.cc/@alice/plans",
     )
 
+    _expect_github_link(page, label_visible=True)
+
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(static_card_url)
     expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
+    _expect_github_link(page, label_visible=False)
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.goto(f"{index_url}#view=posts")
+    _expect_github_link(page, label_visible=False)
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert not any(url.startswith(("http://", "https://")) for url in requests)
+
+
+def _expect_github_link(page: Page, *, label_visible: bool) -> None:
+    """The repository link is click-only: exact URL, new tab, no opener, and an accessible name."""
+    link = page.get_by_role("link", name="GitHub 倉庫（另開新分頁）")
+    expect(link).to_have_count(1)
+    expect(link).to_be_visible()
+    expect(link).to_have_attribute("href", "https://github.com/ER0T1/FANBOX-Archiver")
+    expect(link).to_have_attribute("target", "_blank")
+    expect(link).to_have_attribute("rel", "noopener noreferrer")
+    label = link.locator(".github-label")
+    expect(label).to_be_visible() if label_visible else expect(label).to_be_hidden()
+    link.focus()
+    expect(link).to_be_focused()
 
 
 @pytest.fixture
@@ -798,3 +819,27 @@ def test_settings_about_section_shows_versions_and_opens_fixed_folders(
     copied = page.evaluate("navigator.clipboard.readText()")
     assert f"程式版本：{__version__}" in copied
     assert "token" not in copied.casefold() and "cookie" not in copied.casefold()
+
+
+def test_dynamic_topbar_github_link_is_keyboard_reachable_offline_and_responsive(
+    page: Page, live_gui,
+) -> None:
+    base_url, _config_path, _jobs = live_gui
+    requests: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+    for width, label_visible in ((1280, True), (900, True), (390, False)):
+        page.set_viewport_size({"width": width, "height": 844})
+        page.goto(base_url, wait_until="networkidle")
+        _expect_github_link(page, label_visible=label_visible)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), width
+
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(base_url, wait_until="networkidle")
+    page.locator("#search").focus()
+    page.keyboard.press("Tab")
+    link = page.get_by_role("link", name="GitHub 倉庫（另開新分頁）")
+    expect(link).to_be_focused()
+    assert link.evaluate("element => getComputedStyle(element).outlineStyle") != "none"
+    assert all(url.startswith(base_url) for url in requests), [
+        url for url in requests if not url.startswith(base_url)
+    ]

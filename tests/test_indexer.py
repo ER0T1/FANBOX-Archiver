@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -114,6 +115,13 @@ def test_index_builds_safe_offline_pages_and_omits_private_index_data(tmp_path: 
     assert 'src="../../assets/theme.js"' in post_page
     assert 'href="../../assets/design-tokens.css"' in post_page
     assert "data-theme-toggle" in post_page
+    github = re.search(r'<a class="github-link"[^>]*>', post_page)
+    assert github and 'href="https://github.com/ER0T1/FANBOX-Archiver"' in github.group(0)
+    assert 'target="_blank"' in github.group(0) and 'rel="noopener noreferrer"' in github.group(0)
+    assert 'aria-label="GitHub 倉庫（另開新分頁）"' in github.group(0)
+    assert re.findall(r'(?:src|href)="(https?://[^"]+)"', post_page.split("<main", 1)[0]) == [
+        "https://github.com/ER0T1/FANBOX-Archiver",
+    ]  # the header loads nothing remote; the only external URL is the click-only link
     assert "script-src 'none'" not in post_page
     assert 'class="embed-card"' in post_page
     assert 'href="https://www.fanbox.cc/@alice/posts/99"' in post_page
