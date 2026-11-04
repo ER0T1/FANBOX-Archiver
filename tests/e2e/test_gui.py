@@ -1248,10 +1248,10 @@ _UNTRANSLATED = """(skip) => {
   }
   return [...found];
 }"""
-# Archived content, plus server-provided text (Fan Card benefits, creator status) that is converted
-# with the Python messages in a later batch.
+# Archived content, plus server-provided text (Fan Card benefits, creator status, sign-in status
+# messages) that is converted with the Python messages in a later batch.
 _NOT_YET = (".perk-section, .post-card strong, .post-tags, .body-text, .profile-about, .link-grid span, "
-            ".creator-card .badge")
+            ".creator-card .badge, .backup-auth-notice p, .account-message")
 
 
 def _untranslated(page: Page) -> list[str]:
@@ -1294,4 +1294,45 @@ def test_pseudo_locale_covers_the_reading_screens(page: Page, live_gui) -> None:
     page.locator(".fancard-card").first.click()
     expect(page.locator(".fancard-reader")).to_contain_text("［方案資訊")
     check("fan card reader")
+    assert screens == {name: [] for name in screens}, screens
+
+
+def test_pseudo_locale_covers_backup_and_maintenance(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
+    assert token
+    jobs.hold_backup = False
+    assert httpx.patch(f"{base_url}/api/config", headers={"X-Fanbox-Token": token.group(1)},
+                       json={"display": {"language": "qps-ploc"}}).status_code == 200
+    jobs.hold_backup = True  # a running job: the job page, progress and locks
+    page.set_viewport_size({"width": 375, "height": 844})
+    page.goto(base_url, wait_until="networkidle")
+    screens: dict[str, list[str]] = {}
+
+    def check(name: str) -> None:
+        page.wait_for_timeout(300)
+        screens[name] = _untranslated(page)
+        assert page.evaluate(_NO_PAGE_OVERFLOW), (name, page.evaluate(_OVERFLOWING))
+
+    page.locator("#nav button[data-view=backup]").click()
+    expect(page.locator(".job-heading h1")).to_have_text(re.compile(r"^［備份工作"))
+    page.locator(".job-details summary").click()
+    check("running job")
+    page.locator("#nav button[data-view=maintenance]").click()
+    expect(page.locator(".maintenance-page h1")).to_have_text(re.compile(r"^［封存驗證"))
+    check("maintenance while busy")
+    jobs.hold_backup = False
+    page.locator("#nav button[data-view=backup]").click()
+    expect(page.locator(".backup-form")).to_be_visible(timeout=5_000)
+    page.locator(".creator-combobox input").click()
+    check("backup form")
+    page.locator(".heading button.primary").click()
+    expect(page.locator(".job-history")).to_be_visible()
+    check("job history")
+    page.locator(".history-row").first.click()
+    expect(page.locator(".job-status")).to_have_text(re.compile(r"^［已完成"), timeout=5_000)
+    check("finished job")
+    page.locator("#nav button[data-view=maintenance]").click()
+    expect(page.locator(".maintenance-action button")).to_have_text(re.compile(r"^［開始驗證"))
+    check("maintenance")
     assert screens == {name: [] for name in screens}, screens
