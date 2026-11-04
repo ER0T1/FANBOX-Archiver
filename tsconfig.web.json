@@ -17,6 +17,8 @@
     "src/fanbox_archiver/web_src/format.ts",
     "src/fanbox_archiver/web_src/dom.ts",
     "src/fanbox_archiver/web_src/controls.ts",
+    "src/fanbox_archiver/web_src/dialog.ts",
+    "src/fanbox_archiver/web_src/dirty.ts",
     "src/fanbox_archiver/web_src/api.ts",
     "src/fanbox_archiver/web_src/posts.ts",
     "src/fanbox_archiver/web_src/creators.ts",

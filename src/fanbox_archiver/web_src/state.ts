@@ -23,6 +23,7 @@ namespace FanboxUI {
     activeJob: WebJob | null;
     backupScreen: "form" | "history" | "job";
     backupJobId: string | null;
+    settingsTab: SettingsTab;
   }
 
   export function createInitialState(): AppState {
@@ -47,6 +48,7 @@ namespace FanboxUI {
       activeJob: null,
       backupScreen: "form",
       backupJobId: null,
+      settingsTab: "general",
     };
   }
 }

@@ -10,6 +10,12 @@ namespace FanboxUI {
   export interface ScheduleSection {
     node: HTMLElement;
     read(): ScheduleSettingsPatch;
+    /** Each editable part, so unsaved changes can be marked where they are. */
+    fields: TrackedField[];
+    /** Disables "run now" with a reason (e.g. unsaved changes), or re-enables it with null. */
+    setRunBlocked(reason: string | null): void;
+    /** Follows the page lock when a job starts or ends without a redraw. */
+    setLocked(locked: boolean): void;
   }
 
   function lastResultText(status: ScheduleStatus): string {
@@ -105,7 +111,17 @@ namespace FanboxUI {
       runFeedback.hidden = true;
       const error = await actions.onRunNow();
       if (error) { runFeedback.textContent = error; runFeedback.hidden = false; }
-    }}, "立即執行一次");
+    }}, "立即執行一次") as HTMLButtonElement;
+    const runBlockedNote = h("small", {class: "schedule-run-blocked", hidden: true});
+    const enabledField = h("label", {class: "setting-toggle"}, enabled, h("span", {}, "啟用自動備份"));
+    const frequencyField = h("div", {class: "setting-field"}, h("span", {}, "週期"), frequency);
+    const timeField = h("div", {class: "setting-field"}, h("span", {}, `時間（${status.timezone}，24 小時制）`),
+      h("div", {class: "schedule-time"}, hour, h("span", {"aria-hidden": "true"}, ":"), minute));
+    const powerField = h("div", {class: "setting-field schedule-power"}, h("span", {}, "電源與休眠"), power,
+      h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。"));
+    const creatorsField = h("details", {class: "schedule-creators"}, h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"),
+      creatorBoxes.length ? h("div", {class: "setting-toggles"}, creatorBoxes.map(item => item.node))
+        : h("p", {class: "settings-section-description"}, "目前沒有已知的創作者；將備份全部支援中的創作者。"));
 
     const node = h("section", {class: "settings-section schedule-settings"},
       h("h3", {}, "自動備份"),
@@ -118,21 +134,36 @@ namespace FanboxUI {
         h("div", {class: `schedule-background state-${status.background.state}`},
           h("dt", {}, "程式關閉時"), h("dd", {}, status.background.message))),
       status.note ? h("p", {class: "notice schedule-note"}, status.note) : null,
-      h("label", {class: "setting-toggle"}, enabled, h("span", {}, "啟用自動備份")),
-      h("div", {class: "settings-grid"}, h("div", {class: "setting-field"}, h("span", {}, "週期"), frequency),
-        intervalField, weekdayField, h("div", {class: "setting-field"}, h("span", {}, `時間（${status.timezone}，24 小時制）`),
-          h("div", {class: "schedule-time"}, hour, h("span", {"aria-hidden": "true"}, ":"), minute))),
+      enabledField,
+      h("div", {class: "settings-grid"}, frequencyField, intervalField, weekdayField, timeField),
       monthField,
-      h("div", {class: "setting-field schedule-power"}, h("span", {}, "電源與休眠"), power,
-        h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。")),
-      h("details", {class: "schedule-creators"}, h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"),
-        creatorBoxes.length ? h("div", {class: "setting-toggles"}, creatorBoxes.map(item => item.node))
-          : h("p", {class: "settings-section-description"}, "目前沒有已知的創作者；將備份全部支援中的創作者。")),
+      powerField,
+      creatorsField,
       preview,
       h("div", {class: "schedule-actions"}, runNow,
-        h("span", {class: "settings-section-description"}, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。")),
+        h("span", {class: "settings-section-description"}, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。"),
+        runBlockedNote),
       runFeedback);
     sync();
-    return {node, read};
+    const fields: TrackedField[] = [
+      {node: enabledField, read: () => read().enabled},
+      {node: frequencyField, read: () => read().frequency},
+      {node: intervalField, read: () => read().interval},
+      {node: weekdayField, read: () => read().weekday},
+      {node: timeField, read: () => read().time},
+      {node: monthField, read: () => read().month_day},
+      {node: powerField, read: () => read().power},
+      {node: creatorsField, read: () => read().creators},
+    ];
+    let locked = blocked;
+    let runReason: string | null = null;
+    const updateRun = (): void => {
+      runNow.disabled = locked || runReason !== null;
+      runBlockedNote.hidden = runReason === null;
+      runBlockedNote.textContent = runReason ?? "";
+    };
+    const setRunBlocked = (reason: string | null): void => { runReason = reason; updateRun(); };
+    const setLocked = (next: boolean): void => { locked = next; updateRun(); };
+    return {node, read, fields, setRunBlocked, setLocked};
   }
 }

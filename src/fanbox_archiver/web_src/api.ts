@@ -71,8 +71,8 @@ namespace FanboxUI {
     return requestJson<SettingsResponse>("/api/config", {signal});
   }
 
-  export function saveSettings(patch: SettingsPatch, sessionToken: string): Promise<{saved: boolean}> {
-    return requestJson<{saved: boolean}>("/api/config", {
+  export function saveSettings(patch: SettingsSavePatch, sessionToken: string): Promise<SettingsSaveResult> {
+    return requestJson<SettingsSaveResult>("/api/config", {
       method: "PATCH",
       headers: {"Content-Type": "application/json", "X-Fanbox-Token": sessionToken},
       body: JSON.stringify(patch),

@@ -98,6 +98,7 @@ var FanboxUI;
             activeJob: null,
             backupScreen: "form",
             backupJobId: null,
+            settingsTab: "general",
         };
     }
     FanboxUI.createInitialState = createInitialState;
@@ -229,8 +230,10 @@ var FanboxUI;
                     update(option.value);
                     root.open = false;
                     summary.focus();
-                    if (changed)
+                    if (changed) {
                         options.onChange?.(option.value);
+                        root.dispatchEvent(new Event("change", { bubbles: true }));
+                    }
                 } }, option.label));
         }
         summary.addEventListener("click", event => {
@@ -334,6 +337,79 @@ var FanboxUI;
                                 : view === "settings" ? "search.settings" : "search.creator_profile");
     }
     FanboxUI.setSearchState = setSearchState;
+})(FanboxUI || (FanboxUI = {}));
+var FanboxUI;
+(function (FanboxUI) {
+    function confirmDialog(options) {
+        const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const titleId = `dialog-title-${Math.random().toString(36).slice(2, 9)}`;
+        const cancel = FanboxUI.h("button", { type: "button", class: "dialog-cancel", value: "cancel" }, options.cancelLabel);
+        const confirm = FanboxUI.h("button", { type: "button", class: options.danger ? "dialog-confirm danger" : "dialog-confirm primary",
+            value: "confirm" }, options.confirmLabel);
+        const dialog = FanboxUI.h("dialog", { class: "app-dialog", "aria-labelledby": titleId }, FanboxUI.h("h2", { id: titleId }, options.title), FanboxUI.h("p", {}, options.message), FanboxUI.h("div", { class: "dialog-actions" }, cancel, confirm));
+        document.body.append(dialog);
+        return new Promise(resolve => {
+            let settled = false;
+            const finish = (result) => {
+                if (settled)
+                    return;
+                settled = true;
+                if (dialog.open)
+                    dialog.close();
+                dialog.remove();
+                returnFocus?.focus();
+                resolve(result);
+            };
+            cancel.addEventListener("click", () => finish(false));
+            confirm.addEventListener("click", () => finish(true));
+            dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+            dialog.addEventListener("close", () => finish(false));
+            if (typeof dialog.showModal === "function")
+                dialog.showModal();
+            else
+                dialog.setAttribute("open", "");
+            cancel.focus();
+        });
+    }
+    FanboxUI.confirmDialog = confirmDialog;
+})(FanboxUI || (FanboxUI = {}));
+var FanboxUI;
+(function (FanboxUI) {
+    function trackChanges(root, fields, onChange) {
+        const serialize = (field) => JSON.stringify(field.read());
+        const saved = fields.map(serialize);
+        let dirty = false;
+        const refresh = () => {
+            let any = false;
+            fields.forEach((field, index) => {
+                const changed = serialize(field) !== saved[index];
+                any || (any = changed);
+                field.node.classList.toggle("is-dirty", changed);
+                let badge = field.node.querySelector(":scope > .dirty-badge");
+                if (changed && !badge) {
+                    badge = FanboxUI.h("span", { class: "dirty-badge" }, "已變更");
+                    field.node.append(badge);
+                }
+                else if (!changed && badge) {
+                    badge.remove();
+                }
+            });
+            if (any !== dirty) {
+                dirty = any;
+                onChange(dirty);
+            }
+        };
+        let pending;
+        const schedule = () => {
+            if (pending !== undefined)
+                clearTimeout(pending);
+            pending = window.setTimeout(() => { pending = undefined; refresh(); }, 0);
+        };
+        for (const type of ["input", "change", "click"])
+            root.addEventListener(type, schedule);
+        return { isDirty: () => { refresh(); return dirty; }, refresh };
+    }
+    FanboxUI.trackChanges = trackChanges;
 })(FanboxUI || (FanboxUI = {}));
 var FanboxUI;
 (function (FanboxUI) {
@@ -778,10 +854,35 @@ var FanboxUI;
                     runFeedback.hidden = false;
                 }
             } }, "立即執行一次");
-        const node = FanboxUI.h("section", { class: "settings-section schedule-settings" }, FanboxUI.h("h3", {}, "自動備份"), FanboxUI.h("p", { class: "settings-section-description" }, `依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次；時間依「時區」設定（目前：${status.timezone}）解讀，24 小時制。`), FanboxUI.h("dl", { class: "schedule-status" }, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "目前排程"), FanboxUI.h("dd", {}, status.enabled ? status.summary : "未啟用")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "下一次執行"), FanboxUI.h("dd", {}, status.next_run_at ? FanboxUI.formatDate(status.next_run_at) : "—")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "上次結果"), FanboxUI.h("dd", {}, lastResultText(status))), FanboxUI.h("div", { class: `schedule-background state-${status.background.state}` }, FanboxUI.h("dt", {}, "程式關閉時"), FanboxUI.h("dd", {}, status.background.message))), status.note ? FanboxUI.h("p", { class: "notice schedule-note" }, status.note) : null, FanboxUI.h("label", { class: "setting-toggle" }, enabled, FanboxUI.h("span", {}, "啟用自動備份")), FanboxUI.h("div", { class: "settings-grid" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "週期"), frequency), intervalField, weekdayField, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, `時間（${status.timezone}，24 小時制）`), FanboxUI.h("div", { class: "schedule-time" }, hour, FanboxUI.h("span", { "aria-hidden": "true" }, ":"), minute))), monthField, FanboxUI.h("div", { class: "setting-field schedule-power" }, FanboxUI.h("span", {}, "電源與休眠"), power, FanboxUI.h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。")), FanboxUI.h("details", { class: "schedule-creators" }, FanboxUI.h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"), creatorBoxes.length ? FanboxUI.h("div", { class: "setting-toggles" }, creatorBoxes.map(item => item.node))
-            : FanboxUI.h("p", { class: "settings-section-description" }, "目前沒有已知的創作者；將備份全部支援中的創作者。")), preview, FanboxUI.h("div", { class: "schedule-actions" }, runNow, FanboxUI.h("span", { class: "settings-section-description" }, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。")), runFeedback);
+        const runBlockedNote = FanboxUI.h("small", { class: "schedule-run-blocked", hidden: true });
+        const enabledField = FanboxUI.h("label", { class: "setting-toggle" }, enabled, FanboxUI.h("span", {}, "啟用自動備份"));
+        const frequencyField = FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "週期"), frequency);
+        const timeField = FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, `時間（${status.timezone}，24 小時制）`), FanboxUI.h("div", { class: "schedule-time" }, hour, FanboxUI.h("span", { "aria-hidden": "true" }, ":"), minute));
+        const powerField = FanboxUI.h("div", { class: "setting-field schedule-power" }, FanboxUI.h("span", {}, "電源與休眠"), power, FanboxUI.h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。"));
+        const creatorsField = FanboxUI.h("details", { class: "schedule-creators" }, FanboxUI.h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"), creatorBoxes.length ? FanboxUI.h("div", { class: "setting-toggles" }, creatorBoxes.map(item => item.node))
+            : FanboxUI.h("p", { class: "settings-section-description" }, "目前沒有已知的創作者；將備份全部支援中的創作者。"));
+        const node = FanboxUI.h("section", { class: "settings-section schedule-settings" }, FanboxUI.h("h3", {}, "自動備份"), FanboxUI.h("p", { class: "settings-section-description" }, `依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次；時間依「時區」設定（目前：${status.timezone}）解讀，24 小時制。`), FanboxUI.h("dl", { class: "schedule-status" }, FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "目前排程"), FanboxUI.h("dd", {}, status.enabled ? status.summary : "未啟用")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "下一次執行"), FanboxUI.h("dd", {}, status.next_run_at ? FanboxUI.formatDate(status.next_run_at) : "—")), FanboxUI.h("div", {}, FanboxUI.h("dt", {}, "上次結果"), FanboxUI.h("dd", {}, lastResultText(status))), FanboxUI.h("div", { class: `schedule-background state-${status.background.state}` }, FanboxUI.h("dt", {}, "程式關閉時"), FanboxUI.h("dd", {}, status.background.message))), status.note ? FanboxUI.h("p", { class: "notice schedule-note" }, status.note) : null, enabledField, FanboxUI.h("div", { class: "settings-grid" }, frequencyField, intervalField, weekdayField, timeField), monthField, powerField, creatorsField, preview, FanboxUI.h("div", { class: "schedule-actions" }, runNow, FanboxUI.h("span", { class: "settings-section-description" }, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。"), runBlockedNote), runFeedback);
         sync();
-        return { node, read };
+        const fields = [
+            { node: enabledField, read: () => read().enabled },
+            { node: frequencyField, read: () => read().frequency },
+            { node: intervalField, read: () => read().interval },
+            { node: weekdayField, read: () => read().weekday },
+            { node: timeField, read: () => read().time },
+            { node: monthField, read: () => read().month_day },
+            { node: powerField, read: () => read().power },
+            { node: creatorsField, read: () => read().creators },
+        ];
+        let locked = blocked;
+        let runReason = null;
+        const updateRun = () => {
+            runNow.disabled = locked || runReason !== null;
+            runBlockedNote.hidden = runReason === null;
+            runBlockedNote.textContent = runReason ?? "";
+        };
+        const setRunBlocked = (reason) => { runReason = reason; updateRun(); };
+        const setLocked = (next) => { locked = next; updateRun(); };
+        return { node, read, fields, setRunBlocked, setLocked };
     }
     FanboxUI.renderScheduleSection = renderScheduleSection;
 })(FanboxUI || (FanboxUI = {}));
@@ -1122,48 +1223,29 @@ var FanboxUI;
             } }, "複製診斷資訊")), feedback);
         return card;
     }
-    function renderSettingsPage(data, auth, message, activeJob, onSave, onAuthRefresh, onAuthLogin, onAuthCancel, onAuthLogout, schedule, about) {
-        const value = data.editable;
-        const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
-        const attachments = settingCheckbox("下載附件", value.download.download_attachments);
-        const covers = settingCheckbox("下載投稿與 Profile 封面", value.download.download_cover);
-        const resume = settingCheckbox("支援續傳", value.download.resume);
-        const hashes = settingCheckbox("下載後驗證 SHA-256", value.download.verify_sha256);
-        const retries = settingNumber("失敗重試次數", value.download.retry_count, 0, 10);
-        const interval = settingNumber("請求間隔（秒）", value.download.request_interval_seconds, 1, 3600, .5, "最低 1 秒；提高此值可降低請求頻率。");
-        const timeout = settingNumber("請求逾時（秒）", value.download.timeout_seconds, 5, 600);
-        const skipCompleted = settingCheckbox("略過已完成且未更新的投稿", value.sync.skip_completed);
-        const checkUpdates = settingCheckbox("檢查遠端更新", value.sync.check_updates);
-        const preserveDeleted = settingCheckbox("保留遠端已刪除投稿的本機備份", value.sync.preserve_deleted_posts);
-        const rotate = settingCheckbox("輪替創作者處理順序", value.sync.rotate_creators);
-        const maxPosts = settingNumber("單次最多下載投稿數", value.sync.max_posts_per_run, 1, 100, 1, "new、updated 與 retry 共用的下載配額；略過的投稿不占配額。新工作可單次覆寫。");
-        const unchangedStop = settingNumber("連續未變投稿停止掃描數", value.sync.recent_unchanged_stop_count, 1, 500, 1, "連續遇到已完成且未更新投稿時停止掃描；這不是下載數量。");
-        const defaultDryRun = settingCheckbox("完整備份只預覽，不下載", value.backup_defaults.dry_run);
-        const defaultProfile = settingCheckbox("預設拉取個人資料", value.backup_defaults.include_profile);
-        const defaultFancard = settingCheckbox("預設拉取粉絲卡", value.backup_defaults.include_fancard);
-        const markdown = settingCheckbox("產生 Markdown", value.markdown.enabled);
-        const frontMatter = settingCheckbox("加入 YAML front matter", value.markdown.yaml_front_matter);
-        const relativePaths = settingCheckbox("Markdown 使用相對圖片路徑", value.markdown.relative_image_paths);
-        const preserveOrder = settingCheckbox("保留原始內容順序", value.markdown.preserve_original_order);
-        const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
-        const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
-        const blocked = Boolean(activeJob);
-        const scheduleSection = FanboxUI.renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked, schedule.actions);
-        const timezone = timezoneControl(data, blocked);
-        const theme = themeControl(data, blocked);
-        const language = languageControl(data, blocked);
-        const colors = FanboxUI.colorEditor(data);
-        const logLevel = FanboxUI.customSelect({ id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
-            options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({ value: item, label: item })) });
+    FanboxUI.SETTINGS_TABS = [
+        { id: "account", label: "帳號與登入" },
+        { id: "general", label: "一般" },
+        { id: "backup", label: "備份" },
+        { id: "theme", label: "主題" },
+        { id: "about", label: "關於與診斷" },
+    ];
+    function isSettingsTab(value) {
+        return FanboxUI.SETTINGS_TABS.some(tab => tab.id === value);
+    }
+    FanboxUI.isSettingsTab = isSettingsTab;
+    const AUTH_LABELS = { checking: "檢查中", locked: "工作中", authenticated: "已登入",
+        signed_out: "未登入", expired: "已失效", error: "檢查失敗" };
+    function renderAccountCard(auth, blocked, actions) {
+        if (!auth) {
+            return FanboxUI.h("section", { class: "settings-card account-card tone-neutral", "aria-busy": "true" }, FanboxUI.h("div", { class: "account-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ACCOUNT & SIGN-IN"), FanboxUI.h("h2", {}, "帳號／登入")), FanboxUI.h("span", { class: "auth-badge neutral" }, "檢查中")), FanboxUI.h("p", { class: "account-message", role: "status", "aria-live": "polite" }, "正在檢查登入狀態…"));
+        }
         const authBusy = auth.state === "checking";
         const authLocked = auth.state === "locked";
         const authTone = auth.state === "authenticated" ? "success"
             : auth.state === "expired" || auth.state === "error" ? "error" : "neutral";
-        const authLabels = { checking: "檢查中", locked: "工作中", authenticated: "已登入",
-            signed_out: "未登入", expired: "已失效", error: "檢查失敗" };
-        const authLabel = authLabels[auth.state];
         const lastKnown = authLocked && auth.last_known
-            ? `上次檢查：${authLabels[auth.last_known.state]}（${FanboxUI.formatDate(auth.last_known.checked_at)}）` : null;
+            ? `上次檢查：${AUTH_LABELS[auth.last_known.state]}（${FanboxUI.formatDate(auth.last_known.checked_at)}）` : null;
         const authFeedback = FanboxUI.h("p", { class: "settings-error", role: "alert", hidden: true });
         const runAuth = async (action) => {
             authFeedback.hidden = true;
@@ -1173,48 +1255,213 @@ var FanboxUI;
                 authFeedback.hidden = false;
             }
         };
-        const feedback = FanboxUI.h("p", { class: "settings-error", role: "alert", hidden: true });
-        const form = FanboxUI.h("form", { class: "settings-form", "aria-disabled": blocked, onsubmit: async (event) => {
-                event.preventDefault();
-                if (blocked)
-                    return;
-                feedback.hidden = true;
-                const error = await onSave({ download: {
-                        original_images: originalImages.input.checked, download_attachments: attachments.input.checked,
-                        download_cover: covers.input.checked, resume: resume.input.checked, verify_sha256: hashes.input.checked,
-                        retry_count: Number(retries.input.value), request_interval_seconds: Number(interval.input.value),
-                        timeout_seconds: Number(timeout.input.value),
-                    }, sync: {
-                        skip_completed: skipCompleted.input.checked, check_updates: checkUpdates.input.checked,
-                        preserve_deleted_posts: preserveDeleted.input.checked, rotate_creators: rotate.input.checked,
-                        max_posts_per_run: Number(maxPosts.input.value),
-                        recent_unchanged_stop_count: Number(unchangedStop.input.value),
-                    }, backup_defaults: {
-                        dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
-                        include_fancard: defaultFancard.input.checked,
-                    }, schedule: scheduleSection.read(), display: { timezone: timezone.read(), theme: theme.read(), colors: colors.read(), language: language.read() }, markdown: {
-                        enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
-                        relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
-                    }, logging: { level: logLevel.value, write_to_file: fileLogs.input.checked,
-                        keep_days: Number(keepDays.input.value) } });
-                if (error) {
-                    feedback.textContent = `儲存失敗：${error}`;
-                    feedback.hidden = false;
-                }
-            } }, FanboxUI.h("fieldset", { disabled: blocked }, FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), scheduleSection.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node))), FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "OUTPUT & LOGGING"), FanboxUI.h("h2", {}, "輸出與紀錄"), theme.node, colors.node, language.node, timezone.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel), keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node))), FanboxUI.h("div", { class: "settings-actions" }, FanboxUI.h("button", { type: "submit", class: "primary",
-            disabled: !data.writable || blocked }, "儲存設定"), !data.writable ? FanboxUI.h("span", { class: "notice" }, "目前伺服器未指定可寫入的設定檔。") : null, blocked ? FanboxUI.h("span", { class: "notice" }, "工作結束後即可儲存設定。") : null, feedback)));
-        return FanboxUI.h("section", { class: "page settings-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "LOCAL SETTINGS"), FanboxUI.h("h1", {}, "設定"), FanboxUI.h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))), message ? FanboxUI.h("p", { class: "settings-saved", role: "status" }, message) : null, FanboxUI.activeJobNotice(activeJob), FanboxUI.h("section", { class: `settings-card account-card tone-${authTone}` }, FanboxUI.h("div", { class: "account-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ACCOUNT & SIGN-IN"), FanboxUI.h("h2", {}, "帳號／登入")), FanboxUI.h("span", { class: `auth-badge ${authTone}` }, authLabel)), FanboxUI.h("p", { class: "account-message", role: "status", "aria-live": "polite" }, auth.message), lastKnown ? FanboxUI.h("p", { class: "account-last-known" }, lastKnown) : null, FanboxUI.h("p", { class: "settings-section-description" }, auth.source === "profile"
+        return FanboxUI.h("section", { class: `settings-card account-card tone-${authTone}` }, FanboxUI.h("div", { class: "account-heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "ACCOUNT & SIGN-IN"), FanboxUI.h("h2", {}, "帳號／登入")), FanboxUI.h("span", { class: `auth-badge ${authTone}` }, AUTH_LABELS[auth.state])), FanboxUI.h("p", { class: "account-message", role: "status", "aria-live": "polite" }, auth.message), lastKnown ? FanboxUI.h("p", { class: "account-last-known" }, lastKnown) : null, FanboxUI.h("p", { class: "settings-section-description" }, auth.source === "profile"
             ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
             : auth.source === "environment" ? "認證來源：外部環境 FANBOX_COOKIE"
                 : "尚無認證來源"), auth.externally_managed ? FanboxUI.h("p", { class: "auth-external-notice" }, "此登入由啟動環境管理，應用程式無法撤銷；請更新或移除 FANBOX_COOKIE 後重新啟動。") : null, FanboxUI.h("div", { class: "account-actions" }, FanboxUI.h("button", { type: "button", class: "primary", disabled: blocked || authLocked || authBusy || !auth.can_login,
-            onclick: () => void runAuth(onAuthLogin) }, "登入 FANBOX"), FanboxUI.h("button", { type: "button", disabled: blocked || authLocked || authBusy, onclick: onAuthRefresh }, "重新檢查"), authBusy && auth.job ? FanboxUI.h("button", { type: "button", class: "danger-outline",
-            onclick: () => void runAuth(() => onAuthCancel(auth.job.job_id)) }, "取消登入") : null, FanboxUI.h("button", { type: "button", class: "danger-outline",
+            onclick: () => void runAuth(actions.onLogin) }, "登入 FANBOX"), FanboxUI.h("button", { type: "button", disabled: blocked || authLocked || authBusy, onclick: actions.onRefresh }, "重新檢查"), authBusy && auth.job ? FanboxUI.h("button", { type: "button", class: "danger-outline",
+            onclick: () => void runAuth(() => actions.onCancel(auth.job.job_id)) }, "取消登入") : null, FanboxUI.h("button", { type: "button", class: "danger-outline",
             disabled: blocked || authLocked || authBusy || !auth.can_logout,
-            onclick: () => {
-                if (window.confirm("確定要清除專用 FANBOX 工作階段嗎？封存與設定不會被刪除。")) {
-                    void runAuth(onAuthLogout);
+            onclick: async () => {
+                const confirmed = await FanboxUI.confirmDialog({
+                    title: "登出 FANBOX？", message: "將清除專用 FANBOX 工作階段；封存與設定不會被刪除。",
+                    cancelLabel: "取消", confirmLabel: "登出", danger: true,
+                });
+                if (confirmed)
+                    void runAuth(actions.onLogout);
+            } }, "登出"), authFeedback));
+    }
+    function generalPage(data, blocked) {
+        const value = data.editable;
+        const language = languageControl(data, blocked);
+        const timezone = timezoneControl(data, blocked);
+        const markdown = settingCheckbox("產生 Markdown", value.markdown.enabled);
+        const frontMatter = settingCheckbox("加入 YAML front matter", value.markdown.yaml_front_matter);
+        const relativePaths = settingCheckbox("Markdown 使用相對圖片路徑", value.markdown.relative_image_paths);
+        const preserveOrder = settingCheckbox("保留原始內容順序", value.markdown.preserve_original_order);
+        const logLevel = FanboxUI.customSelect({ id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
+            options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({ value: item, label: item })) });
+        const logLevelField = FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "日誌等級"), logLevel);
+        const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
+        const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
+        const checked = (control) => ({ node: control.node, read: () => control.input.checked });
+        return {
+            content: [FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "GENERAL"), FanboxUI.h("h2", {}, "一般"), language.node, timezone.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "Markdown"), FanboxUI.h("div", { class: "setting-toggles" }, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "日誌"), FanboxUI.h("div", { class: "settings-grid two-columns" }, logLevelField, keepDays.node), FanboxUI.h("div", { class: "setting-toggles" }, fileLogs.node)))],
+            fields: [
+                { node: language.node, read: language.read }, { node: timezone.node, read: timezone.read },
+                checked(markdown), checked(frontMatter), checked(relativePaths), checked(preserveOrder),
+                { node: logLevelField, read: () => logLevel.value }, { node: keepDays.node, read: () => keepDays.input.value },
+                checked(fileLogs),
+            ],
+            patch: () => ({
+                display: { timezone: timezone.read(), language: language.read() },
+                markdown: { enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
+                    relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked },
+                logging: { level: logLevel.value, write_to_file: fileLogs.input.checked, keep_days: Number(keepDays.input.value) },
+            }),
+        };
+    }
+    function themePage(data, blocked) {
+        const theme = themeControl(data, blocked);
+        const colors = FanboxUI.colorEditor(data);
+        return {
+            content: [FanboxUI.h("section", { class: "settings-card" }, FanboxUI.h("p", { class: "eyebrow" }, "THEME"), FanboxUI.h("h2", {}, "主題"), theme.node, colors.node)],
+            fields: [{ node: theme.node, read: theme.read }, { node: colors.node, read: colors.read }],
+            patch: () => ({ display: { theme: theme.read(), colors: colors.read() } }),
+        };
+    }
+    function backupPage(data, blocked, schedule) {
+        const value = data.editable;
+        const maxPosts = settingNumber("單次最多下載投稿數", value.sync.max_posts_per_run, 1, 100, 1, "new、updated 與 retry 共用的下載配額；略過的投稿不占配額。新工作可單次覆寫。");
+        const unchangedStop = settingNumber("連續未變投稿停止掃描數", value.sync.recent_unchanged_stop_count, 1, 500, 1, "連續遇到已完成且未更新投稿時停止掃描；這不是下載數量。");
+        const defaultDryRun = settingCheckbox("完整備份只預覽，不下載", value.backup_defaults.dry_run);
+        const defaultProfile = settingCheckbox("預設拉取個人資料", value.backup_defaults.include_profile);
+        const defaultFancard = settingCheckbox("預設拉取粉絲卡", value.backup_defaults.include_fancard);
+        const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
+        const attachments = settingCheckbox("下載附件", value.download.download_attachments);
+        const covers = settingCheckbox("下載投稿與 Profile 封面", value.download.download_cover);
+        const resume = settingCheckbox("支援續傳", value.download.resume);
+        const hashes = settingCheckbox("下載後驗證 SHA-256", value.download.verify_sha256);
+        const preserveDeleted = settingCheckbox("保留遠端已刪除投稿的本機備份", value.sync.preserve_deleted_posts);
+        const skipCompleted = settingCheckbox("略過已完成且未更新的投稿", value.sync.skip_completed);
+        const checkUpdates = settingCheckbox("檢查遠端更新", value.sync.check_updates);
+        const rotate = settingCheckbox("輪替創作者處理順序", value.sync.rotate_creators);
+        const retries = settingNumber("失敗重試次數", value.download.retry_count, 0, 10);
+        const interval = settingNumber("請求間隔（秒）", value.download.request_interval_seconds, 1, 3600, .5, "最低 1 秒；提高此值可降低請求頻率。");
+        const timeout = settingNumber("請求逾時（秒）", value.download.timeout_seconds, 5, 600);
+        const scheduleSection = FanboxUI.renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked, schedule.actions);
+        const checked = (control) => ({ node: control.node, read: () => control.input.checked });
+        const number = (control) => ({ node: control.node, read: () => control.input.value });
+        return {
+            content: [FanboxUI.h("section", { class: "settings-card backup-settings" }, FanboxUI.h("p", { class: "eyebrow" }, "BACKUP"), FanboxUI.h("h2", {}, "備份"), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "工作數量與掃描停止"), FanboxUI.h("p", { class: "settings-section-description" }, "下載配額與掃描停止門檻是兩個不同概念。"), FanboxUI.h("div", { class: "settings-grid two-columns" }, maxPosts.node, unchangedStop.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "新工作預設"), FanboxUI.h("p", { class: "settings-section-description" }, "每次進入新工作表單時套用；重試仍沿用原工作設定。"), FanboxUI.h("div", { class: "setting-toggles" }, defaultDryRun.node, defaultProfile.node, defaultFancard.node)), scheduleSection.node, FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "內容與保存"), FanboxUI.h("div", { class: "setting-toggles" }, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "更新判定與處理順序"), FanboxUI.h("div", { class: "setting-toggles" }, skipCompleted.node, checkUpdates.node, rotate.node)), FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "網路與失敗處理"), FanboxUI.h("div", { class: "settings-grid" }, retries.node, interval.node, timeout.node)))],
+            fields: [
+                number(maxPosts), number(unchangedStop), checked(defaultDryRun), checked(defaultProfile), checked(defaultFancard),
+                ...scheduleSection.fields,
+                checked(originalImages), checked(attachments), checked(covers), checked(resume), checked(hashes),
+                checked(preserveDeleted), checked(skipCompleted), checked(checkUpdates), checked(rotate),
+                number(retries), number(interval), number(timeout),
+            ],
+            patch: () => ({
+                download: {
+                    original_images: originalImages.input.checked, download_attachments: attachments.input.checked,
+                    download_cover: covers.input.checked, resume: resume.input.checked, verify_sha256: hashes.input.checked,
+                    retry_count: Number(retries.input.value), request_interval_seconds: Number(interval.input.value),
+                    timeout_seconds: Number(timeout.input.value),
+                },
+                sync: {
+                    skip_completed: skipCompleted.input.checked, check_updates: checkUpdates.input.checked,
+                    preserve_deleted_posts: preserveDeleted.input.checked, rotate_creators: rotate.input.checked,
+                    max_posts_per_run: Number(maxPosts.input.value),
+                    recent_unchanged_stop_count: Number(unchangedStop.input.value),
+                },
+                backup_defaults: {
+                    dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
+                    include_fancard: defaultFancard.input.checked,
+                },
+                schedule: scheduleSection.read(),
+            }),
+            onDirty: dirty => scheduleSection.setRunBlocked(dirty ? "請先儲存或放棄未儲存的變更，再立即執行。" : null),
+            onLocked: locked => scheduleSection.setLocked(locked),
+        };
+    }
+    function renderSettingsPage(ctx) {
+        const { data, tab } = ctx;
+        let blocked = Boolean(ctx.activeJob);
+        const tabButtons = new Map();
+        const tabs = FanboxUI.h("nav", { class: "settings-tabs", "aria-label": "設定子頁面" }, FanboxUI.SETTINGS_TABS.map(item => {
+            const button = FanboxUI.h("button", { type: "button", "data-settings-tab": item.id,
+                "aria-current": item.id === tab ? "page" : null, class: item.id === tab ? "active" : "",
+                onclick: () => { if (item.id !== tab)
+                    ctx.onTab(item.id); } }, FanboxUI.h("span", {}, item.label));
+            tabButtons.set(item.id, button);
+            return button;
+        }));
+        const markTab = (dirty) => {
+            const button = tabButtons.get(tab);
+            if (!button)
+                return;
+            button.querySelector(".tab-dirty")?.remove();
+            if (dirty)
+                button.append(FanboxUI.h("span", { class: "tab-dirty" }, "未儲存"));
+        };
+        let notice = FanboxUI.activeJobNotice(ctx.activeJob) ?? FanboxUI.h("div", { hidden: true });
+        const body = FanboxUI.h("div", { class: "settings-body" });
+        let tracker = null;
+        let fieldset = null;
+        let save = null;
+        let lockNote = null;
+        let account = null;
+        let auth = ctx.auth ?? null;
+        const editable = tab === "general" ? generalPage(data, blocked)
+            : tab === "theme" ? themePage(data, blocked)
+                : tab === "backup" && ctx.schedule ? backupPage(data, blocked, ctx.schedule) : null;
+        if (editable) {
+            const feedback = FanboxUI.h("p", { class: "settings-error", role: "alert", hidden: true });
+            save = FanboxUI.h("button", { type: "submit", class: "primary", disabled: !data.writable || blocked }, "儲存設定");
+            lockNote = FanboxUI.h("span", { class: "notice", hidden: !blocked }, "工作結束後即可儲存設定。");
+            fieldset = FanboxUI.h("fieldset", { disabled: blocked }, ...editable.content);
+            const form = FanboxUI.h("form", { class: "settings-form", "aria-disabled": blocked, onsubmit: async (event) => {
+                    event.preventDefault();
+                    if (blocked)
+                        return;
+                    feedback.hidden = true;
+                    save.disabled = true;
+                    const error = await ctx.onSave(editable.patch());
+                    if (save.isConnected)
+                        save.disabled = !data.writable || blocked;
+                    if (error) {
+                        feedback.textContent = `儲存失敗：${error}`;
+                        feedback.hidden = false;
+                    }
+                } }, fieldset, FanboxUI.h("div", { class: "settings-actions" }, save, !data.writable ? FanboxUI.h("span", { class: "notice" }, "目前伺服器未指定可寫入的設定檔。") : null, lockNote, feedback));
+            body.append(form);
+            tracker = FanboxUI.trackChanges(form, editable.fields, dirty => { markTab(dirty); editable.onDirty?.(dirty); });
+        }
+        else if (tab === "account" && ctx.account) {
+            account = renderAccountCard(auth, blocked, ctx.account);
+            body.append(account);
+        }
+        else if (tab === "about" && ctx.about) {
+            body.append(renderAboutSection(ctx.about.info, ctx.about.actions));
+        }
+        const node = FanboxUI.h("section", { class: "page settings-page" }, FanboxUI.h("header", { class: "heading" }, FanboxUI.h("div", {}, FanboxUI.h("p", { class: "eyebrow" }, "LOCAL SETTINGS"), FanboxUI.h("h1", {}, "設定"), FanboxUI.h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))), tabs, ctx.message ? FanboxUI.h("p", { class: "settings-saved", role: "status" }, ctx.message) : null, notice, body);
+        requestAnimationFrame(() => tabButtons.get(tab)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+        return {
+            node,
+            isDirty: () => tracker?.isDirty() ?? false,
+            setLocked: activeJob => {
+                const next = Boolean(activeJob);
+                const replacement = FanboxUI.activeJobNotice(activeJob) ?? FanboxUI.h("div", { hidden: true });
+                notice.replaceWith(replacement);
+                notice = replacement;
+                if (next === blocked)
+                    return;
+                blocked = next;
+                if (fieldset) {
+                    fieldset.disabled = blocked;
+                    for (const select of fieldset.querySelectorAll(".custom-select"))
+                        select.disabled = blocked;
                 }
-            } }, "登出"), authFeedback)), form, renderAboutSection(about.info, about.actions));
+                editable?.onLocked?.(blocked);
+                if (save)
+                    save.disabled = !data.writable || blocked;
+                if (lockNote)
+                    lockNote.hidden = !blocked;
+                if (account && ctx.account) {
+                    const card = renderAccountCard(auth, blocked, ctx.account);
+                    account.replaceWith(card);
+                    account = card;
+                }
+            },
+            setAuth: next => {
+                auth = next;
+                if (!account || !ctx.account)
+                    return;
+                const card = renderAccountCard(auth, blocked, ctx.account);
+                account.replaceWith(card);
+                account = card;
+            },
+        };
     }
     FanboxUI.renderSettingsPage = renderSettingsPage;
 })(FanboxUI || (FanboxUI = {}));
@@ -1657,6 +1904,11 @@ var FanboxUI;
             }
             if (view !== "creator")
                 state.creatorId = null;
+            if (view !== "settings") {
+                settingsPage = null;
+                if (location.hash.startsWith("#settings"))
+                    history.pushState(null, "", `${location.pathname}${location.search}`);
+            }
             setActiveNav(view);
             setSearch(view);
             void refreshView();
@@ -1667,7 +1919,7 @@ var FanboxUI;
             if (state.view === "maintenance")
                 return loadMaintenance(showLoading);
             if (state.view === "settings")
-                return loadSettings("", showLoading);
+                return showLoading ? loadSettings() : refreshSettings();
             if (state.view === "creators")
                 return loadCreators();
             if (state.view === "creator" && state.creatorId)
@@ -1684,11 +1936,11 @@ var FanboxUI;
                 params.set("status", status);
             return params;
         }
-        function scheduleJobRefresh() {
+        function scheduleJobRefresh(authChecking = false) {
             if (jobTimer !== undefined)
                 clearTimeout(jobTimer);
             if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)
-                || state.view === "settings" && app.querySelector(".auth-badge")?.textContent === "檢查中") {
+                || state.view === "settings" && authChecking) {
                 jobTimer = window.setTimeout(() => void refreshView(false), 900);
             }
         }
@@ -1948,7 +2200,7 @@ var FanboxUI;
             }, state.activeJob, auth, {
                 onStart: (creators, dryRun, maxPosts, mode, includeProfile, includeFancard) => void startBackup(creators, dryRun, maxPosts, mode, includeProfile, includeFancard),
                 onHistory: () => { state.backupScreen = "history"; void loadBackup(false); },
-                onSignIn: () => setView("settings"),
+                onSignIn: () => void navigate("settings", "account"),
             }));
             scheduleJobRefresh();
         }
@@ -2103,25 +2355,64 @@ var FanboxUI;
                 loadFailed(load, error);
             }
         }
-        async function loadSettings(message = "", showLoading = true) {
-            const load = beginLoad();
-            state.current = null;
-            if (showLoading)
-                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
-            try {
-                const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
-                    FanboxUI.getSettings(load.signal), FanboxUI.getJobs(undefined, load.signal), FanboxUI.getAuthStatus(sessionToken, load.signal),
-                    FanboxUI.getScheduleStatus(load.signal), FanboxUI.getCreators(load.signal),
-                    optional(FanboxUI.getDiagnostics(sessionToken, load.signal)),
-                ]);
-                if (!load.live())
-                    return;
-                updateActiveJob(jobData);
-                FanboxUI.setDisplayTimeZone(data.display.timezone);
-                FanboxUI.applyTheme(data.editable.display.theme);
-                savedTheme = document.documentElement.dataset.theme ?? "auto";
-                document.getElementById("custom-theme")?.setAttribute("href", `/theme.css?v=${Date.now()}`);
-                app.replaceChildren(FanboxUI.renderSettingsPage(data, auth, message, state.activeJob, patch => saveSettingsForm(patch), () => void loadSettings("", false), () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"), jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"), () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。"), { status: scheduleStatus, creators: creatorData.items, actions: {
+        let settingsPage = null;
+        let settingsData = null;
+        let settingsExtras = {};
+        function settingsUrl(tab) {
+            return `${location.pathname}${location.search}#settings/${tab}`;
+        }
+        function settingsTabFromHash() {
+            const match = /^#settings(?:\/([a-z]+))?$/.exec(location.hash);
+            if (!match)
+                return null;
+            return FanboxUI.isSettingsTab(match[1]) ? match[1] : "general";
+        }
+        async function confirmLeaveSettings() {
+            if (state.view !== "settings" || !settingsPage?.isDirty())
+                return true;
+            return FanboxUI.confirmDialog({
+                title: "放棄未儲存的變更？",
+                message: "這個子頁面有尚未儲存的變更，離開後這些變更會遺失。",
+                cancelLabel: "繼續編輯", confirmLabel: "放棄變更", danger: true,
+            });
+        }
+        async function navigate(view, tab = null) {
+            if (!await confirmLeaveSettings())
+                return;
+            if (tab)
+                state.settingsTab = tab;
+            if (view === "settings")
+                history.pushState(null, "", settingsUrl(state.settingsTab));
+            setView(view);
+        }
+        async function switchSettingsTab(tab) {
+            if (!await confirmLeaveSettings())
+                return;
+            history.pushState(null, "", settingsUrl(tab));
+            openSettingsTab(tab);
+        }
+        function openSettingsTab(tab) {
+            state.settingsTab = tab;
+            document.documentElement.dataset.theme = savedTheme;
+            void loadSettings();
+        }
+        const errorText = (error) => error instanceof Error ? error.message : String(error);
+        function renderSettings(message) {
+            if (!settingsData)
+                return;
+            const tab = state.settingsTab;
+            settingsPage = FanboxUI.renderSettingsPage({
+                data: settingsData, tab, message, activeJob: state.activeJob,
+                onTab: next => void switchSettingsTab(next),
+                onSave: patch => saveSettingsForm(patch),
+                auth: null,
+                account: {
+                    onRefresh: () => void loadSettings(),
+                    onLogin: () => authAction(async () => { await FanboxUI.startAuthLogin(sessionToken); }, "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
+                    onCancel: jobId => authAction(async () => { await FanboxUI.cancelAuthLogin(jobId, sessionToken); }, "正在取消登入…"),
+                    onLogout: () => authAction(async () => { await FanboxUI.logoutAuth(sessionToken); }, "已安全登出；封存與設定均未變更。"),
+                },
+                schedule: settingsExtras.schedule ? { ...settingsExtras.schedule, actions: {
                         onPreview: schedule => FanboxUI.previewSchedule(schedule, sessionToken),
                         onRunNow: async () => {
                             try {
@@ -2130,20 +2421,82 @@ var FanboxUI;
                                 return null;
                             }
                             catch (error) {
-                                return error instanceof Error ? error.message : String(error);
+                                return errorText(error);
                             }
                         },
-                    } }, { info: diagnostics, actions: {
+                    } } : undefined,
+                about: tab === "about" ? { info: settingsExtras.diagnostics ?? null, actions: {
                         onOpen: async (target) => {
                             try {
                                 await FanboxUI.openDiagnosticsFolder(target, sessionToken);
                                 return null;
                             }
                             catch (error) {
-                                return error instanceof Error ? error.message : String(error);
+                                return errorText(error);
                             }
                         },
-                    } }));
+                    } } : undefined,
+            });
+            app.replaceChildren(settingsPage.node);
+        }
+        function checkAuth(load) {
+            FanboxUI.getAuthStatus(sessionToken, load.signal).then(auth => {
+                if (!load.live() || state.view !== "settings" || state.settingsTab !== "account")
+                    return;
+                settingsPage?.setAuth(auth);
+                scheduleJobRefresh(auth.state === "checking");
+            }).catch(error => {
+                if (!load.live() || FanboxUI.isAbortError(error))
+                    return;
+                settingsPage?.setAuth({ state: "error", source: "none", message: `無法檢查登入狀態：${errorText(error)}`,
+                    can_login: false, can_logout: false, externally_managed: false, job: null });
+            });
+        }
+        async function loadSettings(message = "", showLoading = true) {
+            const load = beginLoad();
+            const tab = state.settingsTab;
+            state.current = null;
+            settingsPage = null;
+            if (showLoading)
+                app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
+            try {
+                const [data, jobData, schedule, diagnostics] = await Promise.all([
+                    FanboxUI.getSettings(load.signal), FanboxUI.getJobs(undefined, load.signal),
+                    tab === "backup" ? Promise.all([FanboxUI.getScheduleStatus(load.signal), FanboxUI.getCreators(load.signal)]) : null,
+                    tab === "about" ? optional(FanboxUI.getDiagnostics(sessionToken, load.signal)) : null,
+                ]);
+                if (!load.live())
+                    return;
+                updateActiveJob(jobData);
+                settingsData = data;
+                settingsExtras = {
+                    schedule: schedule ? { status: schedule[0], creators: schedule[1].items } : undefined,
+                    diagnostics,
+                };
+                FanboxUI.setDisplayTimeZone(data.display.timezone);
+                FanboxUI.applyTheme(data.editable.display.theme);
+                savedTheme = document.documentElement.dataset.theme ?? "auto";
+                renderSettings(message);
+                if (tab === "account")
+                    checkAuth(load);
+                scheduleJobRefresh();
+            }
+            catch (error) {
+                loadFailed(load, error);
+            }
+        }
+        async function refreshSettings() {
+            if (!settingsPage)
+                return loadSettings("", false);
+            const load = beginLoad();
+            try {
+                const jobData = await FanboxUI.getJobs(undefined, load.signal);
+                if (!load.live())
+                    return;
+                updateActiveJob(jobData);
+                settingsPage.setLocked(state.activeJob);
+                if (state.settingsTab === "account")
+                    checkAuth(load);
                 scheduleJobRefresh();
             }
             catch (error) {
@@ -2153,23 +2506,43 @@ var FanboxUI;
         async function authAction(action, message) {
             try {
                 await action();
-                if (state.view === "settings")
+                if (state.view === "settings" && state.settingsTab === "account")
                     void loadSettings(message, false);
                 return null;
             }
             catch (error) {
-                return error instanceof Error ? error.message : String(error);
+                return errorText(error);
             }
         }
         async function saveSettingsForm(patch) {
+            const tab = state.settingsTab;
             try {
-                await FanboxUI.saveSettings(patch, sessionToken);
-                if (state.view === "settings")
-                    void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+                const result = await FanboxUI.saveSettings(patch, sessionToken);
+                if (state.view !== "settings" || state.settingsTab !== tab || !settingsData)
+                    return null;
+                const languageChanged = patch.display?.language !== undefined
+                    && result.editable.display.language !== settingsData.editable.display.language;
+                settingsData = { ...settingsData, editable: result.editable, display: result.display };
+                FanboxUI.setDisplayTimeZone(result.display.timezone);
+                if (patch.display?.theme !== undefined || patch.display?.colors !== undefined) {
+                    FanboxUI.applyTheme(result.editable.display.theme);
+                    savedTheme = document.documentElement.dataset.theme ?? "auto";
+                    document.getElementById("custom-theme")?.setAttribute("href", `/theme.css?v=${Date.now()}`);
+                }
+                if (tab === "backup" && settingsExtras.schedule) {
+                    const status = await optional(FanboxUI.getScheduleStatus());
+                    if (status)
+                        settingsExtras.schedule = { ...settingsExtras.schedule, status };
+                    if (state.view !== "settings" || state.settingsTab !== tab)
+                        return null;
+                }
+                renderSettings(languageChanged
+                    ? "設定已安全寫入；介面語言會在重新整理頁面後套用。"
+                    : "設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
                 return null;
             }
             catch (error) {
-                return error instanceof Error ? error.message : String(error);
+                return errorText(error);
             }
         }
         search.addEventListener("input", () => {
@@ -2187,11 +2560,37 @@ var FanboxUI;
             const view = target?.dataset.view;
             if (!view || !["posts", "creators", "backup", "maintenance", "settings"].includes(view))
                 return;
-            state.q = "";
-            search.value = "";
-            setView(view);
+            void (async () => {
+                if (!await confirmLeaveSettings())
+                    return;
+                state.q = "";
+                search.value = "";
+                if (view === "settings")
+                    history.pushState(null, "", settingsUrl(state.settingsTab));
+                setView(view);
+            })();
         });
         window.addEventListener("popstate", event => {
+            const hashTab = settingsTabFromHash();
+            if (state.view === "settings" && hashTab !== state.settingsTab) {
+                const current = state.settingsTab;
+                void confirmLeaveSettings().then(ok => {
+                    if (!ok) {
+                        history.pushState(null, "", settingsUrl(current));
+                        return;
+                    }
+                    if (hashTab)
+                        openSettingsTab(hashTab);
+                    else
+                        setView("posts");
+                });
+                return;
+            }
+            if (hashTab && state.view !== "settings") {
+                state.settingsTab = hashTab;
+                setView("settings");
+                return;
+            }
             if (state.view !== "creator" || state.creatorTab !== "posts" || !state.creatorId)
                 return;
             const historyState = event.state;
@@ -2224,7 +2623,16 @@ var FanboxUI;
             if (state.current)
                 void refreshView();
         });
-        setView("posts");
+        window.addEventListener("beforeunload", event => {
+            if (state.view === "settings" && settingsPage?.isDirty()) {
+                event.preventDefault();
+                event.returnValue = "";
+            }
+        });
+        const startTab = settingsTabFromHash();
+        if (startTab)
+            state.settingsTab = startTab;
+        setView(startTab ? "settings" : "posts");
     }
     FanboxUI.startApp = startApp;
 })(FanboxUI || (FanboxUI = {}));

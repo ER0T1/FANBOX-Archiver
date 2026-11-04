@@ -405,6 +405,15 @@ def tokyo_page():
         yield current_page
 
 
+def _open_settings(page: Page, tab: str | None = None) -> None:
+    """Open 設定 and, if given, one of its sub-pages (account, general, backup, theme, about)."""
+    page.get_by_role("button", name="設定", exact=True).click()
+    if tab:
+        page.locator(f'.settings-tabs [data-settings-tab="{tab}"]').click()
+        expect(page.locator(f'.settings-tabs [data-settings-tab="{tab}"]')).to_have_class(re.compile("active"))
+        expect(page).to_have_url(re.compile(f"#settings/{tab}$"))
+
+
 def test_job_history_uses_the_display_timezone_not_the_browser_timezone(
     tokyo_page: Page, live_gui,
 ) -> None:
@@ -413,7 +422,7 @@ def test_job_history_uses_the_display_timezone_not_the_browser_timezone(
     jobs.hold_backup = False
     assert tokyo_page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone") == "Asia/Tokyo"
     tokyo_page.goto(base_url, wait_until="networkidle")
-    tokyo_page.get_by_role("button", name="備份", exact=True).click()
+    tokyo_page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     tokyo_page.get_by_role("button", name="工作歷史", exact=True).click()
     expect(tokyo_page.get_by_role("heading", name="工作歷史", exact=True)).to_be_visible()
     history = tokyo_page.locator(".job-history")
@@ -421,21 +430,22 @@ def test_job_history_uses_the_display_timezone_not_the_browser_timezone(
     expect(history.get_by_text("2026年11月03日 01:00")).to_have_count(0)
 
     # Choosing Asia/Tokyo in settings moves every displayed time, in 24-hour form.
-    tokyo_page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(tokyo_page, "general")
     tokyo_page.get_by_role("combobox", name="時區", exact=True).click()
     tokyo_page.get_by_role("option", name="Asia/Tokyo", exact=True).click()
     tokyo_page.get_by_role("button", name="儲存設定", exact=True).click()
     expect(tokyo_page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
     assert AppConfig.load(config_path).display.timezone == "Asia/Tokyo"
     expect(tokyo_page.get_by_text("目前生效：Asia/Tokyo", exact=False)).to_be_visible()
+    tokyo_page.locator('.settings-tabs [data-settings-tab="backup"]').click()
     expect(tokyo_page.locator(".schedule-settings")).to_contain_text("Asia/Tokyo，24 小時制")
     body = tokyo_page.locator("body").inner_text()
     assert "上午" not in body and "下午" not in body
-    tokyo_page.get_by_role("button", name="備份", exact=True).click()
+    tokyo_page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     tokyo_page.get_by_role("button", name="工作歷史", exact=True).click()
     expect(history.get_by_text("2026年11月03日 01:00").first).to_be_visible()
 
-    tokyo_page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(tokyo_page, "general")
     tokyo_page.get_by_role("combobox", name="時區", exact=True).click()
     tokyo_page.get_by_role("option", name="其他時區…").click()
     other = tokyo_page.get_by_role("combobox", name="其他時區（IANA 名稱）")
@@ -485,7 +495,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     page.keyboard.press("ArrowRight")
     expect(page.get_by_role("heading", name="投稿 53", exact=True)).to_be_visible()
 
-    page.get_by_role("button", name="備份", exact=True).click()
+    page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="備份工作", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="本次備份摘要", exact=True)).to_be_visible()
     expect(page.locator(".plan-capacity")).to_contain_text("上限 20／發現 55／符合 2／選取 2／略過 53")
@@ -509,14 +519,11 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
 
     page.get_by_role("button", name="設定", exact=True).click()
     expect(page.get_by_role("heading", name="設定", exact=True)).to_be_visible()
+    expect(page).to_have_url(re.compile("#settings/general$"))  # the default sub-page
+    expect(page.get_by_role("heading", name="一般", exact=True)).to_be_visible()
     expect(page.get_by_text("目前工作：完整備份", exact=True)).to_be_visible()
     save_button = page.get_by_role("button", name="儲存設定", exact=True)
     expect(save_button).to_be_disabled()
-    expect(page.locator(".auth-badge")).to_have_text("工作中")
-    expect(page.locator(".account-card")).not_to_have_class(re.compile(r"tone-error"))
-    expect(page.get_by_text("檢查失敗", exact=True)).not_to_be_visible()
-    for name in ("登入 FANBOX", "重新檢查", "登出"):
-        expect(page.get_by_role("button", name=name, exact=True)).to_be_disabled()
     log_level = page.get_by_role("combobox", name="日誌等級")
     expect(log_level).to_have_attribute("aria-disabled", "true")
     log_level.click(force=True)
@@ -524,20 +531,30 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     log_level.press("Enter")
     expect(page.locator("#log-level")).not_to_have_attribute("open", "")
     expect(page.get_by_role("option", name="DEBUG")).not_to_be_visible()
+
+    page.locator('.settings-tabs [data-settings-tab="account"]').click()
+    expect(page.locator(".auth-badge")).to_have_text("工作中")
+    expect(page.locator(".account-card")).not_to_have_class(re.compile(r"tone-error"))
+    expect(page.get_by_text("檢查失敗", exact=True)).not_to_be_visible()
+    expect(page.get_by_role("button", name="儲存設定", exact=True)).to_have_count(0)  # nothing to save here
+    for name in ("登入 FANBOX", "重新檢查", "登出"):
+        expect(page.get_by_role("button", name=name, exact=True)).to_be_disabled()
     jobs.hold_backup = False
-    expect(save_button).to_be_enabled(timeout=5_000)
-    expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible()
+    expect(page.get_by_text("目前工作：完整備份", exact=True)).not_to_be_visible(timeout=5_000)
     expect(page.get_by_role("heading", name="帳號／登入", exact=True)).to_be_visible()
-    expect(page.get_by_text("未登入", exact=True)).to_be_visible()
+    expect(page.locator(".auth-badge")).to_have_text("未登入")
+    expect(page.get_by_role("button", name="登入 FANBOX", exact=True)).to_be_enabled()
+    expect(page.get_by_role("button", name="登出", exact=True)).to_be_disabled()
+
+    page.locator('.settings-tabs [data-settings-tab="general"]').click()
+    expect(save_button).to_be_enabled(timeout=5_000)
     log_level = page.get_by_role("combobox", name="日誌等級")
     expect(log_level).to_have_attribute("aria-disabled", "false")
     log_level.click()
     expect(page.get_by_role("option", name="DEBUG")).to_be_visible()
     page.keyboard.press("Escape")
-    expect(page.get_by_role("button", name="登入 FANBOX", exact=True)).to_be_enabled()
-    expect(page.get_by_role("button", name="登出", exact=True)).to_be_disabled()
+    page.locator('.settings-tabs [data-settings-tab="backup"]').click()
     expect(page.get_by_role("heading", name="備份", exact=True)).to_be_visible()
-    expect(page.get_by_role("heading", name="輸出與紀錄", exact=True)).to_be_visible()
     expect(page.get_by_text("DOWNLOAD", exact=True)).not_to_be_visible()
     expect(page.get_by_text("SYNC", exact=True)).not_to_be_visible()
     expect(page.get_by_text("BACKUP DEFAULTS", exact=True)).not_to_be_visible()
@@ -564,7 +581,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     page.set_viewport_size({"width": 1280, "height": 800})
 
-    page.get_by_role("button", name="備份", exact=True).click()
+    page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="開始備份", exact=True)).to_be_visible()
     expect(page.get_by_text("備份前請確認登入", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="前往設定登入", exact=True)).to_be_visible()
@@ -685,7 +702,7 @@ def test_job_history_pages_sorts_and_filters_on_the_server(page: Page, live_gui)
             "result": {"success": index, "failure": 0}, "event_count": 0,
         })
     page.goto(base_url, wait_until="networkidle")
-    page.get_by_role("button", name="備份", exact=True).click()
+    page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     page.get_by_role("button", name="工作歷史", exact=True).click()
     rows = page.locator(".job-history .history-row")
     expect(rows).to_have_count(20)
@@ -710,7 +727,7 @@ def test_job_history_pages_sorts_and_filters_on_the_server(page: Page, live_gui)
 def test_settings_auto_backup_previews_saves_and_runs_once(page: Page, live_gui) -> None:
     base_url, config_path, jobs = live_gui
     page.goto(base_url, wait_until="networkidle")
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "backup")
     section = page.locator(".schedule-settings")
     expect(section.get_by_role("heading", name="自動備份")).to_be_visible()
     # A running job locks the whole section, including the day grid and run button.
@@ -779,12 +796,12 @@ def test_background_scheduled_backup_locks_the_app_without_a_stop_button(page: P
     original_get = jobs.get
     jobs.get = lambda job_id: ({**jobs.history[0], "events": []} if job_id == "background-job" else original_get(job_id))
     page.goto(base_url, wait_until="networkidle")
-    page.get_by_role("button", name="備份", exact=True).click()
+    page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_role("heading", name="備份工作", exact=True)).to_be_visible()
     expect(page.get_by_text("排程備份", exact=True).first).to_be_visible()
     expect(page.get_by_text("此工作由背景排程在程式關閉期間開始", exact=False)).to_be_visible()
     expect(page.get_by_role("button", name="安全停止", exact=True)).to_have_count(0)
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "backup")
     expect(page.get_by_text("目前工作：排程備份", exact=True)).to_be_visible()
     expect(page.get_by_text("（背景執行中）", exact=False)).to_be_visible()
     expect(page.get_by_role("button", name="儲存設定", exact=True)).to_be_disabled()
@@ -803,7 +820,7 @@ def test_settings_about_section_shows_versions_and_opens_fixed_folders(
     base_url, _config_path, _jobs = live_gui
     page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=base_url)
     page.goto(base_url, wait_until="networkidle")
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "about")
 
     about = page.locator(".about-card")
     expect(about.get_by_role("heading", name="關於與診斷")).to_be_visible()
@@ -857,18 +874,19 @@ def test_theme_setting_previews_saves_and_overrides_a_dark_system(page: Page, li
     page.goto(base_url, wait_until="networkidle")
     assert page.evaluate(_BACKGROUND) == _DARK_BG  # "follow system" by default
 
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "theme")
     save = page.get_by_role("button", name="儲存設定", exact=True)
     expect(save).to_be_enabled(timeout=5_000)
     page.get_by_role("combobox", name="主題", exact=True).click()
     page.get_by_role("option", name="亮色", exact=True).click()
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
     assert page.evaluate(_BACKGROUND) == _LIGHT_BG
-    # Leaving without saving drops the preview.
+    # Leaving without saving asks first, and discarding drops the preview.
     page.get_by_role("button", name="投稿", exact=True).click()
+    page.get_by_role("dialog").get_by_role("button", name="放棄變更").click()
     expect(page.locator("html")).to_have_attribute("data-theme", "auto")
 
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "theme")
     expect(save).to_be_enabled(timeout=5_000)
     page.get_by_role("combobox", name="主題", exact=True).click()
     page.get_by_role("option", name="亮色", exact=True).click()
@@ -907,7 +925,7 @@ def test_custom_color_editor_syncs_controls_warns_saves_and_round_trips(
     jobs.hold_backup = False
     page.emulate_media(color_scheme="light")
     page.goto(base_url, wait_until="networkidle")
-    page.get_by_role("button", name="設定", exact=True).click()
+    _open_settings(page, "theme")
     save = page.get_by_role("button", name="儲存設定", exact=True)
     expect(save).to_be_enabled(timeout=5_000)
     editor = page.locator(".color-editor")
@@ -1040,7 +1058,7 @@ def test_leaving_a_slow_page_abandons_its_load(page: Page, live_gui) -> None:
     page.goto(base_url, wait_until="networkidle")
 
     held = _hold(page, re.compile(r".*/api/jobs\?.*kind=backup.*"))
-    page.get_by_role("button", name="備份", exact=True).click()
+    page.locator("#nav").get_by_role("button", name="備份", exact=True).click()
     expect(page.get_by_text("正在讀取工作狀態…")).to_be_visible()
     page.get_by_role("button", name="創作者", exact=True).click()
     expect(page.locator("h1", has_text="創作者")).to_be_visible()
@@ -1090,3 +1108,206 @@ def test_only_the_latest_search_on_a_page_is_drawn(page: Page, live_gui) -> None
     page.wait_for_timeout(500)
     expect(page.locator(".post-card")).to_have_count(1)
     expect(page.locator(".post-card strong")).to_have_text("投稿 03")
+
+
+_SETTINGS_TABS = ("account", "general", "backup", "theme", "about")
+# Vertical gap between every pair of stacked blocks on the settings page (cards, notices, save row).
+_SETTINGS_GAPS = """() => {
+  const stack = parent => parent ? [...parent.children].filter(e => !e.hidden && e.getClientRects().length) : [];
+  const page = document.querySelector('.settings-page');
+  const body = page.querySelector('.settings-body');
+  const form = body.querySelector('.settings-form');
+  const groups = [stack(page), stack(body)];
+  if (form) groups.push(stack(form), stack(form.querySelector('fieldset')));
+  const gaps = [];
+  for (const group of groups) for (let i = 1; i < group.length; i++) {
+    gaps.push(Math.round(group[i].getBoundingClientRect().top - group[i - 1].getBoundingClientRect().bottom));
+  }
+  return gaps;
+}"""
+
+
+def test_settings_sub_pages_route_save_their_own_fields_and_keep_consistent_spacing(
+    page: Page, live_gui,
+) -> None:
+    base_url, config_path, jobs = live_gui
+    jobs.hold_backup = False
+    auth_requests: list[str] = []
+    patches: list[dict] = []
+    page.on("request", lambda request: auth_requests.append(request.url)
+            if "/api/auth/status" in request.url else None)
+    page.on("request", lambda request: patches.append(request.post_data_json)
+            if request.method == "PATCH" and request.url.endswith("/api/config") else None)
+    page.goto(f"{base_url}/#settings/backup", wait_until="networkidle")
+    # A sub-page address survives a reload.
+    page.reload(wait_until="networkidle")
+    expect(page.locator('.settings-tabs [aria-current="page"]')).to_have_attribute("data-settings-tab", "backup")
+    page.get_by_role("spinbutton", name="單次最多下載投稿數").fill("33")
+    page.get_by_role("button", name="儲存設定", exact=True).click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert set(patches[-1]) == {"download", "sync", "backup_defaults", "schedule"}
+    assert AppConfig.load(config_path).sync.max_posts_per_run == 33
+
+    page.locator('.settings-tabs [data-settings-tab="general"]').click()
+    page.get_by_role("checkbox", name="加入 YAML front matter").uncheck()
+    page.get_by_role("button", name="儲存設定", exact=True).click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert set(patches[-1]) == {"display", "markdown", "logging"}
+    assert set(patches[-1]["display"]) == {"timezone", "language"}
+    assert AppConfig.load(config_path).markdown.yaml_front_matter is False
+    assert AppConfig.load(config_path).sync.max_posts_per_run == 33  # other sub-pages untouched
+    saves = len(patches)
+
+    # Keyboard: the sub-page tabs are ordinary buttons in the tab order.
+    page.locator('.settings-tabs [data-settings-tab="theme"]').focus()
+    page.keyboard.press("Enter")
+    expect(page).to_have_url(re.compile("#settings/theme$"))
+    expect(page.locator(".color-editor")).to_be_visible()
+    assert len(patches) == saves  # moving between sub-pages saves nothing
+
+    # Only "帳號與登入" asks for the (slow) sign-in check.
+    assert auth_requests == []
+    for width in (1280, 390):
+        page.set_viewport_size({"width": width, "height": 844})
+        for name in _SETTINGS_TABS:
+            page.goto(f"{base_url}/#settings/{name}", wait_until="networkidle")
+            expect(page.locator(f'.settings-tabs [data-settings-tab="{name}"]')).to_have_class(re.compile("active"))
+            gaps = page.evaluate(_SETTINGS_GAPS)
+            assert gaps and min(gaps) >= 12, (width, name, gaps)
+            assert page.evaluate(_NO_PAGE_OVERFLOW), (width, name, page.evaluate(_OVERFLOWING))
+    assert len(auth_requests) == 2  # the account sub-page, once per width
+
+
+def test_unsaved_settings_are_marked_and_guarded_by_an_in_page_dialog(page: Page, live_gui) -> None:
+    base_url, config_path, jobs = live_gui
+    jobs.hold_backup = False
+    native_dialogs: list[str] = []
+    page.on("dialog", lambda dialog: (native_dialogs.append(dialog.type), dialog.dismiss()))
+    page.goto(f"{base_url}/#settings/general", wait_until="networkidle")
+    tab = page.locator('.settings-tabs [data-settings-tab="backup"]')
+    tab.click()  # a history entry to go back to
+    run_now = page.get_by_role("button", name="立即執行一次")
+    expect(run_now).to_be_enabled()
+
+    # Checkbox, number, custom select and schedule day buttons are all marked when changed.
+    dry_run_box = page.get_by_role("checkbox", name="完整備份只預覽，不下載")
+    dry_run = page.locator(".setting-toggle").filter(has=dry_run_box)
+    dry_run_box.check()
+    expect(dry_run.locator(".dirty-badge")).to_have_text("已變更")
+    expect(tab.locator(".tab-dirty")).to_have_text("未儲存")
+    expect(run_now).to_be_disabled()  # "run now" uses the saved schedule
+    expect(page.locator(".schedule-run-blocked")).to_be_visible()
+    dry_run_box.uncheck()
+    expect(dry_run.locator(".dirty-badge")).to_have_count(0)
+    expect(tab.locator(".tab-dirty")).to_have_count(0)
+    expect(run_now).to_be_enabled()
+
+    retries = page.get_by_role("spinbutton", name="失敗重試次數")
+    retries.fill("7")
+    expect(page.locator(".setting-field").filter(has=retries).locator(".dirty-badge")).to_be_visible()
+    page.get_by_role("combobox", name="週期").click()
+    page.get_by_role("option", name="每月指定日期").click()
+    page.get_by_role("button", name="15", exact=True).click()
+    expect(page.locator(".schedule-month .dirty-badge")).to_be_visible()
+    expect(page.locator(".is-dirty")).to_have_count(3)  # retries, frequency, month day
+
+    # Switching sub-page asks; "繼續編輯" (also Esc) keeps everything as it was.
+    page.locator('.settings-tabs [data-settings-tab="general"]').click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_contain_text("放棄未儲存的變更？")
+    expect(dialog.get_by_role("button", name="繼續編輯")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)
+    expect(page).to_have_url(re.compile("#settings/backup$"))
+    expect(retries).to_have_value("7")
+    page.locator("#nav").get_by_role("button", name="投稿", exact=True).click()
+    dialog.get_by_role("button", name="繼續編輯").click()
+    expect(page.locator(".settings-page")).to_be_visible()
+
+    # Browser back asks too; declining keeps the address on the unsaved sub-page.
+    page.evaluate("history.back()")
+    expect(dialog).to_contain_text("放棄未儲存的變更？")
+    dialog.get_by_role("button", name="繼續編輯").click()
+    expect(page).to_have_url(re.compile("#settings/backup$"))
+    expect(retries).to_have_value("7")
+
+    # "放棄變更" leaves and drops the edits; nothing was saved.
+    page.locator('.settings-tabs [data-settings-tab="general"]').click()
+    dialog.get_by_role("button", name="放棄變更").click()
+    expect(page).to_have_url(re.compile("#settings/general$"))
+    page.locator('.settings-tabs [data-settings-tab="backup"]').click()
+    expect(page.get_by_role("spinbutton", name="失敗重試次數")).not_to_have_value("7")
+    assert AppConfig.load(config_path).download.retry_count != 7
+    assert native_dialogs == []
+
+
+def test_logout_asks_with_the_in_page_dialog_not_window_confirm(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    jobs.hold_backup = False
+    native_dialogs: list[str] = []
+    logouts: list[str] = []
+    signed_in = {"state": "authenticated", "source": "profile", "message": "登入狀態有效。", "can_login": True,
+                 "can_logout": True, "externally_managed": False, "job": None}
+    signed_out = {**signed_in, "state": "signed_out", "source": "none", "message": "已登出。", "can_logout": False}
+    page.on("dialog", lambda dialog: (native_dialogs.append(dialog.type), dialog.dismiss()))
+    page.route("**/api/auth/status", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(signed_out if logouts else signed_in)))
+    page.route("**/api/auth/logout", lambda route: (logouts.append(route.request.method), route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(signed_out))))
+    page.goto(f"{base_url}/#settings/account", wait_until="networkidle")
+    expect(page.locator(".auth-badge")).to_have_text("已登入")
+    logout = page.get_by_role("button", name="登出", exact=True)
+    logout.click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_contain_text("登出 FANBOX？")
+    dialog.get_by_role("button", name="取消").click()
+    expect(dialog).to_have_count(0)
+    expect(logout).to_be_focused()
+    assert logouts == []
+    logout.click()
+    dialog.get_by_role("button", name="登出").click()
+    expect(page.get_by_text("已安全登出", exact=False)).to_be_visible()
+    assert logouts == ["POST"] and native_dialogs == []
+
+
+def test_settings_render_without_waiting_for_the_sign_in_check(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    jobs.hold_backup = False
+    held = _hold(page, "**/api/auth/status")
+    page.goto(f"{base_url}/#settings/general", wait_until="domcontentloaded")
+    expect(page.get_by_role("heading", name="一般", exact=True)).to_be_visible()
+    assert held == []
+    page.locator('.settings-tabs [data-settings-tab="account"]').click()
+    # The card is shown at once while the check is still running.
+    expect(page.locator(".account-card .auth-badge")).to_have_text("檢查中")
+    expect(page.locator(".account-card")).to_have_attribute("aria-busy", "true")
+    assert len(held) == 1
+    page.unroute("**/api/auth/status")
+    _release(held)
+    expect(page.locator(".account-card .auth-badge")).to_have_text("未登入")
+
+
+def test_job_polling_keeps_unsaved_settings_and_unlocks_in_place(page: Page, live_gui) -> None:
+    base_url, config_path, jobs = live_gui
+    page.goto(f"{base_url}/#settings/general", wait_until="networkidle")
+    save = page.get_by_role("button", name="儲存設定", exact=True)
+    expect(save).to_be_disabled()  # the fixture's backup is running
+    # An edit made just before the job started (the fieldset is locked now, so set it directly).
+    page.evaluate("""() => {
+      const label = [...document.querySelectorAll('.setting-toggle')].find(e => e.textContent.includes('寫入檔案日誌'));
+      const box = label.querySelector('input');
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event('change', {bubbles: true}));
+      document.querySelector('.settings-body').dataset.probe = 'kept';
+    }""")
+    expect(page.locator(".tab-dirty")).to_have_text("未儲存")
+    page.wait_for_timeout(2_200)  # at least two 900 ms polls while the job runs
+    expect(page.locator('.settings-body[data-probe="kept"]')).to_have_count(1)  # never redrawn
+    jobs.hold_backup = False
+    expect(save).to_be_enabled(timeout=5_000)
+    expect(page.get_by_role("combobox", name="日誌等級")).to_have_attribute("aria-disabled", "false")
+    expect(page.locator(".tab-dirty")).to_have_text("未儲存")
+    expect(page.locator('.settings-body[data-probe="kept"]')).to_have_count(1)
+    save.click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert AppConfig.load(config_path).logging.write_to_file is False

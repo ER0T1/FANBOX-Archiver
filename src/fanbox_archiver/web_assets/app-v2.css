@@ -360,7 +360,7 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .color-actions { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.9rem; }
 .color-feedback { min-height:1.3em; margin:.5rem 0 0; color:var(--muted); }
 .settings-form { display:grid; gap:1rem; }
-.account-card { margin-bottom:1rem; border-left:5px solid var(--line); }
+.account-card { border-left:5px solid var(--line); }
 .account-card.tone-success { border-left-color:var(--green); }
 .account-card.tone-error { border-left-color:var(--red); }
 .account-heading { display:flex; align-items:start; justify-content:space-between; gap:1rem; }
@@ -533,3 +533,32 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .settings-form fieldset:disabled {
   opacity: .68;
 }
+
+/* Settings sub-pages. Spacing between cards, notices and the save row comes from the grid gap
+   (one value, never per-card margins), so blocks can no longer touch each other. */
+.settings-page { display:grid; gap:1rem; }
+.settings-page > .heading { margin-bottom:.6rem; }
+.settings-body { display:grid; gap:1rem; min-width:0; }
+.settings-tabs { display:flex; gap:.4rem; padding:.35rem; overflow-x:auto; background:var(--surface-2); border:1px solid var(--line); border-radius:14px; scrollbar-width:thin; }
+.settings-tabs button { display:flex; flex:1 0 auto; align-items:center; justify-content:center; gap:.45rem; min-height:42px; padding:.55rem .9rem; color:var(--muted); background:transparent; border:0; border-radius:10px; cursor:pointer; font-weight:750; white-space:nowrap; }
+.settings-tabs button:hover { color:var(--text); }
+.settings-tabs button.active { color:var(--accent); background:var(--surface); box-shadow:0 2px 8px rgba(25,32,44,.08); }
+.settings-tabs button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.tab-dirty, .dirty-badge { display:inline-flex; align-items:center; padding:.08rem .45rem; color:var(--accent); background:var(--accent-soft); border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line)); border-radius:999px; font-size:.72rem; font-weight:800; line-height:1.4; white-space:nowrap; }
+.tab-dirty::before, .dirty-badge::before { content:"●"; margin-right:.3rem; font-size:.6rem; }
+.is-dirty { position:relative; box-shadow:inset 4px 0 0 var(--accent); }
+.setting-toggle.is-dirty, .setting-field.is-dirty, .schedule-creators.is-dirty { border-radius:10px; }
+.setting-field.is-dirty, .settings-section.is-dirty, .color-editor.is-dirty, .schedule-creators.is-dirty { padding-left:.8rem; }
+.setting-toggle.is-dirty { border-color:color-mix(in srgb,var(--accent) 55%,var(--line)); }
+.setting-toggle .dirty-badge { margin-left:auto; }
+.setting-field .dirty-badge, .settings-section .dirty-badge, .color-editor > .dirty-badge, .schedule-creators .dirty-badge { justify-self:start; width:max-content; }
+.schedule-run-blocked { flex-basis:100%; color:var(--yellow); font-weight:700; }
+.app-dialog { width:min(30rem,calc(100vw - 2rem)); padding:1.3rem; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); }
+.app-dialog::backdrop { background:rgba(10,14,20,.45); }
+.app-dialog h2 { margin:0 0 .6rem; font-size:1.15rem; }
+.app-dialog p { margin:0 0 1.2rem; color:var(--muted); }
+.dialog-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:.6rem; }
+.dialog-actions button { min-height:42px; padding:.6rem 1rem; border-radius:10px; cursor:pointer; font-weight:750; }
+.dialog-cancel { color:var(--text); background:var(--surface-2); border:1px solid var(--line); }
+.dialog-confirm.danger { color:#fff; background:var(--red); border:1px solid var(--red); }
+.dialog-actions button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }

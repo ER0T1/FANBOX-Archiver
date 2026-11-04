@@ -382,6 +382,13 @@ namespace FanboxUI {
     theme_colors: {keys: string[]; defaults: ThemeColorSettings};
   }
 
+  /** PATCH /api/config answers with the saved values, so the page can refresh without reloading. */
+  export interface SettingsSaveResult {
+    editable: EditableSettings;
+    display: DisplayInfo;
+    saved: boolean;
+  }
+
   export type FolderTarget = "archive" | "archive_logs" | "desktop_logs";
 
   export interface DiagnosticsInfo {
@@ -428,4 +435,9 @@ namespace FanboxUI {
     markdown: MarkdownSettings;
     logging: LoggingSettings;
   }
+
+  /** What one settings sub-page saves: only its own sections, and only its own display fields. */
+  export type SettingsSavePatch = {[K in keyof SettingsPatch]?: Partial<SettingsPatch[K]>};
+
+  export type SettingsTab = "account" | "general" | "backup" | "theme" | "about";
 }

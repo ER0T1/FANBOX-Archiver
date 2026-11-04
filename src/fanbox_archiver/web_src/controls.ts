@@ -59,7 +59,11 @@ namespace FanboxUI {
         update(option.value);
         root.open = false;
         summary.focus();
-        if (changed) options.onChange?.(option.value);
+        if (changed) {
+          options.onChange?.(option.value);
+          // Like a native <select>, so forms can notice edits (e.g. the unsaved-changes tracker).
+          root.dispatchEvent(new Event("change", {bubbles: true}));
+        }
       }}, option.label));
     }
     summary.addEventListener("click", event => {

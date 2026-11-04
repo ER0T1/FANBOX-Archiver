@@ -78,6 +78,10 @@ namespace FanboxUI {
         state.backupJobId = null;
       }
       if (view !== "creator") state.creatorId = null;
+      if (view !== "settings") {
+        settingsPage = null;
+        if (location.hash.startsWith("#settings")) history.pushState(null, "", `${location.pathname}${location.search}`);
+      }
       setActiveNav(view);
       setSearch(view);
       void refreshView();
@@ -86,7 +90,7 @@ namespace FanboxUI {
     function refreshView(showLoading = true): void | Promise<void> {
       if (state.view === "backup") return loadBackup(showLoading);
       if (state.view === "maintenance") return loadMaintenance(showLoading);
-      if (state.view === "settings") return loadSettings("", showLoading);
+      if (state.view === "settings") return showLoading ? loadSettings() : refreshSettings();
       if (state.view === "creators") return loadCreators();
       if (state.view === "creator" && state.creatorId) return loadCreator(state.creatorId, state.creatorTab);
       return loadPosts();
@@ -103,10 +107,10 @@ namespace FanboxUI {
       return params;
     }
 
-    function scheduleJobRefresh(): void {
+    function scheduleJobRefresh(authChecking = false): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
       if (state.activeJob && ["backup", "maintenance", "settings"].includes(state.view)
-        || state.view === "settings" && app.querySelector(".auth-badge")?.textContent === "檢查中") {
+        || state.view === "settings" && authChecking) {
         jobTimer = window.setTimeout(() => void refreshView(false), 900);
       }
     }
@@ -357,7 +361,7 @@ namespace FanboxUI {
         onStart: (creators, dryRun, maxPosts, mode, includeProfile, includeFancard) =>
           void startBackup(creators, dryRun, maxPosts, mode, includeProfile, includeFancard),
         onHistory: () => { state.backupScreen = "history"; void loadBackup(false); },
-        onSignIn: () => setView("settings"),
+        onSignIn: () => void navigate("settings", "account"),
       }));
       scheduleJobRefresh();
     }
@@ -499,56 +503,155 @@ namespace FanboxUI {
       }
     }
 
+    // The settings sub-page on screen, its data, and the extra data only some sub-pages need.
+    let settingsPage: SettingsPageHandle | null = null;
+    let settingsData: SettingsResponse | null = null;
+    let settingsExtras: {
+      schedule?: {status: ScheduleStatus; creators: CreatorSummary[]};
+      diagnostics?: DiagnosticsInfo | null;
+    } = {};
+
+    function settingsUrl(tab: SettingsTab): string {
+      return `${location.pathname}${location.search}#settings/${tab}`;
+    }
+
+    function settingsTabFromHash(): SettingsTab | null {
+      const match = /^#settings(?:\/([a-z]+))?$/.exec(location.hash);
+      if (!match) return null;
+      return isSettingsTab(match[1]) ? match[1] : "general";
+    }
+
+    /** Asks before unsaved settings are thrown away; true when it is fine to leave. */
+    async function confirmLeaveSettings(): Promise<boolean> {
+      if (state.view !== "settings" || !settingsPage?.isDirty()) return true;
+      return confirmDialog({
+        title: "放棄未儲存的變更？",
+        message: "這個子頁面有尚未儲存的變更，離開後這些變更會遺失。",
+        cancelLabel: "繼續編輯", confirmLabel: "放棄變更", danger: true,
+      });
+    }
+
+    async function navigate(view: View, tab: SettingsTab | null = null): Promise<void> {
+      if (!await confirmLeaveSettings()) return;
+      if (tab) state.settingsTab = tab;
+      if (view === "settings") history.pushState(null, "", settingsUrl(state.settingsTab));
+      setView(view);
+    }
+
+    async function switchSettingsTab(tab: SettingsTab): Promise<void> {
+      if (!await confirmLeaveSettings()) return;
+      history.pushState(null, "", settingsUrl(tab));
+      openSettingsTab(tab);
+    }
+
+    function openSettingsTab(tab: SettingsTab): void {
+      state.settingsTab = tab;
+      // An unsaved theme preview never outlives its sub-page.
+      document.documentElement.dataset.theme = savedTheme;
+      void loadSettings();
+    }
+
+    const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+    function renderSettings(message: string): void {
+      if (!settingsData) return;
+      const tab = state.settingsTab;
+      settingsPage = renderSettingsPage({
+        data: settingsData, tab, message, activeJob: state.activeJob,
+        onTab: next => void switchSettingsTab(next),
+        onSave: patch => saveSettingsForm(patch),
+        auth: null,
+        account: {
+          onRefresh: () => void loadSettings(),
+          onLogin: () => authAction(async () => { await startAuthLogin(sessionToken); },
+            "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
+          onCancel: jobId => authAction(async () => { await cancelAuthLogin(jobId, sessionToken); },
+            "正在取消登入…"),
+          onLogout: () => authAction(async () => { await logoutAuth(sessionToken); },
+            "已安全登出；封存與設定均未變更。"),
+        },
+        schedule: settingsExtras.schedule ? {...settingsExtras.schedule, actions: {
+          onPreview: schedule => previewSchedule(schedule, sessionToken),
+          onRunNow: async () => {
+            try {
+              // The backup page opens the running job, which this one now is.
+              await runScheduleNow(sessionToken);
+              setView("backup");
+              return null;
+            } catch (error) {
+              return errorText(error);
+            }
+          },
+        }} : undefined,
+        about: tab === "about" ? {info: settingsExtras.diagnostics ?? null, actions: {
+          onOpen: async target => {
+            try {
+              await openDiagnosticsFolder(target, sessionToken);
+              return null;
+            } catch (error) {
+              return errorText(error);
+            }
+          },
+        }} : undefined,
+      });
+      app.replaceChildren(settingsPage.node);
+    }
+
+    /** The sign-in check runs after the account sub-page is shown, and only there. */
+    function checkAuth(load: Load): void {
+      getAuthStatus(sessionToken, load.signal).then(auth => {
+        if (!load.live() || state.view !== "settings" || state.settingsTab !== "account") return;
+        settingsPage?.setAuth(auth);
+        scheduleJobRefresh(auth.state === "checking");
+      }).catch(error => {
+        if (!load.live() || isAbortError(error)) return;
+        settingsPage?.setAuth({state: "error", source: "none", message: `無法檢查登入狀態：${errorText(error)}`,
+          can_login: false, can_logout: false, externally_managed: false, job: null});
+      });
+    }
+
     async function loadSettings(message = "", showLoading = true): Promise<void> {
       const load = beginLoad();
+      const tab = state.settingsTab;
       state.current = null;
+      settingsPage = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
-        const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
-          getSettings(load.signal), getJobs(undefined, load.signal), getAuthStatus(sessionToken, load.signal),
-          getScheduleStatus(load.signal), getCreators(load.signal),
-          optional(getDiagnostics(sessionToken, load.signal)),
+        // Each sub-page reads only what it shows; only "帳號與登入" asks for the sign-in check.
+        const [data, jobData, schedule, diagnostics] = await Promise.all([
+          getSettings(load.signal), getJobs(undefined, load.signal),
+          tab === "backup" ? Promise.all([getScheduleStatus(load.signal), getCreators(load.signal)]) : null,
+          tab === "about" ? optional(getDiagnostics(sessionToken, load.signal)) : null,
         ]);
         if (!load.live()) return;
         updateActiveJob(jobData);
+        settingsData = data;
+        settingsExtras = {
+          schedule: schedule ? {status: schedule[0], creators: schedule[1].items} : undefined,
+          diagnostics,
+        };
         setDisplayTimeZone(data.display.timezone);
         // A preview that was never saved is undone whenever the page reloads its settings.
         applyTheme(data.editable.display.theme);
         savedTheme = document.documentElement.dataset.theme ?? "auto";
-        // Re-read the generated custom-colour stylesheet so a saved palette applies at once.
-        document.getElementById("custom-theme")?.setAttribute("href", `/theme.css?v=${Date.now()}`);
-        app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
-          patch => saveSettingsForm(patch),
-          () => void loadSettings("", false),
-          () => authAction(async () => { await startAuthLogin(sessionToken); },
-            "登入視窗已開啟；請在專用 Chrome 中完成登入。"),
-          jobId => authAction(async () => { await cancelAuthLogin(jobId, sessionToken); },
-            "正在取消登入…"),
-          () => authAction(async () => { await logoutAuth(sessionToken); },
-            "已安全登出；封存與設定均未變更。"),
-          {status: scheduleStatus, creators: creatorData.items, actions: {
-            onPreview: schedule => previewSchedule(schedule, sessionToken),
-            onRunNow: async () => {
-              try {
-                // The backup page opens the running job, which this one now is.
-                await runScheduleNow(sessionToken);
-                setView("backup");
-                return null;
-              } catch (error) {
-                return error instanceof Error ? error.message : String(error);
-              }
-            },
-          }},
-          {info: diagnostics, actions: {
-            onOpen: async target => {
-              try {
-                await openDiagnosticsFolder(target, sessionToken);
-                return null;
-              } catch (error) {
-                return error instanceof Error ? error.message : String(error);
-              }
-            },
-          }}));
+        renderSettings(message);
+        if (tab === "account") checkAuth(load);
+        scheduleJobRefresh();
+      } catch (error) {
+        loadFailed(load, error);
+      }
+    }
+
+    /** Background refresh while a job runs: updates the lock without redrawing unsaved input. */
+    async function refreshSettings(): Promise<void> {
+      if (!settingsPage) return loadSettings("", false);
+      const load = beginLoad();
+      try {
+        const jobData = await getJobs(undefined, load.signal);
+        if (!load.live()) return;
+        updateActiveJob(jobData);
+        settingsPage.setLocked(state.activeJob);
+        if (state.settingsTab === "account") checkAuth(load);
         scheduleJobRefresh();
       } catch (error) {
         loadFailed(load, error);
@@ -558,22 +661,41 @@ namespace FanboxUI {
     async function authAction(action: () => Promise<void>, message: string): Promise<string | null> {
       try {
         await action();
-        // The write always finishes; the settings page is redrawn only if the user is still on it
-        // (a background refresh of the same page does not count as leaving).
-        if (state.view === "settings") void loadSettings(message, false);
+        // The write always finishes; the account sub-page is redrawn only if the user is still on it.
+        if (state.view === "settings" && state.settingsTab === "account") void loadSettings(message, false);
         return null;
       } catch (error) {
-        return error instanceof Error ? error.message : String(error);
+        return errorText(error);
       }
     }
 
-    async function saveSettingsForm(patch: SettingsPatch): Promise<string | null> {
+    async function saveSettingsForm(patch: SettingsSavePatch): Promise<string | null> {
+      const tab = state.settingsTab;
       try {
-        await saveSettings(patch, sessionToken);
-        if (state.view === "settings") void loadSettings("設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
+        const result = await saveSettings(patch, sessionToken);
+        if (state.view !== "settings" || state.settingsTab !== tab || !settingsData) return null;
+        const languageChanged = patch.display?.language !== undefined
+          && result.editable.display.language !== settingsData.editable.display.language;
+        // Saving updates this sub-page only; the page and the sign-in state are not reloaded.
+        settingsData = {...settingsData, editable: result.editable, display: result.display};
+        setDisplayTimeZone(result.display.timezone);
+        if (patch.display?.theme !== undefined || patch.display?.colors !== undefined) {
+          applyTheme(result.editable.display.theme);
+          savedTheme = document.documentElement.dataset.theme ?? "auto";
+          // Re-read the generated custom-colour stylesheet so a saved palette applies at once.
+          document.getElementById("custom-theme")?.setAttribute("href", `/theme.css?v=${Date.now()}`);
+        }
+        if (tab === "backup" && settingsExtras.schedule) {
+          const status = await optional(getScheduleStatus());
+          if (status) settingsExtras.schedule = {...settingsExtras.schedule, status};
+          if (state.view !== "settings" || state.settingsTab !== tab) return null;
+        }
+        renderSettings(languageChanged
+          ? "設定已安全寫入；介面語言會在重新整理頁面後套用。"
+          : "設定已安全寫入；後續新工作會使用更新後的值。日誌處理器變更會在重新啟動後完整套用。");
         return null;
       } catch (error) {
-        return error instanceof Error ? error.message : String(error);
+        return errorText(error);
       }
     }
 
@@ -590,11 +712,31 @@ namespace FanboxUI {
         ? event.target.closest<HTMLButtonElement>("button[data-view]") : null;
       const view = target?.dataset.view;
       if (!view || !["posts", "creators", "backup", "maintenance", "settings"].includes(view)) return;
-      state.q = "";
-      search.value = "";
-      setView(view as View);
+      void (async () => {
+        if (!await confirmLeaveSettings()) return;
+        state.q = "";
+        search.value = "";
+        if (view === "settings") history.pushState(null, "", settingsUrl(state.settingsTab));
+        setView(view as View);
+      })();
     });
     window.addEventListener("popstate", event => {
+      const hashTab = settingsTabFromHash();
+      if (state.view === "settings" && hashTab !== state.settingsTab) {
+        const current = state.settingsTab;
+        void confirmLeaveSettings().then(ok => {
+          // Declined: put the address back where the unsaved sub-page is.
+          if (!ok) { history.pushState(null, "", settingsUrl(current)); return; }
+          if (hashTab) openSettingsTab(hashTab);
+          else setView("posts");
+        });
+        return;
+      }
+      if (hashTab && state.view !== "settings") {
+        state.settingsTab = hashTab;
+        setView("settings");
+        return;
+      }
       if (state.view !== "creator" || state.creatorTab !== "posts" || !state.creatorId) return;
       const historyState = event.state as {fanboxCreatorId?: string; fanboxCreatorTag?: string} | null;
       if (historyState?.fanboxCreatorId && historyState.fanboxCreatorId !== state.creatorId) return;
@@ -624,7 +766,15 @@ namespace FanboxUI {
       if (closeDropdownsAndFocus()) return;
       if (state.current) void refreshView();
     });
-    setView("posts");
+    window.addEventListener("beforeunload", event => {
+      if (state.view === "settings" && settingsPage?.isDirty()) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    });
+    const startTab = settingsTabFromHash();
+    if (startTab) state.settingsTab = startTab;
+    setView(startTab ? "settings" : "posts");
   }
 }
 
