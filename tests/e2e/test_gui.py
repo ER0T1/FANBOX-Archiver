@@ -843,3 +843,57 @@ def test_dynamic_topbar_github_link_is_keyboard_reachable_offline_and_responsive
     assert all(url.startswith(base_url) for url in requests), [
         url for url in requests if not url.startswith(base_url)
     ]
+
+
+_BACKGROUND = "getComputedStyle(document.body).backgroundColor"
+_LIGHT_BG, _DARK_BG = "rgb(244, 246, 249)", "rgb(16, 20, 25)"
+
+
+def test_theme_setting_previews_saves_and_overrides_a_dark_system(page: Page, live_gui) -> None:
+    base_url, config_path, jobs = live_gui
+    jobs.hold_backup = False
+    page.emulate_media(color_scheme="dark")  # Windows set to dark
+    page.goto(base_url, wait_until="networkidle")
+    assert page.evaluate(_BACKGROUND) == _DARK_BG  # "follow system" by default
+
+    page.get_by_role("button", name="設定", exact=True).click()
+    save = page.get_by_role("button", name="儲存設定", exact=True)
+    expect(save).to_be_enabled(timeout=5_000)
+    page.get_by_role("combobox", name="主題", exact=True).click()
+    page.get_by_role("option", name="亮色", exact=True).click()
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    assert page.evaluate(_BACKGROUND) == _LIGHT_BG
+    # Leaving without saving drops the preview.
+    page.get_by_role("button", name="投稿", exact=True).click()
+    expect(page.locator("html")).to_have_attribute("data-theme", "auto")
+
+    page.get_by_role("button", name="設定", exact=True).click()
+    expect(save).to_be_enabled(timeout=5_000)
+    page.get_by_role("combobox", name="主題", exact=True).click()
+    page.get_by_role("option", name="亮色", exact=True).click()
+    save.click()
+    expect(page.get_by_text("設定已安全寫入", exact=False)).to_be_visible()
+    assert AppConfig.load(config_path).display.theme == "light"
+
+    page.reload(wait_until="networkidle")
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    page.get_by_role("button", name="投稿", exact=True).click()
+    assert page.evaluate(_BACKGROUND) == _LIGHT_BG
+    fee = page.locator(".fee-badge").first
+    if fee.count():
+        assert fee.evaluate("element => getComputedStyle(element).backgroundColor") != "rgb(64, 54, 33)"
+
+
+def test_static_site_defaults_to_the_exported_theme_but_keeps_its_own_toggle(page: Page, tmp_path: Path):
+    config, _ = _archive_fixture(tmp_path)
+    config.display.theme = "dark"
+    IndexBuilder(config).build()
+    page.emulate_media(color_scheme="light")
+    index_url = (config.storage.output_dir / "index.html").as_uri()
+    page.goto(index_url)
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    toggle = page.locator("[data-theme-toggle]").first
+    toggle.click()  # dark → light
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    page.reload()
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")

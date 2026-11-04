@@ -57,9 +57,19 @@ class BackupDefaultsConfig(BaseModel):
 
 
 class DisplayConfig(BaseModel):
-    """How times are shown and how schedule times are read: ``system`` or an IANA zone."""
+    """How times are shown and how schedule times are read: ``system`` or an IANA zone.
+
+    ``theme`` is the colour mode of the reader and desktop app, and the default of exported
+    static sites; ``system`` follows the operating system's light/dark setting.
+    """
 
     timezone: str = "system"
+    theme: Literal["system", "dark", "light"] = "system"
+
+    @property
+    def css_theme(self) -> str:
+        """The ``data-theme`` value shared with the static site (it calls ``system`` ``auto``)."""
+        return "auto" if self.theme == "system" else self.theme
 
     @field_validator("timezone")
     @classmethod

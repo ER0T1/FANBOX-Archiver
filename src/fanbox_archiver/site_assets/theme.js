@@ -6,6 +6,11 @@
   const ICONS = {auto:"◐", dark:"☾", light:"☀"};
   const LABELS = {auto:"跟隨系統", dark:"深色", light:"淺色"};
   const channel = "BroadcastChannel" in window ? new BroadcastChannel("fanbox-theme") : null;
+  // The theme chosen in the app's settings when this site was exported; a visitor's own choice wins.
+  const DEFAULT_THEME = (() => {
+    const value = document.querySelector('meta[name="fanbox-default-theme"]')?.getAttribute("content");
+    return THEMES.includes(value) ? value : "auto";
+  })();
 
   function urlTheme() {
     try {
@@ -21,16 +26,16 @@
     if (linked) return linked;
     try {
       const value = localStorage.getItem(STORAGE_KEY);
-      return THEMES.includes(value) ? value : "auto";
+      return THEMES.includes(value) ? value : DEFAULT_THEME;
     } catch (_) {
-      return "auto";
+      return DEFAULT_THEME;
     }
   }
 
   function updateLocation(theme) {
     try {
       const url = new URL(location.href);
-      if (theme === "auto") url.searchParams.delete("theme");
+      if (theme === DEFAULT_THEME) url.searchParams.delete("theme");
       else url.searchParams.set("theme", theme);
       history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {
@@ -44,7 +49,7 @@
         const url = new URL(link.getAttribute("href"), location.href);
         if (!url.pathname.toLowerCase().endsWith(".html")) return;
         if (url.protocol !== location.protocol || (location.protocol !== "file:" && url.origin !== location.origin)) return;
-        if (theme === "auto") url.searchParams.delete("theme");
+        if (theme === DEFAULT_THEME) url.searchParams.delete("theme");
         else url.searchParams.set("theme", theme);
         link.href = url.href;
       } catch (_) {
@@ -62,7 +67,7 @@
   }
 
   function apply(theme = storedTheme()) {
-    const value = THEMES.includes(theme) ? theme : "auto";
+    const value = THEMES.includes(theme) ? theme : DEFAULT_THEME;
     document.documentElement.dataset.theme = value;
     updateLocation(value);
     updateButtons(value);
@@ -99,7 +104,7 @@
   window.addEventListener("focus", () => apply());
   window.addEventListener("storage", event => {
     if (event.key === STORAGE_KEY || event.key === null) {
-      apply(THEMES.includes(event.newValue) ? event.newValue : "auto");
+      apply(THEMES.includes(event.newValue) ? event.newValue : DEFAULT_THEME);
     }
   });
   if (channel) {

@@ -43,6 +43,27 @@ namespace FanboxUI {
     return {node, read: () => choice === OTHER_TIMEZONE ? other.value.trim() : choice};
   }
 
+  const THEME_LABELS: Record<ThemeSetting, string> = {
+    system: "跟隨系統（Windows 深淺色）", dark: "暗色", light: "亮色",
+  };
+
+  /** Applies a theme to this page the same way the server does on load (the static site calls "system" "auto"). */
+  export function applyTheme(theme: ThemeSetting): void {
+    document.documentElement.dataset.theme = theme === "system" ? "auto" : theme;
+  }
+
+  function themeControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): ThemeSetting} {
+    let choice: ThemeSetting = data.editable.display.theme;
+    const select = customSelect({id: "display-theme", label: "主題", value: choice, disabled: blocked,
+      options: (Object.keys(THEME_LABELS) as ThemeSetting[]).map(value => ({value, label: THEME_LABELS[value]})),
+      onChange: next => { choice = next as ThemeSetting; applyTheme(choice); }});
+    const node = h("section", {class: "settings-section"}, h("h3", {}, "主題"),
+      h("p", {class: "settings-section-description"},
+        "選擇後立即預覽，儲存後套用到動態閱讀器、桌面程式，以及之後匯出的靜態網站（靜態網站上仍可自行切換）。"),
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "主題"), select)));
+    return {node, read: () => choice};
+  }
+
   export interface AboutSectionActions {
     onOpen: (target: FolderTarget) => Promise<string | null>;
   }
@@ -165,6 +186,7 @@ namespace FanboxUI {
     const scheduleSection = renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked,
       schedule.actions);
     const timezone = timezoneControl(data, blocked);
+    const theme = themeControl(data, blocked);
     const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
     const authBusy = auth.state === "checking";
@@ -200,7 +222,7 @@ namespace FanboxUI {
       }, backup_defaults: {
         dry_run: defaultDryRun.input.checked, include_profile: defaultProfile.input.checked,
         include_fancard: defaultFancard.input.checked,
-      }, schedule: scheduleSection.read(), display: {timezone: timezone.read()}, markdown: {
+      }, schedule: scheduleSection.read(), display: {timezone: timezone.read(), theme: theme.read()}, markdown: {
         enabled: markdown.input.checked, yaml_front_matter: frontMatter.input.checked,
         relative_image_paths: relativePaths.input.checked, preserve_original_order: preserveOrder.input.checked,
       }, logging: {level: logLevel.value, write_to_file: fileLogs.input.checked,
@@ -226,6 +248,7 @@ namespace FanboxUI {
       h("section", {class: "settings-section"}, h("h3", {}, "網路與失敗處理"),
         h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node))),
     h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "OUTPUT & LOGGING"), h("h2", {}, "輸出與紀錄"),
+      theme.node,
       timezone.node,
       h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
         h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),

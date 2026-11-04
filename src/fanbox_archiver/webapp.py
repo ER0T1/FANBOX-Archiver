@@ -124,6 +124,7 @@ class ScheduleConfigPatch(BaseModel):
 class DisplayConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timezone: str | None = Field(None, max_length=64)
+    theme: Literal["system", "dark", "light"] | None = None
 
 
 class LoggingConfigPatch(BaseModel):
@@ -218,8 +219,9 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     async def home():
-        # The effective zone is read per request so a saved change applies on reload.
-        return HTMLResponse(home_html.replace("__FANBOX_TIMEZONE__", display_zone().name))
+        # Zone and theme are read per request so a saved change applies on reload, with no flash.
+        return HTMLResponse(home_html.replace("__FANBOX_TIMEZONE__", display_zone().name)
+                            .replace("__FANBOX_THEME__", app.state.config.display.css_theme))
 
     @app.get("/api/health")
     async def health():

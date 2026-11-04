@@ -531,3 +531,25 @@ async def test_open_folder_accepts_only_fixed_targets_with_token(tmp_path: Path,
 
     assert response.json() == {"opened": "archive"}
     assert opened == [config.storage.output_dir.resolve()]
+
+
+@pytest.mark.anyio
+async def test_theme_setting_is_saved_and_rendered_into_the_page(tmp_path: Path):
+    config, _ = dynamic_archive(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    type(config).save_editable(config_path, config, {})
+    app = create_app(config, config_path=config_path)
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        assert '<html lang="zh-Hant" data-theme="auto">' in (await client.get("/")).text
+        assert (await client.get("/api/config")).json()["editable"]["display"]["theme"] == "system"
+
+        invalid = await client.patch("/api/config", headers=token, json={"display": {"theme": "sepia"}})
+        assert invalid.status_code == 422
+        saved = await client.patch("/api/config", headers=token, json={"display": {"theme": "dark"}})
+        assert saved.status_code == 200
+        assert saved.json()["editable"]["display"] == {"timezone": config.display.timezone, "theme": "dark"}
+        assert '<html lang="zh-Hant" data-theme="dark">' in (await client.get("/")).text
+
+    assert type(config).load(config_path).display.theme == "dark"

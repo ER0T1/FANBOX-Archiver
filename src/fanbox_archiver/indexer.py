@@ -21,7 +21,7 @@ from .storage import BackupStorage
 from .timestamps import display_zone, format_display
 
 
-TEMPLATE_VERSION = 16
+TEMPLATE_VERSION = 17
 GITHUB_REPOSITORY_URL = "https://github.com/ER0T1/FANBOX-Archiver"
 # Octicons mark-github (MIT), inlined so reader pages never load a remote icon.
 GITHUB_LINK_HTML = (
@@ -173,12 +173,13 @@ class IndexBuilder:
                 "schema": 1,
                 "template_version": TEMPLATE_VERSION,
                 "timezone": display_zone().name,
+                "theme": self.config.display.css_theme,
                 "pages": state_pages,
                 "hashes": page_hashes,
             })
             self._validate_staging(staging, state_pages)
             BackupStorage.publish_version(staging, current_site)
-            BackupStorage.atomic_write_text(self.root / "index.html", self._index_html(creators, posts))
+            BackupStorage.atomic_write_text(self.root / "index.html", self._index_html(creators, posts, self.config.display.css_theme))
             return IndexBuildResult(rendered, reused, warnings, self.root / "index.html")
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
@@ -424,6 +425,8 @@ class IndexBuilder:
             return False
         if old_state.get("timezone") != display_zone().name:
             return False
+        if old_state.get("theme", "auto") != self.config.display.css_theme:
+            return False
         if (old_state.get("pages") or {}).get(relative) != fingerprint:
             return False
         source = confined_path(current, Path(relative))
@@ -494,6 +497,7 @@ class IndexBuilder:
         source_url = html.escape(post.url, quote=True) if self._safe_https(post.url) else "#"
         body = "".join(blocks) or '<p class="empty">此版本沒有可顯示的正文。</p>'
         return self._reader_shell(
+            default_theme=self.config.display.css_theme,
             title=post.title,
             eyebrow=f"{post.creator_name} · Post {post.post_id}",
             metadata=(f"發布 {self._date(post.published_at)} · 更新 {self._date(post.updated_at)} · "
@@ -558,6 +562,7 @@ class IndexBuilder:
         nav = self._version_nav(all_versions, number, output, "profiles", profile.creator_id)
         source_url = html.escape(profile.fanbox_url, quote=True) if self._safe_https(profile.fanbox_url) else "#"
         return self._reader_shell(
+            default_theme=self.config.display.css_theme,
             title=profile.name,
             eyebrow=f"{profile.creator_id} · Creator Profile",
             metadata=f"保存 {self._date(version['captured_at'])} · v{number:04d}",
@@ -702,6 +707,7 @@ class IndexBuilder:
         <section><h2>支援月份</h2><ul>{months}</ul></section>
         """
         return self._reader_shell(
+            default_theme=self.config.display.css_theme,
             title=f"Fan Card — {row['target_month']}",
             eyebrow=f"{user.get('name') or row['creator_id']} · Fan Card",
             metadata=f"{row['target_month']} · v{number:04d}", body=content,
@@ -724,10 +730,11 @@ class IndexBuilder:
 
     @staticmethod
     def _reader_shell(*, title: str, eyebrow: str, metadata: str, body: str,
-                      navigation: str, actions: str, asset_prefix: str) -> str:
+                      navigation: str, actions: str, asset_prefix: str, default_theme: str) -> str:
         return f"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
+<meta name="fanbox-default-theme" content="{html.escape(default_theme, quote=True)}">
 <link rel="icon" href="data:,"><title>{html.escape(title)} · FANBOX Archive</title><script src="{asset_prefix}/theme.js"></script><link rel="stylesheet" href="{asset_prefix}/app.css"><link rel="stylesheet" href="{asset_prefix}/design-tokens.css"></head>
 <body class="reader-page"><header class="reader-header"><a href="{asset_prefix}/../../index.html">← 回到索引</a><div class="reader-header-actions"><span>私人本機備份</span>{GITHUB_LINK_HTML}<button class="icon-button" type="button" data-theme-toggle>◐</button></div></header>
 <main class="reader"><p class="eyebrow">{html.escape(eyebrow)}</p><h1>{html.escape(title)}</h1>
@@ -735,7 +742,7 @@ class IndexBuilder:
 <article>{body}</article><footer>此頁為本機備份，不代表遠端目前狀態。</footer></main></body></html>"""
 
     @staticmethod
-    def _index_html(creators: list[dict], posts: list[dict]) -> str:
+    def _index_html(creators: list[dict], posts: list[dict], default_theme: str) -> str:
         fallback = "".join(
             f'<li><a href="{html.escape(str(item["latest_path"] or "#"), quote=True)}">{html.escape(item["title"])}</a> — {html.escape(item["creator_id"])}</li>'
             for item in posts[:100]
@@ -743,7 +750,7 @@ class IndexBuilder:
         return f"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; img-src 'self' data: file:; style-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; connect-src 'none'; form-action 'none'">
-<meta name="color-scheme" content="light dark"><title>FANBOX Archive</title>
+<meta name="color-scheme" content="light dark"><meta name="fanbox-default-theme" content="{html.escape(default_theme, quote=True)}"><title>FANBOX Archive</title>
 <link rel="icon" href="data:,"><script src="_site/assets/theme.js"></script><link rel="stylesheet" href="_site/assets/app.css"><link rel="stylesheet" href="_site/assets/design-tokens.css"></head><body>
 <div id="app"><header class="topbar"><strong>FANBOX Archive</strong><span>正在載入本機索引…</span></header>
 <noscript><main class="noscript"><h1>本機備份</h1><p>JavaScript 已停用，以下顯示最近文章。</p><ul>{fallback}</ul></main></noscript></div>

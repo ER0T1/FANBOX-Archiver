@@ -43,6 +43,7 @@ schedule:
   power: no_wake_battery_ok
 display:
   timezone: system
+  theme: system
 logging:
   level: INFO
   write_to_file: true

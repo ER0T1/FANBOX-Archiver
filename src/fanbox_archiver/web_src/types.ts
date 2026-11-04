@@ -337,9 +337,12 @@ namespace FanboxUI {
     next_runs: string[];
   }
 
+  export type ThemeSetting = "system" | "dark" | "light";
+
   export interface DisplaySettings {
     /** "system" or an IANA zone name. */
     timezone: string;
+    theme: ThemeSetting;
   }
 
   export interface DisplayInfo {

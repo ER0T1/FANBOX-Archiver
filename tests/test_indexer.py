@@ -221,6 +221,22 @@ def test_index_reuses_pages_and_check_reports_missing_page(tmp_path: Path):
     assert any("v0001.html" in issue for issue in builder.check())
 
 
+def test_index_uses_the_configured_theme_as_default_and_rebuilds_when_it_changes(tmp_path: Path):
+    config, _ = archive_fixture(tmp_path)
+    root = config.storage.output_dir
+    IndexBuilder(config).build()
+    meta = '<meta name="fanbox-default-theme" content="{}">'
+    assert meta.format("auto") in (root / "index.html").read_text(encoding="utf-8")
+    assert meta.format("auto") in (root / "_site/posts/123/v0001.html").read_text(encoding="utf-8")
+
+    config.display.theme = "dark"
+    result = IndexBuilder(config).build()
+
+    assert (result.rendered, result.reused) == (5, 0)
+    assert meta.format("dark") in (root / "index.html").read_text(encoding="utf-8")
+    assert meta.format("dark") in (root / "_site/posts/123/v0001.html").read_text(encoding="utf-8")
+
+
 def test_index_cli_build_and_check(tmp_path: Path):
     config, _ = archive_fixture(tmp_path)
     config_path = tmp_path / "config.yaml"

@@ -32,8 +32,12 @@ namespace FanboxUI {
       setSearchState(search, view, state.creatorTab);
     }
 
+    // The saved theme, rendered by the server; an unsaved settings preview never outlives the page.
+    let savedTheme = document.documentElement.dataset.theme ?? "auto";
+
     function setView(view: View): void {
       if (jobTimer !== undefined) clearTimeout(jobTimer);
+      document.documentElement.dataset.theme = savedTheme;
       state.view = view;
       state.current = null;
       state.page = 1;
@@ -442,6 +446,9 @@ namespace FanboxUI {
         ]);
         updateActiveJob(jobData);
         setDisplayTimeZone(data.display.timezone);
+        // A preview that was never saved is undone whenever the page reloads its settings.
+        applyTheme(data.editable.display.theme);
+        savedTheme = document.documentElement.dataset.theme ?? "auto";
         app.replaceChildren(renderSettingsPage(data, auth, message, state.activeJob,
           patch => saveSettingsForm(patch),
           () => void loadSettings("", false),
