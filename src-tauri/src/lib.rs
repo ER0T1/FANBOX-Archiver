@@ -1,3 +1,5 @@
+mod i18n;
+
 use std::{
     env, fs,
     net::{TcpListener, TcpStream},
@@ -160,11 +162,11 @@ fn clear_saved_config(directory: &Path) -> Result<(), String> {
 }
 
 fn show_launch_error(window: &tauri::WebviewWindow, message: &str) {
-    let message = serde_json::to_string(message)
-        .unwrap_or_else(|_| "\"本機伺服器未在 20 秒內回應，請查看應用程式日誌。\"".to_owned());
+    // The page (desktop.ts) draws the recovery screen in the desktop language.
+    let message = serde_json::to_string(message).unwrap_or_else(|_| "\"\"".to_owned());
     let _ = window.show();
     let _ = window.eval(format!(
-        "document.body.className='desktop-bootstrap';document.body.innerHTML='<main class=\"desktop-onboarding desktop-error\"><section class=\"desktop-intro\"><p class=\"eyebrow\">STARTUP RECOVERY</p><h1>本機伺服器無法啟動</h1><p>設定檔可能已移動、內容無效，或封存位置目前無法存取。</p></section><p id=\"launch-error\" class=\"desktop-status error\"></p><div class=\"desktop-error-actions\"><button id=\"retry-selection\" type=\"button\" class=\"primary\">重新選擇封存</button><small>既有設定檔、資料庫與投稿不會被刪除。</small></div></main>';document.getElementById('launch-error').textContent={message};document.getElementById('retry-selection').addEventListener('click',async function(){{this.disabled=true;this.textContent='正在返回選擇頁…';try{{await window.__TAURI__.core.invoke('reset_desktop_selection')}}catch(error){{this.disabled=false;this.textContent='重新選擇封存';document.getElementById('launch-error').textContent=String(error)}}}});"
+        "window.FanboxDesktop&&window.FanboxDesktop.showLaunchError({message});"
     ));
 }
 
@@ -172,7 +174,7 @@ fn launch_sidecar(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Strin
     let state = app.state::<DesktopState>();
     let mut process = state.process.lock().map_err(|error| error.to_string())?;
     if process.is_some() {
-        return Err("本機伺服器已經在執行。".to_owned());
+        return Err(i18n::text("desktop.server_running"));
     }
 
     let port = reserve_port().map_err(|error| error.to_string())?;
@@ -220,7 +222,7 @@ fn launch_sidecar(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Strin
 
     let window = app
         .get_webview_window("main")
-        .ok_or_else(|| "找不到主視窗".to_owned())?;
+        .ok_or_else(|| i18n::text("desktop.window_missing"))?;
     let url = format!("http://127.0.0.1:{port}/");
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -234,7 +236,7 @@ fn launch_sidecar(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Strin
             }
             thread::sleep(Duration::from_millis(100));
         }
-        show_launch_error(&window, "本機伺服器未在 20 秒內回應，請查看應用程式日誌。");
+        show_launch_error(&window, &i18n::text("desktop.server_timeout"));
     });
 
     Ok(DesktopLaunch {
@@ -252,13 +254,13 @@ fn save_and_launch(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Stri
 #[tauri::command]
 fn choose_existing_config(app: AppHandle) -> Result<Option<DesktopLaunch>, String> {
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("YAML 設定檔", &["yaml", "yml"])
+        .add_filter(i18n::text("desktop.dialog_yaml"), &["yaml", "yml"])
         .pick_file()
     else {
         return Ok(None);
     };
     if !path.is_file() {
-        return Err("選擇的設定檔不存在。".to_owned());
+        return Err(i18n::text("desktop.config_missing"));
     }
     save_and_launch(&app, &path).map(Some)
 }
@@ -291,6 +293,12 @@ fn use_default_config(app: AppHandle) -> Result<Option<DesktopLaunch>, String> {
     }
     drop(state);
     save_and_launch(&app, &config_path).map(Some)
+}
+
+/// The startup page's language and messages (it loads before the local server runs).
+#[tauri::command]
+fn desktop_messages() -> i18n::DesktopMessages {
+    i18n::current().clone()
 }
 
 #[tauri::command]
@@ -338,7 +346,7 @@ fn show_archive_selection(app: &AppHandle) -> Result<(), String> {
 
     let window = app
         .get_webview_window("main")
-        .ok_or_else(|| "找不到主視窗".to_owned())?;
+        .ok_or_else(|| i18n::text("desktop.window_missing"))?;
     window
         .navigate(onboarding_url)
         .map_err(|error| error.to_string())?;
@@ -350,8 +358,8 @@ pub fn run() {
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .menu(|app| {
-            let archive_menu = SubmenuBuilder::new(app, "封存")
-                .text(CHANGE_ARCHIVE_MENU_ID, "變更封存位置…")
+            let archive_menu = SubmenuBuilder::new(app, i18n::text("desktop.menu_archive"))
+                .text(CHANGE_ARCHIVE_MENU_ID, i18n::text("desktop.menu_change_archive"))
                 .build()?;
             MenuBuilder::new(app).item(&archive_menu).build()
         })
@@ -366,7 +374,8 @@ pub fn run() {
             choose_existing_config,
             choose_archive_folder,
             use_default_config,
-            reset_desktop_selection
+            reset_desktop_selection,
+            desktop_messages
         ])
         .setup(|app| {
             app.handle().plugin(
@@ -381,7 +390,9 @@ pub fn run() {
                 return Ok(());
             }
 
-            let window = app.get_webview_window("main").ok_or("找不到主視窗")?;
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| i18n::text("desktop.window_missing"))?;
             let onboarding_url = window.url()?;
             let directory = desktop_state_directory(app)?;
             let config = automatic_config(&directory)?;

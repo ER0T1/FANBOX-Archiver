@@ -2670,37 +2670,87 @@ if (typeof document !== "undefined" && document.getElementById("app"))
     FanboxUI.startApp();
 var FanboxUI;
 (function (FanboxUI) {
-    function startDesktopOnboarding() {
+    let desktopMessages = {};
+    function desktopText(key, params = {}) {
+        const message = desktopMessages[key];
+        if (message === undefined)
+            return key;
+        return message.replace(/\{([a-z_][a-z0-9_]*)\}/g, (match, name) => params[name] ?? match);
+    }
+    function applyDesktopMessages(data) {
+        if (data) {
+            desktopMessages = data.messages;
+            document.documentElement.lang = data.locale;
+            for (const element of document.querySelectorAll("[data-desktop-i18n]")) {
+                const key = element.dataset.desktopI18n;
+                if (key && desktopMessages[key] !== undefined)
+                    element.textContent = desktopMessages[key];
+            }
+            for (const element of document.querySelectorAll("[data-desktop-i18n-label]")) {
+                const key = element.dataset.desktopI18nLabel;
+                if (key && desktopMessages[key] !== undefined)
+                    element.setAttribute("aria-label", desktopMessages[key]);
+            }
+        }
+        document.body.classList.add("desktop-ready");
+    }
+    function showLaunchError(message, bridge) {
+        document.body.className = "desktop-bootstrap desktop-ready";
+        const retry = FanboxUI.h("button", { id: "retry-selection", type: "button", class: "primary" }, desktopText("desktop.error_retry"));
+        const reason = FanboxUI.h("p", { id: "launch-error", class: "desktop-status error" }, message);
+        document.body.replaceChildren(FanboxUI.h("main", { class: "desktop-onboarding desktop-error" }, FanboxUI.h("section", { class: "desktop-intro" }, FanboxUI.h("p", { class: "eyebrow" }, "STARTUP RECOVERY"), FanboxUI.h("h1", {}, desktopText("desktop.error_title")), FanboxUI.h("p", {}, desktopText("desktop.error_body"))), reason, FanboxUI.h("div", { class: "desktop-error-actions" }, retry, FanboxUI.h("small", {}, desktopText("desktop.error_kept")))));
+        retry.addEventListener("click", async () => {
+            retry.disabled = true;
+            retry.textContent = desktopText("desktop.error_returning");
+            try {
+                await bridge.core.invoke("reset_desktop_selection");
+            }
+            catch (error) {
+                retry.disabled = false;
+                retry.textContent = desktopText("desktop.error_retry");
+                reason.textContent = String(error);
+            }
+        });
+    }
+    async function startDesktopOnboarding() {
         const root = document.getElementById("desktop-onboarding");
         const status = document.getElementById("desktop-status");
         if (!(root instanceof HTMLElement) || !(status instanceof HTMLElement))
             return;
-        const bridge = window.__TAURI__;
+        const desktopWindow = window;
+        const bridge = desktopWindow.__TAURI__;
         if (!bridge) {
-            status.textContent = "此頁面必須由 FANBOX Archiver 桌面程式開啟。";
+            applyDesktopMessages(null);
+            status.textContent = desktopText("desktop.needs_app") === "desktop.needs_app"
+                ? "FANBOX Archiver desktop app required." : desktopText("desktop.needs_app");
             status.classList.add("error");
             return;
         }
         const statusElement = status;
         const tauriCore = bridge.core;
+        desktopWindow.FanboxDesktop = { showLaunchError: message => showLaunchError(message, bridge) };
+        try {
+            applyDesktopMessages(await tauriCore.invoke("desktop_messages"));
+        }
+        catch {
+            applyDesktopMessages(null);
+        }
         const buttons = [...root.querySelectorAll("button[data-command]")];
         async function launch(command) {
             for (const button of buttons)
                 button.disabled = true;
-            statusElement.textContent = command === "choose_existing_config"
-                ? "請選擇既有的 config.yaml…"
-                : command === "choose_archive_folder" ? "請選擇既有的 FANBOX 封存資料夾…"
-                    : "正在建立新的本機資料…";
+            statusElement.textContent = desktopText(command === "choose_existing_config" ? "desktop.picking_config"
+                : command === "choose_archive_folder" ? "desktop.picking_folder" : "desktop.creating");
             statusElement.classList.remove("error");
             try {
                 const result = await tauriCore.invoke(command);
                 if (result === null) {
-                    statusElement.textContent = "未選擇任何項目，你可以改用其他方式繼續。";
+                    statusElement.textContent = desktopText("desktop.nothing_chosen");
                     for (const button of buttons)
                         button.disabled = false;
                     return;
                 }
-                statusElement.textContent = `正在啟動本機伺服器：${result.config_path}`;
+                statusElement.textContent = desktopText("desktop.starting", { path: result.config_path });
             }
             catch (error) {
                 statusElement.textContent = error instanceof Error ? error.message : String(error);
@@ -2717,6 +2767,6 @@ var FanboxUI;
         });
     }
     if (typeof document !== "undefined" && document.getElementById("desktop-onboarding")) {
-        startDesktopOnboarding();
+        void startDesktopOnboarding();
     }
 })(FanboxUI || (FanboxUI = {}));

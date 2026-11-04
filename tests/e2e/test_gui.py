@@ -1450,3 +1450,39 @@ def test_each_language_shows_its_catalog_and_fits_narrow_screens(page: Page, liv
         page.locator(f'[data-settings-tab="{tab}"]').click()
         check(f"settings {tab}")
     assert leftovers == {name: [] for name in leftovers}, leftovers
+
+
+def test_desktop_startup_page_follows_the_shell_language(page: Page, live_gui) -> None:
+    base_url, _config_path, _jobs = live_gui
+    english = json.loads((Path(__file__).parents[2] / "src" / "fanbox_archiver" / "locales" / "en.json")
+                         .read_text(encoding="utf-8"))
+    messages = {key: value for key, value in english.items() if key.startswith("desktop.")}
+    # A stand-in for the Tauri bridge: the shell answers desktop_messages in English.
+    page.add_init_script(f"""
+      window.__invoked = [];
+      window.__TAURI__ = {{core: {{invoke: async (command) => {{
+        window.__invoked.push(command);
+        if (command === 'desktop_messages') return {{locale: 'en', messages: {json.dumps(messages)}}};
+        if (command === 'choose_existing_config') return null;
+        return null;
+      }}}}}};
+    """)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{base_url}/assets/desktop.html", wait_until="networkidle")
+    expect(page.locator("body")).to_have_class(re.compile(r"desktop-ready"))
+    expect(page.locator("html")).to_have_attribute("lang", "en")
+    expect(page).to_have_title("Set Up FANBOX Archiver")
+    expect(page.locator("h1")).to_have_text("Choose Your Local Archive")
+    expect(page.locator(".desktop-options")).to_have_attribute("aria-label", "First Launch Options")
+    cjk = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
+    assert not cjk.search(page.locator("body").inner_text())
+    assert page.evaluate(_NO_PAGE_OVERFLOW)
+    page.locator('[data-command="choose_existing_config"]').click()
+    expect(page.locator("#desktop-status")).to_have_text("Nothing was selected; you can continue another way.")
+    page.evaluate("window.FanboxDesktop.showLaunchError('Timed out')")
+    expect(page.locator("h1")).to_have_text("The Local Server Couldn't Start")
+    expect(page.locator("#launch-error")).to_have_text("Timed out")
+    page.locator("#retry-selection").click()
+    expect(page.locator("#retry-selection")).to_have_text("Returning to the selection page…")
+    assert page.evaluate("window.__invoked") == ["desktop_messages", "choose_existing_config", "reset_desktop_selection"]
+    assert not cjk.search(page.locator("body").inner_text())

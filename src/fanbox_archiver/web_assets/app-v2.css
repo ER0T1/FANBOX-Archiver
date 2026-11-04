@@ -428,6 +428,8 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .desktop-option-icon { display:grid; place-items:center; width:2.75rem; height:2.75rem; color:var(--accent); background:var(--accent-soft); border-radius:12px; font-size:.78rem; font-weight:900; letter-spacing:.08em; }
 .desktop-status { min-height:3rem; margin:0; padding:.85rem 1rem; overflow-wrap:anywhere; color:var(--blue); background:color-mix(in srgb,var(--blue) 8%,var(--surface)); border:1px solid color-mix(in srgb,var(--blue) 28%,var(--line)); border-radius:12px; }.desktop-status.error { color:var(--red); border-color:color-mix(in srgb,var(--red) 35%,var(--line)); }
 .desktop-onboarding footer { color:var(--muted); font-size:.8rem; text-align:center; }
+/* The Chinese base text stays hidden until desktop.ts has applied the shell's language. */
+.desktop-bootstrap:not(.desktop-ready) > main { visibility:hidden; }
 .desktop-error { width:min(720px,calc(100% - 2rem)); }.desktop-error-actions { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }.desktop-error-actions button { min-height:44px; padding:.7rem 1rem; border:0; border-radius:10px; cursor:pointer; }.desktop-error-actions small { color:var(--muted); }
 
 /* Dark-only component tweaks follow the effective theme; design-tokens.css owns the colours. */
