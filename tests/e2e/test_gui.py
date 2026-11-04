@@ -767,3 +767,34 @@ def test_background_scheduled_backup_locks_the_app_without_a_stop_button(page: P
     expect(page.get_by_text("（背景執行中）", exact=False)).to_be_visible()
     expect(page.get_by_role("button", name="儲存設定", exact=True)).to_be_disabled()
     expect(page.get_by_role("checkbox", name="啟用自動備份")).to_be_disabled()
+
+
+def test_settings_about_section_shows_versions_and_opens_fixed_folders(
+    page: Page, live_gui, monkeypatch,
+) -> None:
+    import fanbox_archiver.diagnostics as diagnostics
+    from fanbox_archiver import __version__
+
+    opened: list[Path] = []
+    monkeypatch.setattr(diagnostics, "open_folder", opened.append)
+    monkeypatch.setattr(diagnostics, "can_open_folders", lambda: True)
+    base_url, _config_path, _jobs = live_gui
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=base_url)
+    page.goto(base_url, wait_until="networkidle")
+    page.get_by_role("button", name="設定", exact=True).click()
+
+    about = page.locator(".about-card")
+    expect(about.get_by_role("heading", name="關於與診斷")).to_be_visible()
+    expect(about).to_contain_text(__version__)
+    expect(about).to_contain_text("瀏覽器版")
+    expect(about.get_by_role("button", name="開啟桌面日誌資料夾")).to_have_count(0)
+
+    about.get_by_role("button", name="開啟封存資料夾").click()
+    expect(about.get_by_role("status")).to_contain_text("已開啟")
+    assert len(opened) == 1 and opened[0].name
+
+    about.get_by_role("button", name="複製診斷資訊").click()
+    expect(about.get_by_role("status")).to_contain_text("診斷資訊已複製")
+    copied = page.evaluate("navigator.clipboard.readText()")
+    assert f"程式版本：{__version__}" in copied
+    assert "token" not in copied.casefold() and "cookie" not in copied.casefold()

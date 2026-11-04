@@ -369,6 +369,22 @@ namespace FanboxUI {
     timezones: {common: string[]; all: string[]};
   }
 
+  export type FolderTarget = "archive" | "archive_logs" | "desktop_logs";
+
+  export interface DiagnosticsInfo {
+    app_version: string;
+    mode: "desktop" | "browser";
+    desktop_version: string | null;
+    python_version: string;
+    os: string;
+    schema: {database: number | null; supported: number};
+    timezone: string;
+    paths: {config: string | null; archive: string; database: string; archive_logs: string; desktop_logs: string | null};
+    folders: Record<FolderTarget, boolean>;
+    can_open_folders: boolean;
+    text: string;
+  }
+
   export type AuthState = "checking" | "locked" | "authenticated" | "signed_out" | "expired" | "error";
 
   export interface AuthJob {

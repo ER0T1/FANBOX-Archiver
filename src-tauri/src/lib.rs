@@ -12,9 +12,10 @@ use tauri::{
     AppHandle, Manager, RunEvent, Url,
     menu::{MenuBuilder, SubmenuBuilder},
 };
+use tauri_plugin_log::RotationStrategy;
 use tauri_plugin_shell::{
     ShellExt,
-    process::{CommandChild, CommandEvent},
+    process::{Command, CommandChild, CommandEvent},
 };
 
 const STATE_FILE: &str = "desktop-state.json";
@@ -25,6 +26,12 @@ const CHANGE_ARCHIVE_MENU_ID: &str = "change-archive";
 const SCHEDULED_BACKUP_FLAG: &str = "--scheduled-backup";
 /// Lets the sidecar register scheduled tasks that point back at this executable.
 const DESKTOP_EXE_ENV: &str = "FANBOX_ARCHIVER_DESKTOP_EXE";
+/// Shown in the sidecar's About & diagnostics section.
+const DESKTOP_VERSION_ENV: &str = "FANBOX_ARCHIVER_DESKTOP_VERSION";
+const DESKTOP_LOG_DIR_ENV: &str = "FANBOX_ARCHIVER_DESKTOP_LOG_DIR";
+/// Desktop shell log: at most this many bytes per file, keeping the newest few files.
+const LOG_MAX_FILE_BYTES: u128 = 1_000_000;
+const LOG_KEEP_FILES: usize = 5;
 
 struct DesktopState {
     directory: PathBuf,
@@ -57,6 +64,18 @@ fn desktop_executable() -> Option<String> {
         .map(|path| path.to_string_lossy().into_owned())
 }
 
+/// Environment every sidecar process gets from the desktop shell.
+fn with_desktop_env(app: &AppHandle, mut command: Command) -> Command {
+    if let Some(executable) = desktop_executable() {
+        command = command.env(DESKTOP_EXE_ENV, executable);
+    }
+    command = command.env(DESKTOP_VERSION_ENV, app.package_info().version.to_string());
+    if let Ok(log_dir) = app.path().app_log_dir() {
+        command = command.env(DESKTOP_LOG_DIR_ENV, log_dir.to_string_lossy().into_owned());
+    }
+    command
+}
+
 /// Run `schedule-run` hidden and exit with its code; no window is ever shown.
 fn run_scheduled_backup(app: &AppHandle, config: &Path) -> Result<(), String> {
     let mut command = app
@@ -68,9 +87,7 @@ fn run_scheduled_backup(app: &AppHandle, config: &Path) -> Result<(), String> {
             "--config".to_owned(),
             config.to_string_lossy().into_owned(),
         ]);
-    if let Some(executable) = desktop_executable() {
-        command = command.env(DESKTOP_EXE_ENV, executable);
-    }
+    command = with_desktop_env(app, command);
     let (mut events, _child) = command.spawn().map_err(|error| error.to_string())?;
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -173,9 +190,7 @@ fn launch_sidecar(app: &AppHandle, config: &Path) -> Result<DesktopLaunch, Strin
         .sidecar("fanbox-archiver-sidecar")
         .map_err(|error| error.to_string())?
         .args(arguments);
-    if let Some(executable) = desktop_executable() {
-        command = command.env(DESKTOP_EXE_ENV, executable);
-    }
+    command = with_desktop_env(app, command);
     let (mut events, child) = command.spawn().map_err(|error| error.to_string())?;
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
@@ -333,16 +348,16 @@ pub fn run() {
             reset_desktop_selection
         ])
         .setup(|app| {
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(LOG_MAX_FILE_BYTES)
+                    .rotation_strategy(RotationStrategy::KeepSome(LOG_KEEP_FILES))
+                    .build(),
+            )?;
             if let Some(config) = scheduled_backup_config(env::args()) {
                 run_scheduled_backup(app.handle(), &config)?;
                 return Ok(());
-            }
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
             }
 
             let window = app.get_webview_window("main").ok_or("找不到主視窗")?;

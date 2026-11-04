@@ -371,6 +371,18 @@ var FanboxUI;
         });
     }
     FanboxUI.logoutAuth = logoutAuth;
+    function getDiagnostics(sessionToken) {
+        return requestJson("/api/diagnostics", { headers: { "X-Fanbox-Token": sessionToken } });
+    }
+    FanboxUI.getDiagnostics = getDiagnostics;
+    function openDiagnosticsFolder(target, sessionToken) {
+        return requestJson("/api/diagnostics/open", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Fanbox-Token": sessionToken },
+            body: JSON.stringify({ target }),
+        });
+    }
+    FanboxUI.openDiagnosticsFolder = openDiagnosticsFolder;
     function getJobs(params = new URLSearchParams({ page_size: "1" })) {
         return requestJson(`/api/jobs?${params}`);
     }
@@ -722,7 +734,66 @@ var FanboxUI;
         const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, "時區"), FanboxUI.h("p", { class: "settings-section-description" }, `所有時間以 24 小時制、依此時區顯示，自動備份的時間也依此解讀；切換不會改寫已保存的資料。目前生效：${data.display.timezone}`), data.display.notice ? FanboxUI.h("p", { class: "notice" }, data.display.notice) : null, FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, "時區"), select), otherField));
         return { node, read: () => choice === OTHER_TIMEZONE ? other.value.trim() : choice };
     }
-    function renderSettingsPage(data, auth, message, activeJob, onSave, onAuthRefresh, onAuthLogin, onAuthCancel, onAuthLogout, schedule) {
+    async function copyText(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+        catch {
+            const area = FanboxUI.h("textarea", { readonly: true, class: "visually-hidden" });
+            area.value = text;
+            document.body.append(area);
+            area.select();
+            const copied = document.execCommand("copy");
+            area.remove();
+            return copied;
+        }
+    }
+    function renderAboutSection(info, actions) {
+        const card = FanboxUI.h("section", { class: "settings-card about-card" }, FanboxUI.h("p", { class: "eyebrow" }, "ABOUT & DIAGNOSTICS"), FanboxUI.h("h2", {}, "關於與診斷"));
+        if (!info) {
+            card.append(FanboxUI.h("p", { class: "notice" }, "無法讀取診斷資訊；重新整理後再試一次。"));
+            return card;
+        }
+        const feedback = FanboxUI.h("p", { class: "about-feedback", role: "status", "aria-live": "polite" });
+        const show = (text, error = false) => {
+            feedback.textContent = text;
+            feedback.classList.toggle("settings-error", error);
+        };
+        const schema = info.schema.database === null ? `無法讀取（程式支援 ${info.schema.supported}）`
+            : `${info.schema.database}（程式支援 ${info.schema.supported}）`;
+        const rows = [
+            ["程式版本", info.app_version],
+            ["執行方式", info.mode === "desktop" ? `桌面版 ${info.desktop_version ?? "（版本不明）"}` : "瀏覽器版"],
+            ["資料庫 schema", schema],
+            ["Python", info.python_version],
+            ["作業系統", info.os],
+            ["時區", info.timezone],
+            ["設定檔", info.paths.config ?? "未指定"],
+            ["封存目錄", info.paths.archive],
+            ["資料庫", info.paths.database],
+            ["封存日誌", info.paths.archive_logs],
+        ];
+        if (info.paths.desktop_logs)
+            rows.push(["桌面日誌", info.paths.desktop_logs]);
+        const folderButton = (target, label, missing) => {
+            const available = info.can_open_folders && info.folders[target];
+            return FanboxUI.h("button", { type: "button", disabled: !available,
+                title: !info.can_open_folders ? "此系統無法開啟資料夾" : info.folders[target] ? "" : missing,
+                onclick: async (event) => {
+                    const button = event.currentTarget;
+                    button.disabled = true;
+                    const error = await actions.onOpen(target);
+                    button.disabled = false;
+                    show(error ? `無法開啟資料夾：${error}` : `已開啟「${label.replace("開啟", "")}」。`, Boolean(error));
+                } }, label);
+        };
+        card.append(FanboxUI.h("p", { class: "settings-section-description" }, "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"), FanboxUI.h("div", { class: "settings-paths about-facts" }, rows.map(([label, value]) => FanboxUI.h("div", {}, FanboxUI.h("span", {}, label), FanboxUI.h("code", {}, value)))), FanboxUI.h("div", { class: "account-actions about-actions" }, folderButton("archive", "開啟封存資料夾", "封存資料夾不存在"), folderButton("archive_logs", "開啟封存日誌資料夾", "尚未產生日誌（需啟用「寫入檔案日誌」）"), info.paths.desktop_logs ? folderButton("desktop_logs", "開啟桌面日誌資料夾", "尚未產生桌面日誌") : null, FanboxUI.h("button", { type: "button", onclick: async () => {
+                show(await copyText(info.text) ? "診斷資訊已複製到剪貼簿。" : "無法複製；請手動選取上方文字。", false);
+            } }, "複製診斷資訊")), feedback);
+        return card;
+    }
+    function renderSettingsPage(data, auth, message, activeJob, onSave, onAuthRefresh, onAuthLogin, onAuthCancel, onAuthLogout, schedule, about) {
         const value = data.editable;
         const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
         const attachments = settingCheckbox("下載附件", value.download.download_attachments);
@@ -811,7 +882,7 @@ var FanboxUI;
                 if (window.confirm("確定要清除專用 FANBOX 工作階段嗎？封存與設定不會被刪除。")) {
                     void runAuth(onAuthLogout);
                 }
-            } }, "登出"), authFeedback)), FanboxUI.h("section", { class: "settings-paths" }, FanboxUI.h("div", {}, FanboxUI.h("span", {}, "封存目錄"), FanboxUI.h("code", {}, data.storage.output_dir)), FanboxUI.h("div", {}, FanboxUI.h("span", {}, "資料庫"), FanboxUI.h("code", {}, data.storage.database)), FanboxUI.h("div", {}, FanboxUI.h("span", {}, "設定檔"), FanboxUI.h("code", {}, data.config_path || "未指定"))), form);
+            } }, "登出"), authFeedback)), form, renderAboutSection(about.info, about.actions));
     }
     FanboxUI.renderSettingsPage = renderSettingsPage;
 })(FanboxUI || (FanboxUI = {}));
@@ -1634,8 +1705,9 @@ var FanboxUI;
             if (showLoading)
                 app.replaceChildren(FanboxUI.h("p", { class: "empty" }, "正在讀取設定…"));
             try {
-                const [data, jobData, auth, scheduleStatus, creatorData] = await Promise.all([
+                const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
                     FanboxUI.getSettings(), FanboxUI.getJobs(), FanboxUI.getAuthStatus(sessionToken), FanboxUI.getScheduleStatus(), FanboxUI.getCreators(),
+                    FanboxUI.getDiagnostics(sessionToken).catch(() => null),
                 ]);
                 updateActiveJob(jobData);
                 FanboxUI.setDisplayTimeZone(data.display.timezone);
@@ -1645,6 +1717,16 @@ var FanboxUI;
                             try {
                                 await FanboxUI.runScheduleNow(sessionToken);
                                 setView("backup");
+                                return null;
+                            }
+                            catch (error) {
+                                return error instanceof Error ? error.message : String(error);
+                            }
+                        },
+                    } }, { info: diagnostics, actions: {
+                        onOpen: async (target) => {
+                            try {
+                                await FanboxUI.openDiagnosticsFolder(target, sessionToken);
                                 return null;
                             }
                             catch (error) {

@@ -117,6 +117,18 @@ namespace FanboxUI {
     });
   }
 
+  export function getDiagnostics(sessionToken: string): Promise<DiagnosticsInfo> {
+    return requestJson<DiagnosticsInfo>("/api/diagnostics", {headers: {"X-Fanbox-Token": sessionToken}});
+  }
+
+  export function openDiagnosticsFolder(target: FolderTarget, sessionToken: string): Promise<{opened: FolderTarget}> {
+    return requestJson<{opened: FolderTarget}>("/api/diagnostics/open", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-Fanbox-Token": sessionToken},
+      body: JSON.stringify({target}),
+    });
+  }
+
   export function getJobs(params: URLSearchParams = new URLSearchParams({page_size: "1"})): Promise<JobPage> {
     return requestJson<JobPage>(`/api/jobs?${params}`);
   }

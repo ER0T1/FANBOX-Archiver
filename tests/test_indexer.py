@@ -244,7 +244,7 @@ def test_open_cli_only_opens_browser_or_folder_when_explicit(tmp_path: Path, mon
     opened_urls: list[str] = []
     opened_folders: list[Path] = []
     monkeypatch.setattr("fanbox_archiver.cli.webbrowser.open", lambda value: opened_urls.append(value))
-    monkeypatch.setattr("fanbox_archiver.cli.os.startfile", lambda value: opened_folders.append(Path(value)))
+    monkeypatch.setattr("fanbox_archiver.diagnostics.os.startfile", lambda value: opened_folders.append(Path(value)))
     runner = CliRunner()
 
     page = runner.invoke(app, ["open", "--post", "123", "--config", str(config_path)])

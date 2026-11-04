@@ -23,6 +23,8 @@ from .application import (
 )
 from .archive_lock import ArchiveLock
 from .database import Database
+from . import diagnostics
+from .diagnostics import FolderTarget
 from .schedule import describe, upcoming
 from .timestamps import (
     COMMON_TIMEZONES, display_zone, resolve_timezone, set_display_timezone, timezone_names,
@@ -144,6 +146,11 @@ class ConfigPatch(BaseModel):
 
 class LoginBody(BaseModel):
     timeout_seconds: int = Field(default=600, ge=60, le=1800)
+
+
+class OpenFolderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: FolderTarget
 
 
 def create_app(
@@ -340,6 +347,22 @@ def create_app(
             await run_in_threadpool(app.state.scheduler.reset)
             await run_in_threadpool(sync_background)
         return {"editable": updated.editable_dict(), "display": display_info(), "saved": True}
+
+    @app.get("/api/diagnostics", dependencies=[Depends(require_mutation_token)])
+    async def get_diagnostics():
+        return await run_in_threadpool(diagnostics.collect, app.state.config, app.state.config_path)
+
+    @app.post("/api/diagnostics/open", dependencies=[Depends(require_mutation_token)])
+    async def open_diagnostics_folder(body: OpenFolderBody):
+        path = diagnostics.folder_path(app.state.config, body.target)
+        if path is None:
+            raise HTTPException(status_code=404, detail="桌面日誌只在桌面版提供")
+        if not path.is_dir():
+            raise HTTPException(status_code=404, detail="資料夾尚不存在")
+        if not diagnostics.can_open_folders():
+            raise HTTPException(status_code=501, detail="此系統無法開啟資料夾")
+        await run_in_threadpool(diagnostics.open_folder, path)
+        return {"opened": body.target}
 
     def normalize_schedule_patch(values: dict) -> dict:
         if "creators" in values:

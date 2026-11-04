@@ -43,6 +43,83 @@ namespace FanboxUI {
     return {node, read: () => choice === OTHER_TIMEZONE ? other.value.trim() : choice};
   }
 
+  export interface AboutSectionActions {
+    onOpen: (target: FolderTarget) => Promise<string | null>;
+  }
+
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back to a temporary selection when the clipboard API is unavailable.
+      const area = h("textarea", {readonly: true, class: "visually-hidden"}) as HTMLTextAreaElement;
+      area.value = text;
+      document.body.append(area);
+      area.select();
+      const copied = document.execCommand("copy");
+      area.remove();
+      return copied;
+    }
+  }
+
+  /** Versions, locations and safe folder shortcuts; never shows cookies or sign-in data. */
+  function renderAboutSection(info: DiagnosticsInfo | null, actions: AboutSectionActions): HTMLElement {
+    const card = h("section", {class: "settings-card about-card"},
+      h("p", {class: "eyebrow"}, "ABOUT & DIAGNOSTICS"), h("h2", {}, "關於與診斷"));
+    if (!info) {
+      card.append(h("p", {class: "notice"}, "無法讀取診斷資訊；重新整理後再試一次。"));
+      return card;
+    }
+    const feedback = h("p", {class: "about-feedback", role: "status", "aria-live": "polite"});
+    const show = (text: string, error = false): void => {
+      feedback.textContent = text;
+      feedback.classList.toggle("settings-error", error);
+    };
+    const schema = info.schema.database === null ? `無法讀取（程式支援 ${info.schema.supported}）`
+      : `${info.schema.database}（程式支援 ${info.schema.supported}）`;
+    const rows: [string, string][] = [
+      ["程式版本", info.app_version],
+      ["執行方式", info.mode === "desktop" ? `桌面版 ${info.desktop_version ?? "（版本不明）"}` : "瀏覽器版"],
+      ["資料庫 schema", schema],
+      ["Python", info.python_version],
+      ["作業系統", info.os],
+      ["時區", info.timezone],
+      ["設定檔", info.paths.config ?? "未指定"],
+      ["封存目錄", info.paths.archive],
+      ["資料庫", info.paths.database],
+      ["封存日誌", info.paths.archive_logs],
+    ];
+    if (info.paths.desktop_logs) rows.push(["桌面日誌", info.paths.desktop_logs]);
+    const folderButton = (target: FolderTarget, label: string, missing: string): HTMLElement => {
+      const available = info.can_open_folders && info.folders[target];
+      return h("button", {type: "button", disabled: !available,
+        title: !info.can_open_folders ? "此系統無法開啟資料夾" : info.folders[target] ? "" : missing,
+        onclick: async (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          button.disabled = true;
+          const error = await actions.onOpen(target);
+          button.disabled = false;
+          show(error ? `無法開啟資料夾：${error}` : `已開啟「${label.replace("開啟", "")}」。`, Boolean(error));
+        }}, label);
+    };
+    card.append(
+      h("p", {class: "settings-section-description"},
+        "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"),
+      h("div", {class: "settings-paths about-facts"},
+        rows.map(([label, value]) => h("div", {}, h("span", {}, label), h("code", {}, value)))),
+      h("div", {class: "account-actions about-actions"},
+        folderButton("archive", "開啟封存資料夾", "封存資料夾不存在"),
+        folderButton("archive_logs", "開啟封存日誌資料夾", "尚未產生日誌（需啟用「寫入檔案日誌」）"),
+        info.paths.desktop_logs ? folderButton("desktop_logs", "開啟桌面日誌資料夾", "尚未產生桌面日誌") : null,
+        h("button", {type: "button", onclick: async () => {
+          show(await copyText(info.text) ? "診斷資訊已複製到剪貼簿。" : "無法複製；請手動選取上方文字。",
+            false);
+        }}, "複製診斷資訊")),
+      feedback);
+    return card;
+  }
+
   export function renderSettingsPage(
     data: SettingsResponse, auth: AuthStatus, message: string, activeJob: WebJob | null,
     onSave: (patch: SettingsPatch) => Promise<string | null>,
@@ -51,6 +128,7 @@ namespace FanboxUI {
     onAuthCancel: (jobId: string) => Promise<string | null>,
     onAuthLogout: () => Promise<string | null>,
     schedule: {status: ScheduleStatus; creators: CreatorSummary[]; actions: ScheduleSectionActions},
+    about: {info: DiagnosticsInfo | null; actions: AboutSectionActions},
   ): HTMLElement {
     const value = data.editable;
     const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
@@ -186,9 +264,6 @@ namespace FanboxUI {
             onclick: () => { if (window.confirm("確定要清除專用 FANBOX 工作階段嗎？封存與設定不會被刪除。")) {
               void runAuth(onAuthLogout);
             }}}, "登出"), authFeedback)),
-      h("section", {class: "settings-paths"},
-        h("div", {}, h("span", {}, "封存目錄"), h("code", {}, data.storage.output_dir)),
-        h("div", {}, h("span", {}, "資料庫"), h("code", {}, data.storage.database)),
-        h("div", {}, h("span", {}, "設定檔"), h("code", {}, data.config_path || "未指定"))), form);
+      form, renderAboutSection(about.info, about.actions));
   }
 }

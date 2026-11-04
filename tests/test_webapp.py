@@ -445,3 +445,89 @@ async def test_list_endpoints_page_and_sort_with_validated_parameters(tmp_path: 
         assert (await client.get("/api/posts?order=up")).status_code == 422
         assert (await client.get("/api/posts/123?order=asc")).status_code == 200
     app.state.jobs.close()
+
+
+@pytest.mark.anyio
+async def test_diagnostics_report_versions_and_paths_without_credentials(tmp_path: Path, monkeypatch):
+    import fanbox_archiver.diagnostics as diagnostics
+    from fanbox_archiver import __version__
+    from fanbox_archiver.database import SCHEMA_VERSION
+
+    monkeypatch.setenv("FANBOX_COOKIE", "FANBOXSESSID=secret-cookie-value")
+    monkeypatch.delenv("FANBOX_ARCHIVER_DESKTOP_EXE", raising=False)
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config, config_path=tmp_path / "config.yaml")
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get("/api/diagnostics")).status_code == 403
+        response = await client.get("/api/diagnostics", headers=token)
+
+    assert response.status_code == 200
+    info = response.json()
+    assert info["app_version"] == __version__
+    assert (info["mode"], info["desktop_version"]) == ("browser", None)
+    assert info["schema"] == {"database": SCHEMA_VERSION, "supported": SCHEMA_VERSION}
+    assert info["paths"]["archive"] == str(config.storage.output_dir.resolve())
+    assert info["paths"]["archive_logs"] == str((config.storage.output_dir / "logs").resolve())
+    assert info["paths"]["desktop_logs"] is None and info["folders"]["desktop_logs"] is False
+    assert f"程式版本：{__version__}" in info["text"] and "瀏覽器版" in info["text"]
+    serialized = response.text
+    assert "secret-cookie-value" not in serialized and app.state.session_token not in serialized
+    assert diagnostics.diagnostics_text(info) == info["text"]
+
+
+@pytest.mark.anyio
+async def test_diagnostics_desktop_mode_reports_shell_version_and_log_folder(tmp_path: Path, monkeypatch):
+    desktop_logs = tmp_path / "desktop-logs"
+    desktop_logs.mkdir()
+    monkeypatch.setenv("FANBOX_ARCHIVER_DESKTOP_EXE", str(tmp_path / "FANBOX Archiver.exe"))
+    monkeypatch.setenv("FANBOX_ARCHIVER_DESKTOP_VERSION", "9.9.9-alpha")
+    monkeypatch.setenv("FANBOX_ARCHIVER_DESKTOP_LOG_DIR", str(desktop_logs))
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        info = (await client.get("/api/diagnostics",
+                                 headers={"X-Fanbox-Token": app.state.session_token})).json()
+
+    assert (info["mode"], info["desktop_version"]) == ("desktop", "9.9.9-alpha")
+    assert info["paths"]["desktop_logs"] == str(desktop_logs.resolve())
+    assert info["folders"]["desktop_logs"] is True
+    assert "桌面版 9.9.9-alpha" in info["text"] and "桌面日誌：" in info["text"]
+
+
+@pytest.mark.anyio
+async def test_open_folder_accepts_only_fixed_targets_with_token(tmp_path: Path, monkeypatch):
+    import fanbox_archiver.diagnostics as diagnostics
+
+    opened: list[Path] = []
+    monkeypatch.setattr(diagnostics, "open_folder", opened.append)
+    monkeypatch.setattr(diagnostics, "can_open_folders", lambda: True)
+    monkeypatch.delenv("FANBOX_ARCHIVER_DESKTOP_LOG_DIR", raising=False)
+    config, _ = dynamic_archive(tmp_path)
+    app = create_app(config)
+    token = {"X-Fanbox-Token": app.state.session_token}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.post("/api/diagnostics/open", json={"target": "archive"})).status_code == 403
+        unknown = await client.post("/api/diagnostics/open", headers=token, json={"target": "profile"})
+        assert unknown.status_code == 422
+        smuggled = await client.post("/api/diagnostics/open", headers=token,
+                                     json={"target": "archive", "path": str(tmp_path)})
+        assert smuggled.status_code == 422
+        assert (await client.post("/api/diagnostics/open", headers=token,
+                                  json={"target": "desktop_logs"})).status_code == 404
+        logs = config.storage.output_dir / "logs"
+        if logs.exists():
+            import shutil
+
+            shutil.rmtree(logs)
+        missing = await client.post("/api/diagnostics/open", headers=token, json={"target": "archive_logs"})
+        assert missing.status_code == 404
+        assert opened == []
+
+        response = await client.post("/api/diagnostics/open", headers=token, json={"target": "archive"})
+
+    assert response.json() == {"opened": "archive"}
+    assert opened == [config.storage.output_dir.resolve()]

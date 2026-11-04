@@ -4,7 +4,6 @@ import os
 from datetime import UTC, datetime
 import json
 import sqlite3
-import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -35,6 +34,7 @@ from .application import (
 )
 from .archive_lock import ArchiveLock
 from .database import Database
+from .diagnostics import open_folder
 from .windows_task import DESKTOP_EXE_ENV, refresh_wake_task
 from .logging_setup import configure_logging, get_logger
 from .indexer import IndexBuilder
@@ -611,12 +611,7 @@ def open_archive(
         if not target_folder.is_dir():
             console.print(f"[red]找不到備份目錄：[/red]{target_folder}")
             raise typer.Exit(1)
-        if os.name == "nt":
-            os.startfile(target_folder)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target_folder)])
-        else:
-            subprocess.Popen(["xdg-open", str(target_folder)])
+        open_folder(target_folder)
         return
 
     target = root / "index.html"

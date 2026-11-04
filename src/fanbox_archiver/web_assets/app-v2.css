@@ -324,6 +324,9 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 .verification-issues code { overflow-wrap:anywhere; color:var(--muted); }.verification-issues small { color:var(--blue); }
 .settings-paths { display:grid; gap:.55rem; margin-bottom:1rem; padding:1rem 1.2rem; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); }
 .settings-paths div { display:grid; grid-template-columns:7rem minmax(0,1fr); gap:1rem; }.settings-paths span { color:var(--muted); }.settings-paths code { overflow-wrap:anywhere; }
+.about-card .about-facts { margin:.9rem 0 0; padding:0; background:none; border:0; }
+.about-feedback { min-height:1.3em; margin:.6rem 0 0; color:var(--muted); }.about-feedback.settings-error { color:var(--red); }
+.visually-hidden { position:fixed; top:0; left:-9999px; width:1px; height:1px; opacity:0; }
 .settings-form { display:grid; gap:1rem; }
 .account-card { margin-bottom:1rem; border-left:5px solid var(--line); }
 .account-card.tone-success { border-left-color:var(--green); }

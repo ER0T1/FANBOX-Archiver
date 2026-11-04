@@ -436,8 +436,9 @@ namespace FanboxUI {
       state.current = null;
       if (showLoading) app.replaceChildren(h("p", {class: "empty"}, "正在讀取設定…"));
       try {
-        const [data, jobData, auth, scheduleStatus, creatorData] = await Promise.all([
+        const [data, jobData, auth, scheduleStatus, creatorData, diagnostics] = await Promise.all([
           getSettings(), getJobs(), getAuthStatus(sessionToken), getScheduleStatus(), getCreators(),
+          getDiagnostics(sessionToken).catch(() => null),
         ]);
         updateActiveJob(jobData);
         setDisplayTimeZone(data.display.timezone);
@@ -457,6 +458,16 @@ namespace FanboxUI {
                 // The backup page opens the running job, which this one now is.
                 await runScheduleNow(sessionToken);
                 setView("backup");
+                return null;
+              } catch (error) {
+                return error instanceof Error ? error.message : String(error);
+              }
+            },
+          }},
+          {info: diagnostics, actions: {
+            onOpen: async target => {
+              try {
+                await openDiagnosticsFolder(target, sessionToken);
                 return null;
               } catch (error) {
                 return error instanceof Error ? error.message : String(error);
