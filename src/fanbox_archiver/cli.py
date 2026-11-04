@@ -9,7 +9,9 @@ import webbrowser
 from pathlib import Path
 from typing import Annotated
 
+import click
 import typer
+import yaml
 from pydantic import ValidationError
 from rich.console import Console
 from rich.filesize import decimal
@@ -40,7 +42,7 @@ from .legacy_site import cleanup_owned_archive
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, set_display_timezone
-from .i18n import LANGUAGE_SETTINGS, Translator, resolve_locale, system_locales
+from .i18n import BASE_LOCALE, LANGUAGE_SETTINGS, Translator, resolve_locale, system_locales, translate
 
 
 if os.name == "nt":
@@ -50,13 +52,100 @@ if os.name == "nt":
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
-app = typer.Typer(
+# Help texts are written in the base language at import time and swapped for the chosen
+# language just before parsing (see ``localize_help``); this maps each text back to its key.
+_HELP_KEYS: dict[str, str] = {}
+
+
+def _h(key: str) -> str:
+    text = translate(key)
+    assert _HELP_KEYS.setdefault(text, key) == key, f"{key} repeats the text of {_HELP_KEYS[text]}"
+    return text
+
+
+# Messages follow ``--lang``, then config.yaml ``display.language`` once loaded. ``_run_locale``
+# is what the command line chose before parsing; every invocation starts again from it.
+_run_locale = BASE_LOCALE
+_translator = Translator(BASE_LOCALE)
+
+
+def tr(key: str, /, **params: object) -> str:
+    return _translator(key, **params)
+
+
+def _set_locale(locale: str) -> None:
+    global _translator
+    _translator = Translator(locale)
+
+
+def localize_help(command: click.Command, locale: str) -> click.Command:
+    """Show ``--help`` of ``command`` (built by Typer) and all its subcommands in ``locale``."""
+    translator = Translator(locale)
+
+    def swap(text: str | None) -> str | None:
+        key = _HELP_KEYS.get(text or "")
+        return translator(key) if key else text
+
+    command.help = swap(command.help)
+    for param in command.params:
+        if hasattr(param, "help"):
+            param.help = swap(param.help)
+    for child in getattr(command, "commands", {}).values():
+        localize_help(child, locale)
+    return command
+
+
+def localized_command(locale: str) -> click.Command:
+    """The CLI as a click command with its help in ``locale`` (also used by the tests)."""
+    return localize_help(typer.main.get_command(app), locale)
+
+
+def _argv_locale(argv: list[str]) -> str:
+    """The language of this run before any parsing: ``--lang``, else config.yaml, else the system."""
+    def option(*names: str) -> str | None:
+        for index, item in enumerate(argv):
+            for name in names:
+                if item == name and index + 1 < len(argv):
+                    return argv[index + 1]
+                if item.startswith(f"{name}="):
+                    return item.split("=", 1)[1]
+        return None
+
+    setting = option("--lang")
+    if setting not in LANGUAGE_SETTINGS:
+        setting = "auto"
+        try:
+            data = yaml.safe_load(Path(option("--config", "-c") or "config.yaml").read_text(encoding="utf-8"))
+            configured = (data or {}).get("display", {}).get("language")
+            if configured in LANGUAGE_SETTINGS:
+                setting = configured
+        except (OSError, ValueError, AttributeError, yaml.YAMLError):
+            pass
+    return resolve_locale(setting, system_locales())
+
+
+class LocalizedTyper(typer.Typer):
+    """Picks the language from the command line before Typer builds and parses the commands."""
+
+    def __call__(self, *args, **kwargs):
+        argv = kwargs.get("args")
+        if argv is None:
+            argv = args[0] if args else sys.argv[1:]
+        global _run_locale
+        locale = _run_locale = _argv_locale(list(argv))
+        # As Typer.__call__, but the built command gets its help translated before parsing.
+        if sys.excepthook != typer.main.except_hook:
+            sys.excepthook = typer.main.except_hook
+        return localized_command(locale)(*args, **kwargs)
+
+
+app = LocalizedTyper(
     name="fanbox-archiver",
-    help="保守、低頻率的 pixivFANBOX 個人本機備份工具。",
+    help=_h("cli.help.app"),
     no_args_is_help=True,
 )
 auth_app = typer.Typer(
-    help="建立或驗證安全的 FANBOX 瀏覽器工作階段。",
+    help=_h("cli.help.auth_group"),
     invoke_without_command=True,
 )
 app.add_typer(auth_app, name="auth")
@@ -68,17 +157,22 @@ _language_override: str | None = None
 @app.callback()
 def main(
     lang: Annotated[str | None, typer.Option(
-        "--lang", help="介面語言：auto、zh-Hant 或測試用 qps-ploc；預設讀取設定檔 display.language",
+        "--lang", help=_h("cli.help.lang"),
     )] = None,
 ) -> None:
     global _language_override
     if lang is not None and lang not in LANGUAGE_SETTINGS:
-        raise typer.BadParameter(f"不支援的語言：{lang}", param_hint="--lang")
+        raise typer.BadParameter(tr("cli.lang_unsupported", lang=lang), param_hint="--lang")
     _language_override = lang
+    _set_locale(resolve_locale(lang, system_locales()) if lang is not None else _run_locale)
 
 
 def translator(settings: AppConfig) -> Translator:
     return Translator(resolve_locale(_language_override or settings.display.language, system_locales()))
+
+
+def _use_translator(settings: AppConfig) -> None:
+    _set_locale(translator(settings).locale)
 
 
 def format_local_time(value: object) -> str:
@@ -90,9 +184,10 @@ def load_config(path: Path) -> AppConfig:
         settings = AppConfig.load(path)
         configure_logging(settings)
         set_display_timezone(settings.display.timezone)
+        _use_translator(settings)
         return settings
     except (OSError, ValidationError) as exc:
-        console.print(f"[red]設定檔錯誤：[/red]{exc}")
+        console.print(f"[red]{tr('cli.config_error')}[/red]{exc}")
         raise typer.Exit(2) from exc
 
 
@@ -114,29 +209,28 @@ def verify_login(settings: AppConfig, browser: str | None = None) -> None:
     if browser is None:
         status = AuthenticationService(settings).check()
         if status.state == "authenticated":
-            console.print("[green]登入狀態有效。[/green]")
+            console.print(f"[green]{tr('cli.auth.valid')}[/green]")
             return
         console.print(f"[red]{status.message}[/red]")
         raise typer.Exit(1)
     cookie = get_cookie(settings, browser)
     if not cookie:
-        console.print("[yellow]找不到登入工作階段，請先執行 `fanbox-archiver auth login`。[/yellow]")
+        console.print(f"[yellow]{tr('cli.auth.no_session')}[/yellow]")
         raise typer.Exit(1)
     with FanboxClient(
         cookie=cookie, timeout=settings.download.timeout_seconds,
         request_interval=settings.download.request_interval_seconds,
     ) as client:
         ok = client.verify_auth()
-    console.print("[green]登入狀態有效。[/green]" if ok else "[red]登入狀態無效。[/red]")
+    console.print(f"[green]{tr('cli.auth.valid')}[/green]" if ok else f"[red]{tr('cli.auth.invalid')}[/red]")
 
 
-@auth_app.callback()
+@auth_app.callback(help=_h("cli.help.cmd_auth"))
 def auth(
     ctx: typer.Context,
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    browser: Annotated[str | None, typer.Option("--browser", help=_h("cli.help.browser"))] = None,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """未指定子指令時，驗證目前的登入狀態。"""
     if ctx.invoked_subcommand is not None:
         return
     settings = load_config(config)
@@ -148,12 +242,11 @@ def auth(
         handle_remote_error(exc)
 
 
-@auth_app.command("check")
+@auth_app.command("check", help=_h("cli.help.cmd_auth_check"))
 def auth_check(
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    browser: Annotated[str | None, typer.Option("--browser", help=_h("cli.help.browser"))] = None,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """驗證專用瀏覽器設定檔或明確指定瀏覽器的登入狀態。"""
     settings = load_config(config)
     try:
         verify_login(settings, browser)
@@ -163,15 +256,14 @@ def auth_check(
         handle_remote_error(exc)
 
 
-@auth_app.command("login")
+@auth_app.command("login", help=_h("cli.help.cmd_auth_login"))
 def auth_login(
-    timeout_minutes: Annotated[int, typer.Option("--timeout-minutes", min=1, max=30, help="等待手動登入的分鐘數")] = 10,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    timeout_minutes: Annotated[int, typer.Option("--timeout-minutes", min=1, max=30, help=_h("cli.help.timeout_minutes"))] = 10,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """開啟專用 Chrome 視窗，由使用者親自登入並保存工作階段。"""
     settings = load_config(config)
-    console.print("[cyan]請在即將開啟的專用 Chrome 視窗中正常登入 FANBOX。[/cyan]")
-    console.print("程式不會讀取帳號、密碼、2FA 或 CAPTCHA，只等待登入狀態生效。")
+    console.print(f"[cyan]{tr('cli.auth.login_prompt')}[/cyan]")
+    console.print(tr("cli.auth.login_privacy"))
     try:
         AuthenticationService(settings).login(
             timeout_seconds=timeout_minutes * 60,
@@ -181,14 +273,13 @@ def auth_login(
         handle_remote_error(exc)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_creators"))
 def creators(
-    refresh: Annotated[bool, typer.Option("--refresh", help="重新向 FANBOX 取得目前支援中清單")] = False,
-    json_output: Annotated[bool, typer.Option("--json", help="以 JSON 輸出，供其他工具使用")] = False,
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    refresh: Annotated[bool, typer.Option("--refresh", help=_h("cli.help.refresh"))] = False,
+    json_output: Annotated[bool, typer.Option("--json", help=_h("cli.help.creators_json"))] = False,
+    browser: Annotated[str | None, typer.Option("--browser", help=_h("cli.help.browser"))] = None,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """列出目前帳號正在支援且可由 API 回傳的繪師。"""
     settings = load_config(config)
     archive = ArchiveService(settings)
     try:
@@ -208,7 +299,8 @@ def creators(
     if json_output:
         console.print_json(json.dumps(rows, ensure_ascii=False))
         return
-    table = Table("Creator ID", "名稱", "本機文章", "最後同步", "狀態", "網址")
+    table = Table("Creator ID", tr("cli.creators.column_name"), tr("cli.creators.column_posts"),
+                  tr("cli.creators.column_last_sync"), tr("cli.creators.column_status"), tr("cli.creators.column_url"))
     for row in rows:
         table.add_row(
             str(row["creator_id"]), str(row["name"]), str(row["post_count"]),
@@ -217,15 +309,14 @@ def creators(
     console.print(table)
 
 
-@app.command("import-html")
+@app.command("import-html", help=_h("cli.help.cmd_import_html"))
 def import_html(
-    html: Annotated[Path, typer.Argument(help="已登入瀏覽器另存的完整 HTML")],
-    source_url: Annotated[str | None, typer.Option("--url", help="原始投稿 URL（HTML 無法判斷時使用）")] = None,
-    download_assets: Annotated[bool, typer.Option("--download-assets/--metadata-only", help="是否下載解析出的原始資源")] = False,
-    force: Annotated[bool, typer.Option("--force", help="忽略增量判斷並重新處理")] = False,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    html: Annotated[Path, typer.Argument(help=_h("cli.help.html"))],
+    source_url: Annotated[str | None, typer.Option("--url", help=_h("cli.help.source_url"))] = None,
+    download_assets: Annotated[bool, typer.Option("--download-assets/--metadata-only", help=_h("cli.help.download_assets"))] = False,
+    force: Annotated[bool, typer.Option("--force", help=_h("cli.help.force"))] = False,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """離線解析渲染後的 FANBOX HTML，輸出 post.md 與 post.json。"""
     settings = load_config(config)
     try:
         post = HtmlPostParser().parse_file(html, source_url)
@@ -233,13 +324,14 @@ def import_html(
             ArchiveService(settings), post, download_assets=download_assets, force=force
         )
     except Exception as exc:
-        console.print(f"[red]匯入失敗：[/red]{exc}")
+        console.print(f"[red]{tr('cli.import.failed')}[/red]{exc}")
         raise typer.Exit(1) from exc
-    console.print(f"[green]已匯入[/green] {post.post_id}：{post.title}（{status.value}）")
+    console.print(f"[green]{tr('cli.import.done')}[/green] {post.post_id}：{post.title}（{status.value}）")
 
 
 def _print_plan(data: dict) -> None:
-    table = Table("Creator ID", "Profile", "發現", "新增/更新/重試", "略過")
+    table = Table("Creator ID", "Profile", tr("cli.backup.column_discovered"),
+                  tr("cli.backup.column_new_updated_retry"), tr("cli.backup.column_skipped"))
     for scan in data["scans"]:
         table.add_row(
             scan["creator_id"], str(scan.get("profile") or "-"), str(scan["discovered"]),
@@ -247,10 +339,10 @@ def _print_plan(data: dict) -> None:
             str(scan["skipped"]),
         )
     console.print(table)
-    console.print(
-        f"合計：新增 {data['new']}、更新 {data['updated']}、重試 {data['retried']}、"
-        f"略過 {data['skipped']}、本次上限延後 {data['deferred']}"
-    )
+    console.print(tr(
+        "cli.backup.plan_total", new=data["new"], updated=data["updated"], retried=data["retried"],
+        skipped=data["skipped"], deferred=data["deferred"],
+    ))
 
 
 class RichBackupEventSink:
@@ -265,10 +357,10 @@ class RichBackupEventSink:
         elif event.kind == "profile_started":
             self.progress.update(
                 self.task_id,
-                description=f"正在備份 @{data['creator_id']} 的個人資料",
+                description=tr("cli.backup.profile_started", creator_id=data["creator_id"]),
             )
         elif event.kind == "profile_finished":
-            preview = "（預覽）" if data.get("dry_run") else ""
+            preview = tr("cli.backup.preview_suffix") if data.get("dry_run") else ""
             self.progress.console.print(
                 f"[cyan]Profile[/cyan] {data['creator_id']}: {data['status']} "
                 f"v{int(data.get('version') or 0):04d}{preview}"
@@ -303,12 +395,12 @@ class RichBackupEventSink:
             self.progress.console.print(f"[yellow]{creator}{data['message']}[/yellow]")
         elif event.kind == "job_finished":
             if data.get("dry_run"):
-                self.progress.console.print("[cyan]預覽完成，未下載投稿或資源。[/cyan]")
+                self.progress.console.print(f"[cyan]{tr('cli.backup.preview_done')}[/cyan]")
             else:
-                self.progress.console.print(
-                    f"完成：成功 {data['success']}，內容未變 {data['unchanged']}，"
-                    f"未完成 {data['failure']}"
-                )
+                self.progress.console.print(tr(
+                    "cli.backup.done", success=data["success"], unchanged=data["unchanged"],
+                    failure=data["failure"],
+                ))
 
 
 def _run_backup(
@@ -317,10 +409,10 @@ def _run_backup(
     include_profile: bool, include_fancard: bool,
 ) -> None:
     with Progress(
-        SpinnerColumn(), TextColumn("{task.description}"), TextColumn("{task.completed} 項"),
+        SpinnerColumn(), TextColumn("{task.description}"), TextColumn(tr("cli.backup.items", count="{task.completed}")),
         console=console, disable=not console.is_terminal, transient=True,
     ) as progress:
-        task = progress.add_task("準備備份", total=None)
+        task = progress.add_task(tr("cli.backup.preparing"), total=None)
         sink = RichBackupEventSink(progress, task)
         BackupUseCase(settings, sink=sink).run(BackupRequest(
             creators=creators,
@@ -334,18 +426,17 @@ def _run_backup(
         ))
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_backup"))
 def backup(
-    creator: Annotated[list[str] | None, typer.Option("--creator", help="指定 Creator ID 或首頁網址；可重複使用")] = None,
-    post: Annotated[list[str] | None, typer.Option("--post", help="指定 Post ID 或投稿網址；可重複使用")] = None,
-    fancard: Annotated[bool, typer.Option("--fancard", help="同時保存指定創作者當月份 Fan Card")] = False,
-    profile: Annotated[bool, typer.Option("--profile", help="同時保存指定創作者的 Creator Profile")] = False,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="只查詢並顯示備份計畫，不下載投稿或資源")] = False,
-    max_posts: Annotated[int | None, typer.Option("--max-posts", min=1, max=100, help="覆寫本次實際下載上限")] = None,
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    creator: Annotated[list[str] | None, typer.Option("--creator", help=_h("cli.help.backup_creator"))] = None,
+    post: Annotated[list[str] | None, typer.Option("--post", help=_h("cli.help.backup_post"))] = None,
+    fancard: Annotated[bool, typer.Option("--fancard", help=_h("cli.help.backup_fancard"))] = False,
+    profile: Annotated[bool, typer.Option("--profile", help=_h("cli.help.backup_profile"))] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help=_h("cli.help.dry_run"))] = False,
+    max_posts: Annotated[int | None, typer.Option("--max-posts", min=1, max=100, help=_h("cli.help.max_posts"))] = None,
+    browser: Annotated[str | None, typer.Option("--browser", help=_h("cli.help.browser"))] = None,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """唯一下載入口；備份全部支援中創作者、指定創作者或指定投稿。"""
     settings = load_config(config)
     try:
         creators = tuple(dict.fromkeys(FanboxClient.creator_id(value) for value in (creator or [])))
@@ -354,9 +445,9 @@ def backup(
             for value in (post or [])
         ))
         if creators and posts:
-            raise ValueError("--creator 與 --post 不可同時使用")
+            raise ValueError(tr("cli.backup.creator_and_post"))
         if (fancard or profile) and not creators:
-            raise ValueError("--fancard 與 --profile 只能搭配 --creator 使用")
+            raise ValueError(tr("cli.backup.extras_need_creator"))
         scope = (
             f"posts:{','.join(posts)}" if posts else
             f"creators:{','.join(creators)}" if creators else "supporting"
@@ -370,50 +461,48 @@ def backup(
             include_fancard=fancard if creators else True,
         )
     except ValueError as exc:
-        console.print(f"[red]備份參數錯誤：[/red]{exc}")
+        console.print(f"[red]{tr('cli.backup.bad_arguments')}[/red]{exc}")
         raise typer.Exit(2) from exc
     except Exception as exc:
         handle_remote_error(exc)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_verify"))
 def verify(
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """以檔案大小與 SHA-256 驗證已完成的本機資源。"""
     issues = ArchiveService(load_config(config)).verify()
     if not issues:
-        console.print("[green]完整性驗證通過。[/green]")
+        console.print(f"[green]{tr('cli.verify.passed')}[/green]")
         return
     for issue in issues:
         console.print(f"[red]{issue.reason}[/red] {issue.path}")
     raise typer.Exit(1)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_audit"))
 def audit(
     json_output: Annotated[
-        bool, typer.Option("--json", help="以 JSON 輸出唯讀稽核與 dry-run 修復計畫")
+        bool, typer.Option("--json", help=_h("cli.help.audit_json"))
     ] = False,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """唯讀稽核版本、manifest、latest pointer、alias 與時間欄位。"""
     try:
         settings = AppConfig.load(config)
         set_display_timezone(settings.display.timezone)
+        _use_translator(settings)
     except (OSError, ValidationError) as exc:
-        console.print(f"[red]設定檔錯誤：[/red]{exc}")
+        console.print(f"[red]{tr('cli.config_error')}[/red]{exc}")
         raise typer.Exit(2) from exc
     report = ArchiveAuditor(settings).run()
     if json_output:
         console.print_json(data=report.model_dump(mode="json"))
     else:
         info_count = report.finding_count - report.blocking_count
-        console.print(
-            f"唯讀稽核完成：{report.blocking_count} 個問題，"
-            f"{report.automatic_count} 個可產生確定性修復預覽；"
-            f"另有 {info_count} 項不需處理的資訊。"
-        )
+        console.print(tr(
+            "cli.audit.summary", blocking=report.blocking_count, automatic=report.automatic_count,
+            info=info_count,
+        ))
         for finding in report.findings:
             if finding.severity == "info":
                 continue
@@ -425,11 +514,10 @@ def audit(
         raise typer.Exit(1)
 
 
-@app.command("schedule-run")
+@app.command("schedule-run", help=_h("cli.help.cmd_schedule_run"))
 def schedule_run(
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """背景排程檢查：到期時執行一次排程備份並等待完成（供 Windows 工作排程器呼叫）。"""
     settings = load_config(config)
     log = get_logger()
     if not settings.schedule.enabled:
@@ -463,49 +551,46 @@ def schedule_run(
         manager.close()
 
 
-@app.command("repair-copy")
+@app.command("repair-copy", help=_h("cli.help.cmd_repair_copy"))
 def repair_copy(
-    output: Annotated[Path, typer.Option("--output", help="建立修復後封存副本的全新目錄")],
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    output: Annotated[Path, typer.Option("--output", help=_h("cli.help.repair_output"))],
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """只在新副本套用 audit 已確認的 pointer／alias 修復。"""
     try:
         settings = AppConfig.load(config)
         set_display_timezone(settings.display.timezone)
+        _use_translator(settings)
         result = ArchiveRepairer(settings).repair_copy(output)
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
-        console.print(f"[red]建立修復副本失敗：[/red]{exc}")
+        console.print(f"[red]{tr('cli.repair.failed')}[/red]{exc}")
         raise typer.Exit(1) from exc
-    console.print(
-        f"[green]修復副本已建立。[/green]套用 {result.applied_actions} 項確定性修復，"
-        f"仍有 {result.remaining_findings} 項需人工判讀"
-        f"（其中 {result.unrecoverable_findings} 項標記為無法恢復）。"
-    )
-    console.print(f"副本內資料庫備份：{result.database_backup}")
-    console.print(f"修復前後差異與完整驗證報告：{result.report}（驗證問題 {result.verify_issue_count} 項）")
+    console.print(f"[green]{tr('cli.repair.created')}[/green]" + tr(
+        "cli.repair.summary", applied=result.applied_actions, remaining=result.remaining_findings,
+        unrecoverable=result.unrecoverable_findings,
+    ))
+    console.print(tr("cli.repair.database_backup", path=str(result.database_backup)), markup=False)
+    console.print(tr("cli.repair.report", path=str(result.report), count=result.verify_issue_count), markup=False)
 
 
-@app.command("index", hidden=True)
+@app.command("index", hidden=True, help=_h("cli.help.cmd_index"))
 def build_index(
     force: Annotated[bool, typer.Option("--force", hidden=True)] = False,
     check: Annotated[bool, typer.Option("--check", hidden=True)] = False,
     config: Annotated[Path, typer.Option("--config", "-c", hidden=True)] = Path("config.yaml"),
 ) -> None:
-    """已移除：離線靜態網站自 v1.3.46-alpha 起不再提供。"""
     # Kept only so old scripts and scheduled tasks get a clear message instead of "no such command".
     del force, check, config
-    console.print("[red]離線靜態網站已移除，`index` 指令不再提供。[/red]")
-    console.print("請改用 `fanbox-archiver serve`（或 Windows 桌面版）閱讀封存；可攜閱讀請使用各投稿資料夾中的 Markdown。")
+    console.print(f"[red]{tr('cli.index.removed')}[/red]")
+    console.print(tr("cli.index.alternative"))
     raise typer.Exit(1)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_serve"))
 def serve(
-    port: Annotated[int, typer.Option("--port", min=1, max=65535, help="本機閱讀伺服器連接埠")] = 8765,
-    open_browser: Annotated[bool, typer.Option("--open/--no-open", help="啟動後以預設瀏覽器開啟")] = True,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    port: Annotated[int, typer.Option("--port", min=1, max=65535, help=_h("cli.help.port"))] = 8765,
+    open_browser: Annotated[bool, typer.Option("--open/--no-open", help=_h("cli.help.open_browser"))] = True,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """啟動動態本機閱讀器。"""
     settings = load_config(config)
     try:
         import threading
@@ -517,71 +602,69 @@ def serve(
         url = f"http://127.0.0.1:{port}/"
         if open_browser:
             threading.Timer(0.75, lambda: webbrowser.open(url)).start()
-        console.print(f"[green]動態閱讀器已啟動：[/green]{url}")
-        console.print("按 Ctrl+C 停止；下載完成後重新整理頁面即可看到新內容。")
+        console.print(f"[green]{tr('cli.serve.started')}[/green]{url}")
+        console.print(tr("cli.serve.hint"))
         uvicorn.run(
             create_app(settings, config_path=config, run_scheduler=True),
             host="127.0.0.1", port=port, log_level="info",
         )
     except KeyboardInterrupt:
-        console.print("\n閱讀器已停止。")
+        console.print("\n" + tr("cli.serve.stopped"))
     except Exception as exc:
-        console.print(f"[red]閱讀器啟動失敗：[/red]{exc}")
+        console.print(f"[red]{tr('cli.serve.failed')}[/red]{exc}")
         raise typer.Exit(1) from exc
 
 
-@app.command("clear-posts")
+@app.command("clear-posts", help=_h("cli.help.cmd_clear_posts"))
 def clear_posts(
-    yes: Annotated[bool, typer.Option("--yes", help="確認永久刪除所有本機 Post 與其版本／資源")] = False,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    yes: Annotated[bool, typer.Option("--yes", help=_h("cli.help.clear_yes"))] = False,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """清空 Post 舊資料並重設回補進度；保留 Fan Card、創作者與登入資料。"""
     settings = load_config(config)
-    if not yes and not typer.confirm("確定永久刪除所有 Post 舊資料？Fan Card 與登入資料會保留"):
-        console.print("已取消。")
+    if not yes and not typer.confirm(tr("cli.clear.confirm")):
+        console.print(tr("cli.clear.cancelled"))
         raise typer.Exit()
     try:
         cleanup_owned_archive(settings)
         count = ArchiveService(settings).clear_posts()
     except Exception as exc:
-        console.print(f"[red]清除 Post 失敗：[/red]{exc}")
+        console.print(f"[red]{tr('cli.clear.failed')}[/red]{exc}")
         raise typer.Exit(1) from exc
-    console.print(f"[green]已清除 {count} 篇 Post。[/green]Fan Card、創作者與登入資料均已保留。")
+    console.print(f"[green]{tr('cli.clear.done', count=count)}[/green]{tr('cli.clear.kept')}")
 
 
-@app.command("open")
+@app.command("open", help=_h("cli.help.cmd_open"))
 def open_archive(
-    post: Annotated[str | None, typer.Option("--post", help="開啟指定投稿 ID 最新版的資料夾")] = None,
-    version: Annotated[int | None, typer.Option("--version", min=1, help="搭配 --post 開啟指定版本")] = None,
-    creator: Annotated[str | None, typer.Option("--creator", help="開啟指定 Creator ID 的資料夾")] = None,
-    fancard: Annotated[str | None, typer.Option("--fancard", help="開啟指定 Creator ID 的 Fan Card 資料夾")] = None,
-    month: Annotated[str | None, typer.Option("--month", help="搭配 --fancard 指定 YYYY-MM 月份")] = None,
+    post: Annotated[str | None, typer.Option("--post", help=_h("cli.help.open_post"))] = None,
+    version: Annotated[int | None, typer.Option("--version", min=1, help=_h("cli.help.open_version"))] = None,
+    creator: Annotated[str | None, typer.Option("--creator", help=_h("cli.help.open_creator"))] = None,
+    fancard: Annotated[str | None, typer.Option("--fancard", help=_h("cli.help.open_fancard"))] = None,
+    month: Annotated[str | None, typer.Option("--month", help=_h("cli.help.open_month"))] = None,
     folder: Annotated[bool, typer.Option("--folder", hidden=True)] = False,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """以檔案總管開啟封存、投稿版本、創作者或 Fan Card 的資料夾（內含 Markdown 與原始檔）。"""
     del folder  # folders are the only target since the static site was removed; kept for old scripts
     settings = load_config(config)
     root = settings.storage.output_dir.resolve()
     if version is not None and not post:
-        console.print("[red]--version 必須搭配 --post。[/red]")
+        console.print(f"[red]{tr('cli.open.version_needs_post')}[/red]")
         raise typer.Exit(2)
     if month and not fancard:
-        console.print("[red]--month 必須搭配 --fancard。[/red]")
+        console.print(f"[red]{tr('cli.open.month_needs_fancard')}[/red]")
         raise typer.Exit(2)
     if post and (creator or fancard):
-        console.print("[red]--post 不能與 --creator 或 --fancard 併用。[/red]")
+        console.print(f"[red]{tr('cli.open.post_exclusive')}[/red]")
         raise typer.Exit(2)
     if fancard and creator:
-        console.print("[red]--fancard 不能與 --creator 併用。[/red]")
+        console.print(f"[red]{tr('cli.open.fancard_exclusive')}[/red]")
         raise typer.Exit(2)
     if post and not post.isdigit():
-        console.print("[red]投稿 ID 必須是數字。[/red]")
+        console.print(f"[red]{tr('cli.post_id_numeric')}[/red]")
         raise typer.Exit(2)
     safe_card_creator = safe_filename(fancard) if fancard else None
     if fancard and (safe_card_creator != fancard or not month or len(month) != 7
                     or month[4] != "-" or not month.replace("-", "").isdigit()):
-        console.print("[red]Fan Card 需要安全的 Creator ID 與 --month YYYY-MM。[/red]")
+        console.print(f"[red]{tr('cli.open.fancard_arguments')}[/red]")
         raise typer.Exit(2)
 
     target_folder = root
@@ -592,46 +675,46 @@ def open_archive(
         if selected:
             target_folder = Path(str(selected["local_path"])).resolve()
         else:
-            console.print(f"[red]找不到投稿版本：[/red]{post}")
+            console.print(f"[red]{tr('cli.open.version_missing')}[/red]{post}")
             raise typer.Exit(1)
     elif fancard:
         selected = database.latest_fancard_version(fancard, month or "")
         if selected:
             target_folder = Path(str(selected["local_path"])).resolve()
         else:
-            console.print(f"[red]找不到 Fan Card：[/red]{fancard}/{month}")
+            console.print(f"[red]{tr('cli.open.fancard_missing')}[/red]{fancard}/{month}")
             raise typer.Exit(1)
     elif creator:
         safe_creator = safe_filename(creator)
         if safe_creator != creator:
-            console.print("[red]Creator ID 含有不安全字元。[/red]")
+            console.print(f"[red]{tr('cli.open.unsafe_creator')}[/red]")
             raise typer.Exit(2)
         target_folder = confined_path(root, Path(safe_creator))
     try:
         target_folder.relative_to(root)
     except ValueError as exc:
-        console.print("[red]資料庫中的本機路徑超出備份根目錄。[/red]")
+        console.print(f"[red]{tr('cli.open.outside_root')}[/red]")
         raise typer.Exit(1) from exc
     if not target_folder.is_dir():
-        console.print(f"[red]找不到備份目錄：[/red]{target_folder}")
+        console.print(f"[red]{tr('cli.open.folder_missing')}[/red]{target_folder}")
         raise typer.Exit(1)
     open_folder(target_folder)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_versions"))
 def versions(
-    post_id: Annotated[str, typer.Argument(help="投稿 ID")],
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    post_id: Annotated[str, typer.Argument(help=_h("cli.help.post_id"))],
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """列出某篇投稿已保存的所有版本。"""
     if not post_id.isdigit():
-        console.print("[red]投稿 ID 必須是數字。[/red]")
+        console.print(f"[red]{tr('cli.post_id_numeric')}[/red]")
         raise typer.Exit(2)
     rows = ArchiveService(load_config(config)).db.version_rows(post_id)
     if not rows:
-        console.print(f"找不到投稿 {post_id} 的版本紀錄。")
+        console.print(tr("cli.versions.none", post_id=post_id))
         raise typer.Exit(1)
-    table = Table("版本", "遠端更新時間", "擷取時間", "狀態", "路徑")
+    table = Table(tr("cli.versions.column_version"), tr("cli.versions.column_remote_updated"),
+                  tr("cli.versions.column_captured"), tr("cli.versions.column_status"), tr("cli.versions.column_path"))
     for row in rows:
         table.add_row(
             f"v{int(row['version_number']):04d}", format_local_time(row["remote_updated_at"]),
@@ -640,12 +723,11 @@ def versions(
     console.print(table)
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_retry"))
 def retry(
-    browser: Annotated[str | None, typer.Option("--browser", help="從指定瀏覽器讀取 FANBOX Cookie，例如 chrome")] = None,
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    browser: Annotated[str | None, typer.Option("--browser", help=_h("cli.help.browser"))] = None,
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """重新處理資料庫中含失敗、遺失或損壞資源的投稿。"""
     try:
         settings = load_config(config)
         cookie = get_cookie(settings, browser)
@@ -655,7 +737,7 @@ def retry(
     service = ArchiveService(settings, cookie=cookie)
     versions_to_retry = service.db.retryable_versions()
     if not versions_to_retry:
-        console.print("沒有需要重試的版本或資源。")
+        console.print(tr("cli.retry.none"))
         return
     for row in versions_to_retry:
         post_id = str(row["post_id"])
@@ -670,13 +752,12 @@ def retry(
             console.print(f"[red]{post_id}/v{int(row['version_number']):04d}: {exc}[/red]")
 
 
-@app.command()
+@app.command(help=_h("cli.help.cmd_status"))
 def status(
-    config: Annotated[Path, typer.Option("--config", "-c", help="設定檔路徑")] = Path("config.yaml"),
+    config: Annotated[Path, typer.Option("--config", "-c", help=_h("cli.help.config"))] = Path("config.yaml"),
 ) -> None:
-    """顯示本機備份資料庫統計。"""
     settings = load_config(config)
-    t = translator(settings)
+    t = tr
     database = ArchiveService(settings).db
     stats = database.statistics()
     if not stats:

@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from fanbox_archiver import i18n
+from fanbox_archiver import cli
 from fanbox_archiver.cli import app
 from fanbox_archiver.config import AppConfig, StorageConfig
 from fanbox_archiver.i18n import (
@@ -40,7 +41,7 @@ def _used_keys() -> set[str]:
     keys: set[str] = set()
     for path in sources:
         text = path.read_text(encoding="utf-8")
-        keys |= set(re.findall(r"""\bt\(\s*["']([a-z0-9_]+(?:\.[a-z0-9_]+)+)["']""", text))
+        keys |= set(re.findall(r"""\b(?:t|tr|_h)\(\s*["']([a-z0-9_]+(?:\.[a-z0-9_]+)+)["']""", text))
     html = (PACKAGE / "web_assets" / "index.html").read_text(encoding="utf-8")
     keys |= set(re.findall(r'data-i18n="([^"]+)"', html))
     for attributes in re.findall(r'data-i18n-attr="([^"]+)"', html):
@@ -52,7 +53,8 @@ def _used_keys() -> set[str]:
 
 def test_every_key_used_by_the_ui_and_cli_exists():
     used = _used_keys()
-    assert {"nav.posts", "posts.total", "cli.status.last_run", "search.creators"} <= used
+    assert {"nav.posts", "posts.total", "cli.status.last_run", "search.creators", "cli.help.cmd_backup",
+            "cli.open.version_needs_post"} <= used
     assert sorted(used - set(catalog(BASE_LOCALE))) == []
 
 
@@ -141,3 +143,41 @@ def test_cli_status_follows_the_config_language_and_the_lang_option(tmp_path: Pa
 
     invalid = runner.invoke(app, ["--lang", "xx", "status", "--config", str(path)])
     assert invalid.exit_code != 0
+
+
+def _help_texts(command) -> list[str]:
+    texts = [command.help] + [getattr(param, "help", None) for param in command.params]
+    for child in getattr(command, "commands", {}).values():
+        texts += _help_texts(child)
+    return [text for text in texts if text]
+
+
+def test_cli_help_of_every_command_follows_the_language():
+    base = _help_texts(cli.localized_command(BASE_LOCALE))
+    assert "保守、低頻率的 pixivFANBOX 個人本機備份工具。" in base and all("［" not in text for text in base)
+    # Typer's own options (--help, --install-completion) are English and not ours to translate.
+    ours = [text for text in _help_texts(cli.localized_command(PSEUDO_LOCALE))
+            if re.search(r"[㐀-鿿]", text)]
+    assert len(ours) >= 40
+    assert [text for text in ours if not text.startswith("［")] == []
+    # Building the pseudo help must not leak into the next build.
+    assert _help_texts(cli.localized_command(BASE_LOCALE)) == base
+
+
+def test_cli_help_language_is_read_from_the_command_line_before_parsing(tmp_path: Path):
+    pseudo_config = _status_config(tmp_path, "qps-ploc")
+    assert cli._argv_locale(["status", "--config", str(pseudo_config)]) == PSEUDO_LOCALE
+    assert cli._argv_locale(["status", f"--config={pseudo_config}"]) == PSEUDO_LOCALE
+    assert cli._argv_locale(["--lang", "zh-Hant", "status", "-c", str(pseudo_config)]) == BASE_LOCALE
+    assert cli._argv_locale(["--lang", "qps-ploc", "--help"]) == PSEUDO_LOCALE
+    assert cli._argv_locale(["status", "--config", str(tmp_path / "missing.yaml")]) == BASE_LOCALE
+
+
+def test_cli_messages_follow_the_language(tmp_path: Path):
+    path = _status_config(tmp_path)
+    usage = runner.invoke(app, ["--lang", "qps-ploc", "open", "--version", "3", "--config", str(path)])
+    assert usage.exit_code == 2 and "［--version 必須搭配 --post。" in usage.output
+    bad_id = runner.invoke(app, ["--lang", "qps-ploc", "versions", "abc", "--config", str(path)])
+    assert bad_id.exit_code == 2 and "［投稿 ID 必須是數字。" in bad_id.output
+    plain = runner.invoke(app, ["versions", "abc", "--config", str(path)])
+    assert "投稿 ID 必須是數字。" in plain.output and "［" not in plain.output
