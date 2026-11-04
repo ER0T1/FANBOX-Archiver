@@ -51,7 +51,10 @@ def _load(locale: str) -> dict[str, Message]:
 
 def _pseudo_text(text: str) -> str:
     # Pad outside placeholders so interpolation keeps working; brackets mark catalogued text.
-    padding = "·" * max(2, round(len(PLACEHOLDER.sub("", text)) * 0.4))
+    # Groups of at most four dots with spaces between, so long messages can wrap like real text
+    # (an unbroken run of dots could never wrap and would overflow narrow screens).
+    count = max(2, round(len(PLACEHOLDER.sub("", text)) * 0.4))
+    padding = " ".join("·" * min(4, count - start) for start in range(0, count, 4))
     return f"［{text}{padding}］"
 
 

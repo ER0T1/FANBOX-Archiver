@@ -1,18 +1,16 @@
 namespace FanboxUI {
-  const COLOR_LABELS: Record<string, string> = {
-    bg: "背景", surface: "卡片", "surface-2": "次要卡片", text: "文字", muted: "次要文字", line: "分隔線",
-    accent: "強調色", "accent-soft": "強調淡色", blue: "藍（資訊）", green: "綠（成功）",
-    yellow: "黃（警告）", red: "紅（錯誤）", purple: "紫",
-  };
-  const MODE_LABELS: Record<ColorMode, string> = {light: "亮色配色", dark: "暗色配色"};
+  const NAMED_COLORS = ["bg", "surface", "surface-2", "text", "muted", "line", "accent", "accent-soft",
+    "blue", "green", "yellow", "red", "purple"];
+  const colorLabel = (key: string): string => NAMED_COLORS.includes(key) ? t(`colors.${key.replace("-", "_")}`) : key;
+  const modeLabel = (mode: ColorMode): string => t(`colors.mode_${mode}`);
   const HEX_COLOR = /^#[0-9a-f]{6}$/;
   const EXPORT_FORMAT = "fanbox-archiver-colors";
-  /** [foreground, background, minimum ratio, label]; "white" is the text on accent buttons. */
+  /** [foreground, background, minimum ratio, label key]; "white" is the text on accent buttons. */
   const CONTRAST_CHECKS: [string, string, number, string][] = [
-    ["text", "bg", 4.5, "文字／背景"], ["text", "surface", 4.5, "文字／卡片"],
-    ["text", "surface-2", 4.5, "文字／次要卡片"], ["muted", "surface", 3, "次要文字／卡片"],
-    ["accent", "surface", 3, "強調色／卡片"], ["white", "accent", 3, "按鈕白字／強調色"],
-    ["red", "surface", 3, "錯誤色／卡片"], ["green", "surface", 3, "成功色／卡片"],
+    ["text", "bg", 4.5, "colors.pair_text_bg"], ["text", "surface", 4.5, "colors.pair_text_surface"],
+    ["text", "surface-2", 4.5, "colors.pair_text_surface_2"], ["muted", "surface", 3, "colors.pair_muted_surface"],
+    ["accent", "surface", 3, "colors.pair_accent_surface"], ["white", "accent", 3, "colors.pair_white_accent"],
+    ["red", "surface", 3, "colors.pair_red_surface"], ["green", "surface", 3, "colors.pair_green_surface"],
   ];
 
   function hexToRgb(hex: string): [number, number, number] {
@@ -64,18 +62,18 @@ namespace FanboxUI {
   /** Validates an imported or pasted palette exactly like the server does. */
   export function parseColorExport(text: string, keys: string[]): ThemeColorSettings {
     let value: unknown;
-    try { value = JSON.parse(text); } catch { throw new Error("檔案不是有效的 JSON。"); }
+    try { value = JSON.parse(text); } catch { throw new Error(t("colors.invalid_json")); }
     if (!value || typeof value !== "object" || (value as {format?: unknown}).format !== EXPORT_FORMAT) {
-      throw new Error("這不是 FANBOX Archiver 匯出的配色檔。");
+      throw new Error(t("colors.not_export"));
     }
     const result: ThemeColorSettings = {light: {}, dark: {}};
     for (const mode of ["light", "dark"] as ColorMode[]) {
       const colors = (value as Record<string, unknown>)[mode] ?? {};
-      if (typeof colors !== "object" || colors === null) throw new Error(`${MODE_LABELS[mode]}格式錯誤。`);
+      if (typeof colors !== "object" || colors === null) throw new Error(t("colors.mode_invalid", {mode: modeLabel(mode)}));
       for (const [key, color] of Object.entries(colors)) {
-        if (!keys.includes(key)) throw new Error(`不支援的顏色名稱：${key}`);
+        if (!keys.includes(key)) throw new Error(t("colors.unknown_key", {key}));
         const normalized = String(color).trim().toLowerCase();
-        if (!HEX_COLOR.test(normalized)) throw new Error(`顏色必須是 #RRGGBB：${key}`);
+        if (!HEX_COLOR.test(normalized)) throw new Error(t("colors.invalid_hex", {key}));
         result[mode][key] = normalized;
       }
     }
@@ -90,7 +88,7 @@ namespace FanboxUI {
     node: HTMLElement; set(value: number): void;
   } {
     const range = h("input", {type: "range", min: 0, max, step: 1, "aria-label": label}) as HTMLInputElement;
-    const number = h("input", {type: "number", min: 0, max, step: 1, "aria-label": `${label}數值`}) as HTMLInputElement;
+    const number = h("input", {type: "number", min: 0, max, step: 1, "aria-label": t("colors.slider_value", {label})}) as HTMLInputElement;
     const emit = (source: HTMLInputElement): void => {
       const value = Math.min(max, Math.max(0, Math.round(Number(source.value) || 0)));
       (source === range ? number : range).value = String(value);
@@ -116,25 +114,26 @@ namespace FanboxUI {
     const effective = (key: string): string => working[mode][key] ?? defaults[mode][key] ?? "#000000";
     const feedback = h("p", {class: "color-feedback", role: "status", "aria-live": "polite"});
     const warnings = h("ul", {class: "color-warnings"});
-    const preview = h("div", {class: "color-preview", "aria-label": "配色預覽"},
+    const preview = h("div", {class: "color-preview", "aria-label": t("colors.preview_label")},
       h("div", {class: "color-preview-card"},
-        h("strong", {}, "預覽標題"), h("p", {}, "一般文字的樣子。"), h("p", {class: "color-preview-muted"}, "次要說明文字"),
+        h("strong", {}, t("colors.preview_title")), h("p", {}, t("colors.preview_text")), h("p", {class: "color-preview-muted"}, t("colors.preview_muted")),
         h("div", {class: "color-preview-row"},
-          h("span", {class: "color-preview-button"}, "主要按鈕"), h("span", {class: "color-preview-chip"}, "強調標籤"),
-          h("span", {class: "color-preview-link"}, "連結文字")),
+          h("span", {class: "color-preview-button"}, t("colors.preview_button")), h("span", {class: "color-preview-chip"}, t("colors.preview_chip")),
+          h("span", {class: "color-preview-link"}, t("colors.preview_link"))),
         h("div", {class: "color-preview-row"}, ...["blue", "green", "yellow", "red", "purple"].map(key =>
-          h("span", {class: "color-preview-status", "data-color": key}, COLOR_LABELS[key] ?? key)))));
+          h("span", {class: "color-preview-status", "data-color": key}, colorLabel(key))))));
     const rows = h("div", {class: "color-rows"});
     const modeButtons = (["light", "dark"] as ColorMode[]).map(value => h("button", {type: "button",
       class: "color-mode", "aria-pressed": value === mode,
-      onclick: () => { mode = value; render(); }}, MODE_LABELS[value]));
+      onclick: () => { mode = value; render(); }}, modeLabel(value)));
 
     function refreshPreview(): void {
       for (const key of keys) preview.style.setProperty(`--${key}`, effective(key));
-      warnings.replaceChildren(...CONTRAST_CHECKS.flatMap(([foreground, background, minimum, label]) => {
+      warnings.replaceChildren(...CONTRAST_CHECKS.flatMap(([foreground, background, minimum, labelKey]) => {
         const ratio = contrastRatio(foreground === "white" ? "#ffffff" : effective(foreground), effective(background));
         return ratio < minimum
-          ? [h("li", {}, `${label} 對比度 ${ratio.toFixed(2)}:1，低於建議的 ${minimum}:1，可能不易閱讀。`)] : [];
+          ? [h("li", {}, t("colors.contrast_warning",
+            {label: t(labelKey), ratio: ratio.toFixed(2), minimum: String(minimum)}))] : [];
       }));
       warnings.hidden = !warnings.childElementCount;
     }
@@ -144,7 +143,7 @@ namespace FanboxUI {
       const code = h("code", {});
       const badge = h("small", {class: "color-badge"});
       const hex = h("input", {type: "text", maxlength: 7, spellcheck: "false", autocomplete: "off",
-        "aria-label": `${COLOR_LABELS[key]} Hex`, class: "color-hex"}) as HTMLInputElement;
+        "aria-label": t("colors.hex_label", {label: colorLabel(key)}), class: "color-hex"}) as HTMLInputElement;
       let current = effective(key);
       const setColor = (value: string, source?: string): void => {
         current = value;
@@ -164,12 +163,12 @@ namespace FanboxUI {
         setColor(rgbToHex(...hslToRgb(...hsl)), "hsl");
       };
       const rgb = ["R", "G", "B"].map((label, index) => numberSlider(label, 255, fromRgb(index)));
-      const hsl = [["色相", 360], ["彩度", 100], ["明暗", 100]].map(([label, max], index) =>
+      const hsl = [[t("colors.hue"), 360], [t("colors.saturation"), 100], [t("colors.lightness"), 100]].map(([label, max], index) =>
         numberSlider(label as string, max as number, fromHsl(index)));
       function update(source?: string): void {
         swatch.style.background = current;
         code.textContent = current;
-        badge.textContent = working[mode][key] ? "已自訂" : "預設";
+        badge.textContent = working[mode][key] ? t("colors.badge_custom") : t("colors.badge_default");
         badge.classList.toggle("custom", Boolean(working[mode][key]));
         if (source !== "hex") { hex.value = current; hex.removeAttribute("aria-invalid"); }
         if (source !== "rgb") hexToRgb(current).forEach((value, index) => rgb[index]?.set(value));
@@ -184,12 +183,12 @@ namespace FanboxUI {
       hex.addEventListener("blur", () => update());
       update();
       return h("details", {class: "color-row"},
-        h("summary", {}, swatch, h("span", {class: "color-name"}, COLOR_LABELS[key] ?? key), code, badge),
+        h("summary", {}, swatch, h("span", {class: "color-name"}, colorLabel(key)), code, badge),
         h("div", {class: "color-controls"},
           h("label", {class: "color-hex-field"}, h("span", {}, "Hex"), hex),
           h("div", {class: "color-slider-group"}, h("span", {class: "color-group-label"}, "RGB"), ...rgb.map(item => item.node)),
-          h("div", {class: "color-slider-group"}, h("span", {class: "color-group-label"}, "色相／彩度／明暗"), ...hsl.map(item => item.node)),
-          h("button", {type: "button", onclick: () => setColor(defaults[mode][key] ?? current)}, "恢復此色預設")));
+          h("div", {class: "color-slider-group"}, h("span", {class: "color-group-label"}, t("colors.hsl_group")), ...hsl.map(item => item.node)),
+          h("button", {type: "button", onclick: () => setColor(defaults[mode][key] ?? current)}, t("colors.reset_color"))));
     }
 
     function render(): void {
@@ -208,22 +207,22 @@ namespace FanboxUI {
         try {
           working = parseColorExport(await file.text(), keys);
           render();
-          feedback.textContent = "已匯入配色；按「儲存設定」後才會套用。";
+          feedback.textContent = t("colors.imported");
         } catch (error) {
-          feedback.textContent = `無法匯入：${error instanceof Error ? error.message : String(error)}`;
+          feedback.textContent = t("colors.import_failed", {error: error instanceof Error ? error.message : String(error)});
         }
       }}) as HTMLInputElement;
 
-    const node = h("section", {class: "settings-section color-editor"}, h("h3", {}, "自訂配色"),
+    const node = h("section", {class: "settings-section color-editor"}, h("h3", {}, t("colors.title")),
       h("p", {class: "settings-section-description"},
-        "只能調整下列顏色，未自訂的顏色沿用內建值；亮色與暗色各一組。儲存後套用到動態閱讀器與桌面程式。"),
-      h("div", {class: "color-mode-switch", role: "group", "aria-label": "編輯哪一組配色"}, ...modeButtons),
+        t("colors.description")),
+      h("div", {class: "color-mode-switch", role: "group", "aria-label": t("colors.mode_switch_label")}, ...modeButtons),
       preview, warnings, rows,
       h("div", {class: "color-actions"},
         h("button", {type: "button", onclick: () => { working[mode] = {}; render();
-          feedback.textContent = `${MODE_LABELS[mode]}已恢復內建值；按「儲存設定」後套用。`; }}, "恢復此組預設"),
-        h("button", {type: "button", onclick: () => { working = copy(saved); render(); feedback.textContent = "已取消未儲存的配色修改。"; }},
-          "取消未儲存修改"),
+          feedback.textContent = t("colors.mode_reset", {mode: modeLabel(mode)}); }}, t("colors.reset_mode")),
+        h("button", {type: "button", onclick: () => { working = copy(saved); render(); feedback.textContent = t("colors.discarded"); }},
+          t("colors.discard")),
         h("button", {type: "button", onclick: () => {
           const blob = new Blob([JSON.stringify({format: EXPORT_FORMAT, version: 1, ...working}, null, 2) + "\n"],
             {type: "application/json"});
@@ -233,9 +232,9 @@ namespace FanboxUI {
           link.click();
           link.remove();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-          feedback.textContent = "已匯出目前編輯中的配色（JSON，不含任何帳號資料）。";
-        }}, "匯出配色"),
-        h("button", {type: "button", onclick: () => importInput.click()}, "匯入配色"), importInput),
+          feedback.textContent = t("colors.exported");
+        }}, t("colors.export")),
+        h("button", {type: "button", onclick: () => importInput.click()}, t("colors.import")), importInput),
       feedback);
     render();
     return {node, read: () => copy(working)};

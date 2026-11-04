@@ -27,25 +27,23 @@ namespace FanboxUI {
     let choice = custom ? OTHER_TIMEZONE : setting;
     const listId = `timezone-list-${Math.random().toString(36).slice(2, 9)}`;
     const other = h("input", {type: "text", value: custom ? setting : "", list: listId, spellcheck: "false",
-      placeholder: "例如 Asia/Tokyo", "aria-label": "其他時區（IANA 名稱）", autocomplete: "off"}) as HTMLInputElement;
+      placeholder: t("settings.timezone_placeholder"), "aria-label": t("settings.timezone_other_aria"), autocomplete: "off"}) as HTMLInputElement;
     const otherField = h("label", {class: "setting-field timezone-other", hidden: !custom},
-      h("span", {}, "其他時區（輸入以搜尋）"), other,
+      h("span", {}, t("settings.timezone_other_search")), other,
       h("datalist", {id: listId}, data.timezones.all.map(name => h("option", {value: name}))));
-    const select = customSelect({id: "display-timezone", label: "時區", value: choice, disabled: blocked,
-      options: [{value: "system", label: `電腦系統（目前：${data.display.system_timezone}）`},
-        ...common.map(name => ({value: name, label: name})), {value: OTHER_TIMEZONE, label: "其他時區…"}],
+    const select = customSelect({id: "display-timezone", label: t("settings.timezone"), value: choice, disabled: blocked,
+      options: [{value: "system", label: t("settings.timezone_system", {zone: data.display.system_timezone})},
+        ...common.map(name => ({value: name, label: name})), {value: OTHER_TIMEZONE, label: t("settings.timezone_other")}],
       onChange: next => { choice = next; otherField.hidden = next !== OTHER_TIMEZONE; if (!otherField.hidden) other.focus(); }});
-    const node = h("section", {class: "settings-section"}, h("h3", {}, "時區"),
+    const node = h("section", {class: "settings-section"}, h("h3", {}, t("settings.timezone")),
       h("p", {class: "settings-section-description"},
-        `所有時間以 24 小時制、依此時區顯示，自動備份的時間也依此解讀；切換不會改寫已保存的資料。目前生效：${data.display.timezone}`),
+        t("settings.timezone_description", {zone: data.display.timezone})),
       data.display.notice ? h("p", {class: "notice"}, data.display.notice) : null,
-      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "時區"), select), otherField));
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, t("settings.timezone")), select), otherField));
     return {node, read: () => choice === OTHER_TIMEZONE ? other.value.trim() : choice};
   }
 
-  const THEME_LABELS: Record<ThemeSetting, string> = {
-    system: "跟隨系統（Windows 深淺色）", dark: "暗色", light: "亮色",
-  };
+  const THEMES: ThemeSetting[] = ["system", "dark", "light"];
 
   /** Applies a theme to this page the same way the server does on load ("system" is rendered as "auto"). */
   export function applyTheme(theme: ThemeSetting): void {
@@ -54,32 +52,31 @@ namespace FanboxUI {
 
   function themeControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): ThemeSetting} {
     let choice: ThemeSetting = data.editable.display.theme;
-    const select = customSelect({id: "display-theme", label: "主題", value: choice, disabled: blocked,
-      options: (Object.keys(THEME_LABELS) as ThemeSetting[]).map(value => ({value, label: THEME_LABELS[value]})),
+    const select = customSelect({id: "display-theme", label: t("settings.theme"), value: choice, disabled: blocked,
+      options: THEMES.map(value => ({value, label: t(`settings.theme_${value}`)})),
       onChange: next => { choice = next as ThemeSetting; applyTheme(choice); }});
-    const node = h("section", {class: "settings-section"}, h("h3", {}, "主題"),
+    const node = h("section", {class: "settings-section"}, h("h3", {}, t("settings.theme")),
       h("p", {class: "settings-section-description"},
-        "選擇後立即預覽，儲存後套用到動態閱讀器與桌面程式。"),
-      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "主題"), select)));
+        t("settings.theme_description")),
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, t("settings.theme")), select)));
     return {node, read: () => choice};
   }
 
-  // Language names are shown in their own language. The pseudo-locale is listed only while
-  // config.yaml selects it, so saving the form never silently switches it off.
-  const LANGUAGE_LABELS: Record<LanguageSetting, string> = {
-    auto: "跟隨系統", "zh-Hant": "繁體中文", "qps-ploc": "測試語系（Pseudo，僅限 config.yaml）",
-  };
+  // Language names are shown in their own language and never translated. The pseudo-locale is
+  // listed only while config.yaml selects it, so saving the form never silently switches it off.
+  const languageLabel = (value: LanguageSetting): string => value === "auto" ? t("settings.language_auto")
+    : value === "qps-ploc" ? t("settings.language_pseudo") : "繁體中文";
 
   function languageControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): LanguageSetting} {
     let choice: LanguageSetting = data.editable.display.language;
     const values: LanguageSetting[] = choice === "qps-ploc" ? ["auto", "zh-Hant", "qps-ploc"] : ["auto", "zh-Hant"];
-    const select = customSelect({id: "display-language", label: "介面語言", value: choice, disabled: blocked,
-      options: values.map(value => ({value, label: LANGUAGE_LABELS[value]})),
+    const select = customSelect({id: "display-language", label: t("settings.language"), value: choice, disabled: blocked,
+      options: values.map(value => ({value, label: languageLabel(value)})),
       onChange: next => { choice = next as LanguageSetting; }});
-    const node = h("section", {class: "settings-section"}, h("h3", {}, "介面語言"),
+    const node = h("section", {class: "settings-section"}, h("h3", {}, t("settings.language")),
       h("p", {class: "settings-section-description"},
-        `目前提供繁體中文；「跟隨系統」找不到支援的語言時使用繁體中文。投稿、創作者名稱與標籤等封存內容不會翻譯。儲存後重新整理頁面套用。目前生效：${currentLocale()}`),
-      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, "介面語言"), select)));
+        t("settings.language_description", {locale: currentLocale()})),
+      h("div", {class: "settings-grid two-columns"}, h("div", {class: "setting-field"}, h("span", {}, t("settings.language")), select)));
     return {node, read: () => choice};
   }
 
@@ -106,9 +103,9 @@ namespace FanboxUI {
   /** Versions, locations and safe folder shortcuts; never shows cookies or sign-in data. */
   function renderAboutSection(info: DiagnosticsInfo | null, actions: AboutSectionActions): HTMLElement {
     const card = h("section", {class: "settings-card about-card"},
-      h("p", {class: "eyebrow"}, "ABOUT & DIAGNOSTICS"), h("h2", {}, "關於與診斷"));
+      h("p", {class: "eyebrow"}, "ABOUT & DIAGNOSTICS"), h("h2", {}, t("settings.tab_about")));
     if (!info) {
-      card.append(h("p", {class: "notice"}, "無法讀取診斷資訊；重新整理後再試一次。"));
+      card.append(h("p", {class: "notice"}, t("settings.about_unavailable")));
       return card;
     }
     const feedback = h("p", {class: "about-feedback", role: "status", "aria-live": "polite"});
@@ -116,61 +113,58 @@ namespace FanboxUI {
       feedback.textContent = text;
       feedback.classList.toggle("settings-error", error);
     };
-    const schema = info.schema.database === null ? `無法讀取（程式支援 ${info.schema.supported}）`
-      : `${info.schema.database}（程式支援 ${info.schema.supported}）`;
+    const supported = String(info.schema.supported);
+    const schema = info.schema.database === null ? t("settings.schema_unreadable", {supported})
+      : t("settings.schema_value", {database: String(info.schema.database), supported});
     const rows: [string, string][] = [
-      ["程式版本", info.app_version],
-      ["執行方式", info.mode === "desktop" ? `桌面版 ${info.desktop_version ?? "（版本不明）"}` : "瀏覽器版"],
-      ["資料庫 schema", schema],
+      [t("settings.about_app_version"), info.app_version],
+      [t("settings.about_mode"), info.mode === "desktop" ? t("settings.about_desktop", {version: info.desktop_version ?? t("settings.about_version_unknown")}) : t("settings.about_browser")],
+      [t("settings.about_schema"), schema],
       ["Python", info.python_version],
-      ["作業系統", info.os],
-      ["時區", info.timezone],
-      ["設定檔", info.paths.config ?? "未指定"],
-      ["封存目錄", info.paths.archive],
-      ["資料庫", info.paths.database],
-      ["封存日誌", info.paths.archive_logs],
+      [t("settings.about_os"), info.os],
+      [t("settings.timezone"), info.timezone],
+      [t("settings.about_config"), info.paths.config ?? t("settings.about_unspecified")],
+      [t("settings.about_archive"), info.paths.archive],
+      [t("settings.about_database"), info.paths.database],
+      [t("settings.about_archive_logs"), info.paths.archive_logs],
     ];
-    if (info.paths.desktop_logs) rows.push(["桌面日誌", info.paths.desktop_logs]);
-    const folderButton = (target: FolderTarget, label: string, missing: string): HTMLElement => {
+    if (info.paths.desktop_logs) rows.push([t("settings.about_desktop_logs"), info.paths.desktop_logs]);
+    const folderButton = (target: FolderTarget): HTMLElement => {
       const available = info.can_open_folders && info.folders[target];
       return h("button", {type: "button", disabled: !available,
-        title: !info.can_open_folders ? "此系統無法開啟資料夾" : info.folders[target] ? "" : missing,
+        title: !info.can_open_folders ? t("settings.folder_unsupported") : info.folders[target] ? ""
+          : t(`settings.folder_missing_${target}`),
         onclick: async (event: Event) => {
           const button = event.currentTarget as HTMLButtonElement;
           button.disabled = true;
           const error = await actions.onOpen(target);
           button.disabled = false;
-          show(error ? `無法開啟資料夾：${error}` : `已開啟「${label.replace("開啟", "")}」。`, Boolean(error));
-        }}, label);
+          show(error ? t("settings.folder_open_failed", {error})
+            : t("settings.folder_opened", {name: t(`settings.folder_${target}`)}), Boolean(error));
+        }}, t(`settings.open_${target}`));
     };
     card.append(
       h("p", {class: "settings-section-description"},
-        "回報問題時可附上下方的診斷資訊；其中不含 Cookie、帳號或登入資料。"),
+        t("settings.about_description")),
       ...(info.notices ?? []).map(text => h("p", {class: "notice"}, text)),
       h("div", {class: "settings-paths about-facts"},
         rows.map(([label, value]) => h("div", {}, h("span", {}, label), h("code", {}, value)))),
       h("div", {class: "account-actions about-actions"},
-        folderButton("archive", "開啟封存資料夾", "封存資料夾不存在"),
-        folderButton("archive_logs", "開啟封存日誌資料夾", "尚未產生日誌（需啟用「寫入檔案日誌」）"),
-        info.paths.desktop_logs ? folderButton("desktop_logs", "開啟桌面日誌資料夾", "尚未產生桌面日誌") : null,
+        folderButton("archive"),
+        folderButton("archive_logs"),
+        info.paths.desktop_logs ? folderButton("desktop_logs") : null,
         h("button", {type: "button", onclick: async () => {
-          show(await copyText(info.text) ? "診斷資訊已複製到剪貼簿。" : "無法複製；請手動選取上方文字。",
+          show(await copyText(info.text) ? t("settings.copied") : t("settings.copy_failed"),
             false);
-        }}, "複製診斷資訊")),
+        }}, t("settings.copy_diagnostics"))),
       feedback);
     return card;
   }
 
-  export const SETTINGS_TABS: {id: SettingsTab; label: string}[] = [
-    {id: "account", label: "帳號與登入"},
-    {id: "general", label: "一般"},
-    {id: "backup", label: "備份"},
-    {id: "theme", label: "主題"},
-    {id: "about", label: "關於與診斷"},
-  ];
+  export const SETTINGS_TABS: SettingsTab[] = ["account", "general", "backup", "theme", "about"];
 
   export function isSettingsTab(value: unknown): value is SettingsTab {
-    return SETTINGS_TABS.some(tab => tab.id === value);
+    return SETTINGS_TABS.includes(value as SettingsTab);
   }
 
   export interface AccountActions {
@@ -205,23 +199,23 @@ namespace FanboxUI {
     setAuth(auth: AuthStatus): void;
   }
 
-  const AUTH_LABELS: Record<AuthState, string> = {checking: "檢查中", locked: "工作中", authenticated: "已登入",
-    signed_out: "未登入", expired: "已失效", error: "檢查失敗"};
+  const authLabel = (state: AuthState): string => t(`settings.auth_${state}`);
 
   function renderAccountCard(auth: AuthStatus | null, blocked: boolean, actions: AccountActions): HTMLElement {
     if (!auth) {
       // Shown at once; the check can take a while (it may start the dedicated browser).
       return h("section", {class: "settings-card account-card tone-neutral", "aria-busy": "true"},
         h("div", {class: "account-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "ACCOUNT & SIGN-IN"),
-          h("h2", {}, "帳號／登入")), h("span", {class: "auth-badge neutral"}, "檢查中")),
-        h("p", {class: "account-message", role: "status", "aria-live": "polite"}, "正在檢查登入狀態…"));
+          h("h2", {}, t("settings.account_title"))), h("span", {class: "auth-badge neutral"}, authLabel("checking"))),
+        h("p", {class: "account-message", role: "status", "aria-live": "polite"}, t("settings.account_checking")));
     }
     const authBusy = auth.state === "checking";
     const authLocked = auth.state === "locked";
     const authTone = auth.state === "authenticated" ? "success"
       : auth.state === "expired" || auth.state === "error" ? "error" : "neutral";
     const lastKnown = authLocked && auth.last_known
-      ? `上次檢查：${AUTH_LABELS[auth.last_known.state]}（${formatDate(auth.last_known.checked_at)}）` : null;
+      ? t("settings.last_known", {state: authLabel(auth.last_known.state), time: formatDate(auth.last_known.checked_at)})
+      : null;
     const authFeedback = h("p", {class: "settings-error", role: "alert", hidden: true});
     const runAuth = async (action: () => Promise<string | null>): Promise<void> => {
       authFeedback.hidden = true;
@@ -230,30 +224,30 @@ namespace FanboxUI {
     };
     return h("section", {class: `settings-card account-card tone-${authTone}`},
       h("div", {class: "account-heading"}, h("div", {}, h("p", {class: "eyebrow"}, "ACCOUNT & SIGN-IN"),
-        h("h2", {}, "帳號／登入")), h("span", {class: `auth-badge ${authTone}`}, AUTH_LABELS[auth.state])),
+        h("h2", {}, t("settings.account_title"))), h("span", {class: `auth-badge ${authTone}`}, authLabel(auth.state))),
       h("p", {class: "account-message", role: "status", "aria-live": "polite"}, auth.message),
       lastKnown ? h("p", {class: "account-last-known"}, lastKnown) : null,
       h("p", {class: "settings-section-description"}, auth.source === "profile"
-        ? "認證來源：FANBOX Archiver 專用瀏覽器工作階段"
-        : auth.source === "environment" ? "認證來源：外部環境 FANBOX_COOKIE"
-        : "尚無認證來源"),
+        ? t("settings.source_profile")
+        : auth.source === "environment" ? t("settings.source_environment")
+        : t("settings.source_none")),
       auth.externally_managed ? h("p", {class: "auth-external-notice"},
-        "此登入由啟動環境管理，應用程式無法撤銷；請更新或移除 FANBOX_COOKIE 後重新啟動。") : null,
+        t("settings.external_notice")) : null,
       h("div", {class: "account-actions"},
         h("button", {type: "button", class: "primary", disabled: blocked || authLocked || authBusy || !auth.can_login,
-          onclick: () => void runAuth(actions.onLogin)}, "登入 FANBOX"),
-        h("button", {type: "button", disabled: blocked || authLocked || authBusy, onclick: actions.onRefresh}, "重新檢查"),
+          onclick: () => void runAuth(actions.onLogin)}, t("settings.login")),
+        h("button", {type: "button", disabled: blocked || authLocked || authBusy, onclick: actions.onRefresh}, t("settings.recheck")),
         authBusy && auth.job ? h("button", {type: "button", class: "danger-outline",
-          onclick: () => void runAuth(() => actions.onCancel(auth.job!.job_id))}, "取消登入") : null,
+          onclick: () => void runAuth(() => actions.onCancel(auth.job!.job_id))}, t("settings.cancel_login")) : null,
         h("button", {type: "button", class: "danger-outline",
           disabled: blocked || authLocked || authBusy || !auth.can_logout,
           onclick: async () => {
             const confirmed = await confirmDialog({
-              title: "登出 FANBOX？", message: "將清除專用 FANBOX 工作階段；封存與設定不會被刪除。",
-              cancelLabel: "取消", confirmLabel: "登出", danger: true,
+              title: t("settings.logout_title"), message: t("settings.logout_message"),
+              cancelLabel: t("settings.logout_cancel"), confirmLabel: t("settings.logout"), danger: true,
             });
             if (confirmed) void runAuth(actions.onLogout);
-          }}, "登出"), authFeedback));
+          }}, t("settings.logout")), authFeedback));
   }
 
   interface EditablePage {
@@ -268,22 +262,22 @@ namespace FanboxUI {
     const value = data.editable;
     const language = languageControl(data, blocked);
     const timezone = timezoneControl(data, blocked);
-    const markdown = settingCheckbox("產生 Markdown", value.markdown.enabled);
-    const frontMatter = settingCheckbox("加入 YAML front matter", value.markdown.yaml_front_matter);
-    const relativePaths = settingCheckbox("Markdown 使用相對圖片路徑", value.markdown.relative_image_paths);
-    const preserveOrder = settingCheckbox("保留原始內容順序", value.markdown.preserve_original_order);
-    const logLevel = customSelect({id: "log-level", label: "日誌等級", value: value.logging.level, disabled: blocked,
+    const markdown = settingCheckbox(t("settings.markdown_enabled"), value.markdown.enabled);
+    const frontMatter = settingCheckbox(t("settings.markdown_front_matter"), value.markdown.yaml_front_matter);
+    const relativePaths = settingCheckbox(t("settings.markdown_relative_paths"), value.markdown.relative_image_paths);
+    const preserveOrder = settingCheckbox(t("settings.markdown_original_order"), value.markdown.preserve_original_order);
+    const logLevel = customSelect({id: "log-level", label: t("settings.log_level"), value: value.logging.level, disabled: blocked,
       options: ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"].map(item => ({value: item, label: item}))});
-    const logLevelField = h("div", {class: "setting-field"}, h("span", {}, "日誌等級"), logLevel);
-    const keepDays = settingNumber("日誌保留天數", value.logging.keep_days, 1, 365);
-    const fileLogs = settingCheckbox("寫入檔案日誌", value.logging.write_to_file);
+    const logLevelField = h("div", {class: "setting-field"}, h("span", {}, t("settings.log_level")), logLevel);
+    const keepDays = settingNumber(t("settings.log_keep_days"), value.logging.keep_days, 1, 365);
+    const fileLogs = settingCheckbox(t("settings.log_to_file"), value.logging.write_to_file);
     const checked = (control: InputControl): TrackedField => ({node: control.node, read: () => control.input.checked});
     return {
-      content: [h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "GENERAL"), h("h2", {}, "一般"),
+      content: [h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "GENERAL"), h("h2", {}, t("settings.tab_general")),
         language.node, timezone.node,
         h("section", {class: "settings-section"}, h("h3", {}, "Markdown"),
           h("div", {class: "setting-toggles"}, markdown.node, frontMatter.node, relativePaths.node, preserveOrder.node)),
-        h("section", {class: "settings-section"}, h("h3", {}, "日誌"),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.logs")),
           h("div", {class: "settings-grid two-columns"}, logLevelField, keepDays.node),
           h("div", {class: "setting-toggles"}, fileLogs.node)))],
       fields: [
@@ -305,7 +299,7 @@ namespace FanboxUI {
     const theme = themeControl(data, blocked);
     const colors = colorEditor(data);
     return {
-      content: [h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "THEME"), h("h2", {}, "主題"),
+      content: [h("section", {class: "settings-card"}, h("p", {class: "eyebrow"}, "THEME"), h("h2", {}, t("settings.tab_theme")),
         theme.node, colors.node)],
       fields: [{node: theme.node, read: theme.read}, {node: colors.node, read: colors.read}],
       patch: () => ({display: {theme: theme.read(), colors: colors.read()}}),
@@ -318,47 +312,47 @@ namespace FanboxUI {
   ): EditablePage {
     const value = data.editable;
     const maxPosts = settingNumber(
-      "單次最多下載投稿數", value.sync.max_posts_per_run, 1, 100, 1,
-      "new、updated 與 retry 共用的下載配額；略過的投稿不占配額。新工作可單次覆寫。",
+      t("settings.max_posts"), value.sync.max_posts_per_run, 1, 100, 1,
+      t("settings.max_posts_hint"),
     );
     const unchangedStop = settingNumber(
-      "連續未變投稿停止掃描數", value.sync.recent_unchanged_stop_count, 1, 500, 1,
-      "連續遇到已完成且未更新投稿時停止掃描；這不是下載數量。",
+      t("settings.unchanged_stop"), value.sync.recent_unchanged_stop_count, 1, 500, 1,
+      t("settings.unchanged_stop_hint"),
     );
-    const defaultDryRun = settingCheckbox("完整備份只預覽，不下載", value.backup_defaults.dry_run);
-    const defaultProfile = settingCheckbox("預設拉取個人資料", value.backup_defaults.include_profile);
-    const defaultFancard = settingCheckbox("預設拉取粉絲卡", value.backup_defaults.include_fancard);
-    const originalImages = settingCheckbox("下載原始圖片", value.download.original_images);
-    const attachments = settingCheckbox("下載附件", value.download.download_attachments);
-    const covers = settingCheckbox("下載投稿與 Profile 封面", value.download.download_cover);
-    const resume = settingCheckbox("支援續傳", value.download.resume);
-    const hashes = settingCheckbox("下載後驗證 SHA-256", value.download.verify_sha256);
-    const preserveDeleted = settingCheckbox("保留遠端已刪除投稿的本機備份", value.sync.preserve_deleted_posts);
-    const skipCompleted = settingCheckbox("略過已完成且未更新的投稿", value.sync.skip_completed);
-    const checkUpdates = settingCheckbox("檢查遠端更新", value.sync.check_updates);
-    const rotate = settingCheckbox("輪替創作者處理順序", value.sync.rotate_creators);
-    const retries = settingNumber("失敗重試次數", value.download.retry_count, 0, 10);
-    const interval = settingNumber("請求間隔（秒）", value.download.request_interval_seconds, 1, 3600, .5,
-      "最低 1 秒；提高此值可降低請求頻率。");
-    const timeout = settingNumber("請求逾時（秒）", value.download.timeout_seconds, 5, 600);
+    const defaultDryRun = settingCheckbox(t("settings.default_dry_run"), value.backup_defaults.dry_run);
+    const defaultProfile = settingCheckbox(t("settings.default_profile"), value.backup_defaults.include_profile);
+    const defaultFancard = settingCheckbox(t("settings.default_fancard"), value.backup_defaults.include_fancard);
+    const originalImages = settingCheckbox(t("settings.original_images"), value.download.original_images);
+    const attachments = settingCheckbox(t("settings.attachments"), value.download.download_attachments);
+    const covers = settingCheckbox(t("settings.covers"), value.download.download_cover);
+    const resume = settingCheckbox(t("settings.resume"), value.download.resume);
+    const hashes = settingCheckbox(t("settings.verify_sha256"), value.download.verify_sha256);
+    const preserveDeleted = settingCheckbox(t("settings.preserve_deleted"), value.sync.preserve_deleted_posts);
+    const skipCompleted = settingCheckbox(t("settings.skip_completed"), value.sync.skip_completed);
+    const checkUpdates = settingCheckbox(t("settings.check_updates"), value.sync.check_updates);
+    const rotate = settingCheckbox(t("settings.rotate_creators"), value.sync.rotate_creators);
+    const retries = settingNumber(t("settings.retries"), value.download.retry_count, 0, 10);
+    const interval = settingNumber(t("settings.request_interval"), value.download.request_interval_seconds, 1, 3600, .5,
+      t("settings.request_interval_hint"));
+    const timeout = settingNumber(t("settings.request_timeout"), value.download.timeout_seconds, 5, 600);
     const scheduleSection = renderScheduleSection(value.schedule, schedule.status, schedule.creators, blocked,
       schedule.actions);
     const checked = (control: InputControl): TrackedField => ({node: control.node, read: () => control.input.checked});
     const number = (control: InputControl): TrackedField => ({node: control.node, read: () => control.input.value});
     return {
-      content: [h("section", {class: "settings-card backup-settings"}, h("p", {class: "eyebrow"}, "BACKUP"), h("h2", {}, "備份"),
-        h("section", {class: "settings-section"}, h("h3", {}, "工作數量與掃描停止"),
-          h("p", {class: "settings-section-description"}, "下載配額與掃描停止門檻是兩個不同概念。"),
+      content: [h("section", {class: "settings-card backup-settings"}, h("p", {class: "eyebrow"}, "BACKUP"), h("h2", {}, t("settings.tab_backup")),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.section_quota")),
+          h("p", {class: "settings-section-description"}, t("settings.section_quota_description")),
           h("div", {class: "settings-grid two-columns"}, maxPosts.node, unchangedStop.node)),
-        h("section", {class: "settings-section"}, h("h3", {}, "新工作預設"),
-          h("p", {class: "settings-section-description"}, "每次進入新工作表單時套用；重試仍沿用原工作設定。"),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.section_defaults")),
+          h("p", {class: "settings-section-description"}, t("settings.section_defaults_description")),
           h("div", {class: "setting-toggles"}, defaultDryRun.node, defaultProfile.node, defaultFancard.node)),
         scheduleSection.node,
-        h("section", {class: "settings-section"}, h("h3", {}, "內容與保存"),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.section_content")),
           h("div", {class: "setting-toggles"}, originalImages.node, attachments.node, covers.node, resume.node, hashes.node, preserveDeleted.node)),
-        h("section", {class: "settings-section"}, h("h3", {}, "更新判定與處理順序"),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.section_updates")),
           h("div", {class: "setting-toggles"}, skipCompleted.node, checkUpdates.node, rotate.node)),
-        h("section", {class: "settings-section"}, h("h3", {}, "網路與失敗處理"),
+        h("section", {class: "settings-section"}, h("h3", {}, t("settings.section_network")),
           h("div", {class: "settings-grid"}, retries.node, interval.node, timeout.node)))],
       fields: [
         number(maxPosts), number(unchangedStop), checked(defaultDryRun), checked(defaultProfile), checked(defaultFancard),
@@ -387,7 +381,7 @@ namespace FanboxUI {
         schedule: scheduleSection.read(),
       }),
       // "Run now" uses the saved schedule, so it waits until edits are saved or discarded.
-      onDirty: dirty => scheduleSection.setRunBlocked(dirty ? "請先儲存或放棄未儲存的變更，再立即執行。" : null),
+      onDirty: dirty => scheduleSection.setRunBlocked(dirty ? t("settings.run_blocked_unsaved") : null),
       onLocked: locked => scheduleSection.setLocked(locked),
     };
   }
@@ -397,20 +391,20 @@ namespace FanboxUI {
     const {data, tab} = ctx;
     let blocked = Boolean(ctx.activeJob);
     const tabButtons = new Map<SettingsTab, HTMLButtonElement>();
-    const tabs = h("nav", {class: "settings-tabs", "aria-label": "設定子頁面"},
+    const tabs = h("nav", {class: "settings-tabs", "aria-label": t("settings.tabs_label")},
       SETTINGS_TABS.map(item => {
-        const button = h("button", {type: "button", "data-settings-tab": item.id,
-          "aria-current": item.id === tab ? "page" : null, class: item.id === tab ? "active" : "",
-          onclick: () => { if (item.id !== tab) ctx.onTab(item.id); }},
-        h("span", {}, item.label)) as HTMLButtonElement;
-        tabButtons.set(item.id, button);
+        const button = h("button", {type: "button", "data-settings-tab": item,
+          "aria-current": item === tab ? "page" : null, class: item === tab ? "active" : "",
+          onclick: () => { if (item !== tab) ctx.onTab(item); }},
+        h("span", {}, t(`settings.tab_${item}`))) as HTMLButtonElement;
+        tabButtons.set(item, button);
         return button;
       }));
     const markTab = (dirty: boolean): void => {
       const button = tabButtons.get(tab);
       if (!button) return;
       button.querySelector(".tab-dirty")?.remove();
-      if (dirty) button.append(h("span", {class: "tab-dirty"}, "未儲存"));
+      if (dirty) button.append(h("span", {class: "tab-dirty"}, t("settings.tab_unsaved")));
     };
     let notice = activeJobNotice(ctx.activeJob) ?? h("div", {hidden: true});
     const body = h("div", {class: "settings-body"});
@@ -427,8 +421,8 @@ namespace FanboxUI {
 
     if (editable) {
       const feedback = h("p", {class: "settings-error", role: "alert", hidden: true});
-      save = h("button", {type: "submit", class: "primary", disabled: !data.writable || blocked}, "儲存設定") as HTMLButtonElement;
-      lockNote = h("span", {class: "notice", hidden: !blocked}, "工作結束後即可儲存設定。");
+      save = h("button", {type: "submit", class: "primary", disabled: !data.writable || blocked}, t("settings.save")) as HTMLButtonElement;
+      lockNote = h("span", {class: "notice", hidden: !blocked}, t("settings.locked_note"));
       fieldset = h("fieldset", {disabled: blocked}, ...editable.content) as HTMLFieldSetElement;
       const form = h("form", {class: "settings-form", "aria-disabled": blocked, onsubmit: async (event: Event) => {
         event.preventDefault();
@@ -438,13 +432,13 @@ namespace FanboxUI {
         const error = await ctx.onSave(editable.patch());
         if (save!.isConnected) save!.disabled = !data.writable || blocked;
         if (error) {
-          feedback.textContent = `儲存失敗：${error}`;
+          feedback.textContent = t("settings.save_failed", {error});
           feedback.hidden = false;
         }
       }},
       fieldset,
       h("div", {class: "settings-actions"}, save,
-        !data.writable ? h("span", {class: "notice"}, "目前伺服器未指定可寫入的設定檔。") : null,
+        !data.writable ? h("span", {class: "notice"}, t("settings.not_writable")) : null,
         lockNote, feedback));
       body.append(form);
       tracker = trackChanges(form, editable.fields, dirty => { markTab(dirty); editable.onDirty?.(dirty); });
@@ -456,8 +450,8 @@ namespace FanboxUI {
     }
 
     const node = h("section", {class: "page settings-page"},
-      h("header", {class: "heading"}, h("div", {}, h("p", {class: "eyebrow"}, "LOCAL SETTINGS"), h("h1", {}, "設定"),
-        h("p", {}, "只顯示安全的一般選項；儲存與認證路徑維持唯讀。"))),
+      h("header", {class: "heading"}, h("div", {}, h("p", {class: "eyebrow"}, "LOCAL SETTINGS"), h("h1", {}, t("settings.title")),
+        h("p", {}, t("settings.subtitle")))),
       tabs,
       ctx.message ? h("p", {class: "settings-saved", role: "status"}, ctx.message) : null,
       notice,

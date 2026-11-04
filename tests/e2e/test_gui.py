@@ -909,7 +909,11 @@ def test_custom_color_editor_syncs_controls_warns_saves_and_round_trips(
 _NO_PAGE_OVERFLOW = "document.documentElement.scrollWidth <= window.innerWidth"
 # Names the elements that stick out, so a failing layout check says what to fix.
 _OVERFLOWING = """() => [...document.querySelectorAll('body *')]
-  .filter(e => e.getBoundingClientRect().right > window.innerWidth + 0.5).slice(0, 8)
+  .filter(e => e.getBoundingClientRect().right > window.innerWidth + 0.5)
+  // Content inside a horizontally scrolling box (e.g. the settings tab row) is allowed to extend.
+  .filter(e => { for (let p = e.parentElement; p; p = p.parentElement) {
+    if (['auto', 'scroll'].includes(getComputedStyle(p).overflowX)) return false; } return true; })
+  .slice(0, 8)
   .map(e => `${e.tagName}.${e.className} ${(e.textContent || '').trim().slice(0, 30)}`)"""
 
 
@@ -1251,7 +1255,8 @@ _UNTRANSLATED = """(skip) => {
 # Archived content, plus server-provided text (Fan Card benefits, creator status, sign-in status
 # messages) that is converted with the Python messages in a later batch.
 _NOT_YET = (".perk-section, .post-card strong, .post-tags, .body-text, .profile-about, .link-grid span, "
-            ".creator-card .badge, .backup-auth-notice p, .account-message")
+            ".creator-card .badge, .backup-auth-notice p, .account-message, .schedule-background dd, "
+            ".schedule-note")
 
 
 def _untranslated(page: Page) -> list[str]:
@@ -1335,4 +1340,45 @@ def test_pseudo_locale_covers_backup_and_maintenance(page: Page, live_gui) -> No
     page.locator("#nav button[data-view=maintenance]").click()
     expect(page.locator(".maintenance-action button")).to_have_text(re.compile(r"^［開始驗證"))
     check("maintenance")
+    assert screens == {name: [] for name in screens}, screens
+
+
+def test_pseudo_locale_covers_the_settings_pages(page: Page, live_gui) -> None:
+    base_url, _config_path, jobs = live_gui
+    token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
+    assert token
+    jobs.hold_backup = False
+    assert httpx.patch(f"{base_url}/api/config", headers={"X-Fanbox-Token": token.group(1)},
+                       json={"display": {"language": "qps-ploc"}}).status_code == 200
+    page.set_viewport_size({"width": 375, "height": 844})
+    page.goto(f"{base_url}/#settings/general", wait_until="networkidle")
+    screens: dict[str, list[str]] = {}
+
+    def check(name: str) -> None:
+        page.wait_for_timeout(300)
+        # The language name stays in its own language; schedule state comes from the server.
+        screens[name] = [text for text in _untranslated(page) if text != "繁體中文"]
+        assert page.evaluate(_NO_PAGE_OVERFLOW), (name, page.evaluate(_OVERFLOWING))
+
+    expect(page.locator(".settings-page h1")).to_have_text(re.compile(r"^［設定"))
+    page.locator("#display-timezone summary").click()
+    check("general")
+    page.locator("#display-timezone summary").click()
+    page.locator(".setting-toggle").first.click()
+    expect(page.locator(".tab-dirty")).to_have_text(re.compile(r"^［未儲存"))
+    check("general with unsaved change")
+    page.locator('[data-settings-tab="theme"]').click()
+    expect(page.locator(".app-dialog")).to_contain_text("［放棄未儲存的變更")
+    check("leave dialog")
+    page.locator(".app-dialog button.danger").click()
+    expect(page.locator(".color-editor h3")).to_have_text(re.compile(r"^［自訂配色"))
+    page.locator(".color-row summary").first.click()
+    check("theme")
+    for tab, ready in (("backup", ".schedule-settings h3"), ("account", ".account-card h2"),
+                       ("about", ".about-card h2")):
+        page.locator(f'[data-settings-tab="{tab}"]').click()
+        expect(page.locator(ready)).to_contain_text("［")
+        if tab == "backup":
+            page.locator(".schedule-creators summary").click()
+        check(tab)
     assert screens == {name: [] for name in screens}, screens

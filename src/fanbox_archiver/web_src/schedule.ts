@@ -1,5 +1,4 @@
 namespace FanboxUI {
-  const WEEKDAYS = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"];
 
   export interface ScheduleSectionActions {
     /** Server-side summary and next runs for the values currently in the form. */
@@ -20,10 +19,13 @@ namespace FanboxUI {
 
   function lastResultText(status: ScheduleStatus): string {
     const job = status.last_job;
-    if (!job) return status.last_due_at ? `上次排程：${formatDate(status.last_due_at)}` : "尚未執行過排程備份。";
-    const outcome = job.status === "completed" ? "完成" : job.status === "failed" ? "失敗"
-      : isActiveJob(job as WebJob) ? "執行中" : statusText(job.status);
-    return `上次排程：${formatDate(status.last_due_at ?? job.created_at)} · ${outcome}${job.error ? `（${job.error}）` : ""}`;
+    if (!job) return status.last_due_at ? t("schedule.last_due", {time: formatDate(status.last_due_at)}) : t("schedule.never_run");
+    const outcome = job.status === "completed" ? t("schedule.outcome_completed")
+      : job.status === "failed" ? t("schedule.outcome_failed")
+      : isActiveJob(job as WebJob) ? t("schedule.outcome_running") : statusText(job.status);
+    const time = formatDate(status.last_due_at ?? job.created_at);
+    return job.error ? t("schedule.last_result_error", {time, outcome, error: job.error})
+      : t("schedule.last_result", {time, outcome});
   }
 
   export function renderScheduleSection(
@@ -37,27 +39,28 @@ namespace FanboxUI {
     const interval = h("input", {type: "number", value: value.interval, min: 1, max: 30, step: 1}) as HTMLInputElement;
     // 24-hour hour/minute pickers: a native time input follows the Windows locale (上午／下午).
     const [savedHour, savedMinute] = value.time.split(":");
-    const hour = customSelect({id: "schedule-hour", label: "時", value: savedHour, disabled: blocked,
+    const hour = customSelect({id: "schedule-hour", label: t("schedule.hour"), value: savedHour, disabled: blocked,
       options: Array.from({length: 24}, (_, index) => ({value: String(index).padStart(2, "0"), label: String(index).padStart(2, "0")})),
       onChange: () => sync()});
-    const minute = customSelect({id: "schedule-minute", label: "分", value: savedMinute, disabled: blocked,
+    const minute = customSelect({id: "schedule-minute", label: t("schedule.minute"), value: savedMinute, disabled: blocked,
       options: Array.from({length: 60}, (_, index) => ({value: String(index).padStart(2, "0"), label: String(index).padStart(2, "0")})),
       onChange: () => sync()});
     const intervalUnit = h("small", {});
     const preview = h("p", {class: "schedule-preview", role: "status", "aria-live": "polite"});
     const runFeedback = h("p", {class: "settings-error", role: "alert", hidden: true});
 
-    const frequency = customSelect({id: "schedule-frequency", label: "週期", value: frequencyValue, disabled: blocked,
-      options: [{value: "daily", label: "每天／每 N 天"}, {value: "weekly", label: "每週／每 N 週"},
-        {value: "monthly", label: "每月指定日期"}],
+    const frequency = customSelect({id: "schedule-frequency", label: t("schedule.frequency"), value: frequencyValue, disabled: blocked,
+      options: [{value: "daily", label: t("schedule.frequency_daily")}, {value: "weekly", label: t("schedule.frequency_weekly")},
+        {value: "monthly", label: t("schedule.frequency_monthly")}],
       onChange: next => { frequencyValue = next as ScheduleFrequency; sync(); }});
-    const power = customSelect({id: "schedule-power", label: "電源與休眠", value: powerValue, disabled: blocked,
-      options: [{value: "no_wake_battery_ok", label: "不喚醒電腦，使用電池時也執行"},
-        {value: "no_wake_ac_only", label: "不喚醒電腦，只在接上電源時執行"},
-        {value: "wake", label: "喚醒休眠中的電腦執行"}],
+    const power = customSelect({id: "schedule-power", label: t("schedule.power"), value: powerValue, disabled: blocked,
+      options: [{value: "no_wake_battery_ok", label: t("schedule.power_no_wake_battery_ok")},
+        {value: "no_wake_ac_only", label: t("schedule.power_no_wake_ac_only")},
+        {value: "wake", label: t("schedule.power_wake")}],
       onChange: next => { powerValue = next as SchedulePower; sync(); }});
-    const weekday = customSelect({id: "schedule-weekday", label: "星期", value: value.weekday, disabled: blocked,
-      options: WEEKDAYS.map((label, index) => ({value: index, label})), onChange: () => sync()});
+    const weekday = customSelect({id: "schedule-weekday", label: t("schedule.weekday"), value: value.weekday, disabled: blocked,
+      options: Array.from({length: 7}, (_, index) => ({value: index, label: t(`schedule.weekday_${index}`)})),
+      onChange: () => sync()});
     const dayButtons = Array.from({length: 31}, (_, index) => h("button", {type: "button",
       class: "schedule-day", "aria-pressed": index + 1 === monthDay ? "true" : "false",
       onclick: () => { monthDay = index + 1; sync(); }}, String(index + 1)) as HTMLButtonElement);
@@ -69,12 +72,12 @@ namespace FanboxUI {
     });
     const unknownCreators = value.creators.filter(id => !creators.some(item => item.creator_id === id));
 
-    const intervalField = h("label", {class: "setting-field"}, h("span", {}, "間隔"), interval, intervalUnit);
-    const weekdayField = h("div", {class: "setting-field"}, h("span", {}, "星期"), weekday);
+    const intervalField = h("label", {class: "setting-field"}, h("span", {}, t("schedule.interval")), interval, intervalUnit);
+    const weekdayField = h("div", {class: "setting-field"}, h("span", {}, t("schedule.weekday")), weekday);
     const monthField = h("div", {class: "setting-field schedule-month"},
-      h("span", {id: "schedule-month-label"}, "每月日期"),
+      h("span", {id: "schedule-month-label"}, t("schedule.month_day")),
       h("div", {class: "schedule-days", role: "group", "aria-labelledby": "schedule-month-label"}, dayButtons),
-      h("small", {}, "選 29–31 日時，沒有這一天的月份會在月底執行。"));
+      h("small", {}, t("schedule.month_day_hint")));
 
     const read = (): ScheduleSettingsPatch => ({
       enabled: enabled.checked, frequency: frequencyValue,
@@ -89,7 +92,7 @@ namespace FanboxUI {
       intervalField.hidden = frequencyValue === "monthly";
       weekdayField.hidden = frequencyValue !== "weekly";
       monthField.hidden = frequencyValue !== "monthly";
-      intervalUnit.textContent = frequencyValue === "weekly" ? "1 = 每週；2 = 每兩週" : "1 = 每天；2 = 每兩天";
+      intervalUnit.textContent = t(frequencyValue === "weekly" ? "schedule.interval_weekly" : "schedule.interval_daily");
       for (const [index, button] of dayButtons.entries()) {
         button.setAttribute("aria-pressed", index + 1 === monthDay ? "true" : "false");
       }
@@ -98,10 +101,11 @@ namespace FanboxUI {
         const token = ++previewToken;
         actions.onPreview(read()).then(result => {
           if (token !== previewToken) return;
-          preview.textContent = `預覽：${result.summary}｜接下來：${result.next_runs.map(formatDate).join("、")}`;
+          preview.textContent = t("schedule.preview", {summary: result.summary,
+            runs: result.next_runs.map(formatDate).join(t("schedule.run_separator"))});
         }).catch(error => {
           if (token !== previewToken) return;
-          preview.textContent = `無法預覽：${error instanceof Error ? error.message : String(error)}`;
+          preview.textContent = t("schedule.preview_failed", {error: error instanceof Error ? error.message : String(error)});
         });
       }, 250);
     };
@@ -111,28 +115,28 @@ namespace FanboxUI {
       runFeedback.hidden = true;
       const error = await actions.onRunNow();
       if (error) { runFeedback.textContent = error; runFeedback.hidden = false; }
-    }}, "立即執行一次") as HTMLButtonElement;
+    }}, t("schedule.run_now")) as HTMLButtonElement;
     const runBlockedNote = h("small", {class: "schedule-run-blocked", hidden: true});
-    const enabledField = h("label", {class: "setting-toggle"}, enabled, h("span", {}, "啟用自動備份"));
-    const frequencyField = h("div", {class: "setting-field"}, h("span", {}, "週期"), frequency);
-    const timeField = h("div", {class: "setting-field"}, h("span", {}, `時間（${status.timezone}，24 小時制）`),
+    const enabledField = h("label", {class: "setting-toggle"}, enabled, h("span", {}, t("schedule.enabled")));
+    const frequencyField = h("div", {class: "setting-field"}, h("span", {}, t("schedule.frequency")), frequency);
+    const timeField = h("div", {class: "setting-field"}, h("span", {}, t("schedule.time", {zone: status.timezone})),
       h("div", {class: "schedule-time"}, hour, h("span", {"aria-hidden": "true"}, ":"), minute));
-    const powerField = h("div", {class: "setting-field schedule-power"}, h("span", {}, "電源與休眠"), power,
-      h("small", {}, "錯過的排程會每 15 分鐘再試一次；「只在接上電源時」在程式開著時也適用。"));
-    const creatorsField = h("details", {class: "schedule-creators"}, h("summary", {}, "備份範圍：未勾選時備份全部支援中的創作者"),
+    const powerField = h("div", {class: "setting-field schedule-power"}, h("span", {}, t("schedule.power")), power,
+      h("small", {}, t("schedule.power_hint")));
+    const creatorsField = h("details", {class: "schedule-creators"}, h("summary", {}, t("schedule.creators_summary")),
       creatorBoxes.length ? h("div", {class: "setting-toggles"}, creatorBoxes.map(item => item.node))
-        : h("p", {class: "settings-section-description"}, "目前沒有已知的創作者；將備份全部支援中的創作者。"));
+        : h("p", {class: "settings-section-description"}, t("schedule.creators_empty")));
 
     const node = h("section", {class: "settings-section schedule-settings"},
-      h("h3", {}, "自動備份"),
+      h("h3", {}, t("schedule.title")),
       h("p", {class: "settings-section-description"},
-        `依排程自動開始完整備份。程式開著時由程式執行；關閉時由 Windows 工作排程器在背景執行（桌面版）。錯過的排程只會補跑一次；時間依「時區」設定（目前：${status.timezone}）解讀，24 小時制。`),
+        t("schedule.description", {zone: status.timezone})),
       h("dl", {class: "schedule-status"},
-        h("div", {}, h("dt", {}, "目前排程"), h("dd", {}, status.enabled ? status.summary : "未啟用")),
-        h("div", {}, h("dt", {}, "下一次執行"), h("dd", {}, status.next_run_at ? formatDate(status.next_run_at) : "—")),
-        h("div", {}, h("dt", {}, "上次結果"), h("dd", {}, lastResultText(status))),
+        h("div", {}, h("dt", {}, t("schedule.current")), h("dd", {}, status.enabled ? status.summary : t("schedule.disabled"))),
+        h("div", {}, h("dt", {}, t("schedule.next_run")), h("dd", {}, status.next_run_at ? formatDate(status.next_run_at) : "—")),
+        h("div", {}, h("dt", {}, t("schedule.last_result_label")), h("dd", {}, lastResultText(status))),
         h("div", {class: `schedule-background state-${status.background.state}`},
-          h("dt", {}, "程式關閉時"), h("dd", {}, status.background.message))),
+          h("dt", {}, t("schedule.background")), h("dd", {}, status.background.message))),
       status.note ? h("p", {class: "notice schedule-note"}, status.note) : null,
       enabledField,
       h("div", {class: "settings-grid"}, frequencyField, intervalField, weekdayField, timeField),
@@ -141,7 +145,7 @@ namespace FanboxUI {
       creatorsField,
       preview,
       h("div", {class: "schedule-actions"}, runNow,
-        h("span", {class: "settings-section-description"}, "使用目前已儲存的排程範圍與「新工作預設」的 Profile／Fan Card 選項，不會變更下一次排程。"),
+        h("span", {class: "settings-section-description"}, t("schedule.run_now_hint")),
         runBlockedNote),
       runFeedback);
     sync();

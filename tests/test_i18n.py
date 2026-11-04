@@ -76,6 +76,7 @@ def test_pseudo_locale_marks_and_pads_every_message_but_keeps_placeholders():
             assert marked.startswith("［") and marked.endswith("］"), key
             assert len(marked) >= len(text) + 4, key
             assert _placeholders(marked) == _placeholders(text), key
+            assert "·····" not in marked, key  # the padding can wrap on narrow screens
     assert translate("posts.total", PSEUDO_LOCALE, count=3).startswith("［3 篇備份")
 
 
