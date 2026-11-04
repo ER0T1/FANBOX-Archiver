@@ -34,6 +34,14 @@ def test_naive_and_invalid_values_are_never_guessed():
     assert isoformat_display("", None) is None
 
 
+def test_server_display_times_follow_the_reader_language():
+    shown = format_display("2026-10-29T12:28:00+00:00")
+    assert shown == "2026年10月29日 20:28"  # the base text, e.g. for logs
+    assert shown.localized("en") == "October 29th, 2026 20:28"
+    assert shown.localized("ko") == "2026년10월29일 20:28"
+    assert format_display("2026-11-02T16:00:00").localized("en") == "2026-11-02T16:00:00 (time zone not recorded)"
+
+
 def test_a_chosen_timezone_ignores_the_host_timezone():
     # The host clock is set to Tokyo; an explicit Asia/Taipei setting must still win.
     script = (

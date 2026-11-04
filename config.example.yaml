@@ -44,7 +44,7 @@ schedule:
 display:
   timezone: system
   theme: system
-  # 介面語言：auto（跟隨系統，找不到支援語言時用繁體中文）或 zh-Hant；qps-ploc 為版面測試用語系。
+  # 介面語言：auto（跟隨系統，找不到支援語言時用 English）、zh-Hant、en、ja 或 ko；qps-ploc 為版面測試用語系。
   language: auto
   colors:
     light: {}

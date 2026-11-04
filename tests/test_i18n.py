@@ -62,7 +62,7 @@ def test_translate_interpolates_formats_numbers_and_keeps_gaps_visible():
     assert translate("posts.total", BASE_LOCALE, count=1234) == "1,234 篇備份"
     assert translate("common.page_position", BASE_LOCALE, page=2, pages=3) == "目前第 2 頁，共 3 頁"
     # A post ID is an identifier, never a grouped number.
-    assert "Post 12345" in translate("posts.card_meta", BASE_LOCALE, creator="A", post_id="12345", count=2)
+    assert "投稿 12345" in translate("posts.card_meta", BASE_LOCALE, creator="A", post_id="12345", count=2)
     assert translate("no.such.key", BASE_LOCALE) == "no.such.key"
     assert translate("common.page_position", BASE_LOCALE, page=1) == "目前第 1 頁，共 {pages} 頁"
 
@@ -100,7 +100,8 @@ def test_missing_translations_fall_back_to_traditional_chinese(tmp_path: Path, m
 
 @pytest.mark.parametrize(("preferred", "expected"), [
     (["zh-TW"], BASE_LOCALE), (["zh_HK"], BASE_LOCALE), (["zh-Hant-TW"], BASE_LOCALE),
-    (["en-US", "ja"], BASE_LOCALE), ([], BASE_LOCALE), (["", "zh-hant"], BASE_LOCALE),
+    (["zh-CN"], BASE_LOCALE), (["", "zh-hant"], BASE_LOCALE), (["en-US", "ja"], "en"),
+    (["fr-FR", "ja-JP"], "ja"), (["ko_KR"], "ko"), (["fr-FR", "de"], "en"), ([], "en"),
 ])
 def test_auto_language_matches_supported_locales_or_falls_back(preferred, expected):
     assert match_locale(preferred) == expected
@@ -109,6 +110,7 @@ def test_auto_language_matches_supported_locales_or_falls_back(preferred, expect
 
 def test_explicit_language_settings_win_over_the_system():
     assert resolve_locale("zh-Hant", ["en-US"]) == BASE_LOCALE
+    assert resolve_locale("ko", ["zh-TW"]) == "ko"
     assert resolve_locale(PSEUDO_LOCALE, ["zh-TW"]) == PSEUDO_LOCALE
 
 
@@ -211,4 +213,47 @@ def test_core_errors_keep_their_key():
     with pytest.raises(ValueError) as raised:
         FanboxClient.creator_id("")
     assert isinstance(error_text(raised.value), Text)
-    assert error_text(raised.value).localized(PSEUDO_LOCALE).startswith("［Creator ID 不可為空")
+    assert error_text(raised.value).localized(PSEUDO_LOCALE).startswith("［創作者 ID 不可為空")
+
+
+def test_shipped_catalogs_match_the_base_catalog():
+    import runpy
+
+    check = runpy.run_path(str(PACKAGE.parents[1] / "scripts" / "check-i18n.py"))
+    assert check["problems"]() == []
+    assert set(i18n.SUPPORTED_LOCALES) == {"zh-Hant", "en", "ja", "ko"}
+    for locale in i18n.SUPPORTED_LOCALES:
+        assert set(catalog(locale)) == set(catalog(BASE_LOCALE)), locale
+    assert translate("nav.posts", "ko") == "투고" and translate("nav.posts", "en") == "Posts"
+
+
+def test_plural_rules_of_the_shipped_locales():
+    assert translate("posts.total", "en", count=1) == "1 backed-up post"
+    assert translate("posts.total", "en", count=1234) == "1,234 backed-up posts"
+    assert translate("posts.total", "ja", count=1) == "バックアップ済み 1 件"
+    assert translate("posts.total", "ko", count=2) == "백업된 투고 2개"
+    assert {i18n.plural_category(1, locale) for locale in ("zh-Hant", "ja", "ko")} == {"other"}
+
+
+@pytest.mark.parametrize(("day", "ordinal"), [(1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"),
+                                               (12, "12th"), (13, "13th"), (21, "21st"), (22, "22nd"), (31, "31st")])
+def test_english_ordinal_days(day, ordinal):
+    assert i18n.ordinal_en(day) == ordinal
+
+
+def test_dates_follow_each_language_format():
+    params = i18n.datetime_params(2026, 10, 29, 20, 8)
+    assert translate("common.datetime", BASE_LOCALE, **params) == "2026年10月29日 20:08"
+    assert translate("common.datetime", "ja", **params) == "2026年10月29日 20:08"
+    assert translate("common.datetime", "ko", **params) == "2026년10월29일 20:08"
+    assert translate("common.datetime", "en", **params) == "October 29th, 2026 20:08"
+
+
+def test_cli_speaks_english_with_the_lang_option(tmp_path: Path):
+    path = _status_config(tmp_path)
+    english = runner.invoke(app, ["--lang", "en", "status", "--config", str(path)])
+    assert english.exit_code == 0, english.output
+    assert "No backups yet." in english.output
+    help_text = _help_texts(cli.localized_command("en"))
+    assert "A conservative, low-frequency personal local backup tool for pixivFANBOX." in help_text
+    assert not [text for text in help_text if re.search(r"[㐀-鿿]", text)]

@@ -21,6 +21,11 @@
   font-family:Inter,"Noto Sans TC","Segoe UI",system-ui,sans-serif;
 }
 
+/* Han characters differ between Chinese, Japanese and Korean typefaces: follow <html lang> so
+   Japanese kanji are not drawn with Traditional Chinese glyphs. System fonts only. */
+:root:lang(ja) { font-family:Inter,"Noto Sans JP","Yu Gothic UI","Yu Gothic",Meiryo,"Segoe UI",system-ui,sans-serif; }
+:root:lang(ko) { font-family:Inter,"Noto Sans KR","Malgun Gothic","Segoe UI",system-ui,sans-serif; }
+
 :root[data-theme="light"] {
   color-scheme:light;
 }

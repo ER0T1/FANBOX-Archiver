@@ -64,12 +64,16 @@ namespace FanboxUI {
 
   // Language names are shown in their own language and never translated. The pseudo-locale is
   // listed only while config.yaml selects it, so saving the form never silently switches it off.
+  const LANGUAGE_NAMES: Record<Exclude<LanguageSetting, "auto" | "qps-ploc">, string> = {
+    "zh-Hant": "繁體中文", en: "English", ja: "日本語", ko: "한국어",
+  };
   const languageLabel = (value: LanguageSetting): string => value === "auto" ? t("settings.language_auto")
-    : value === "qps-ploc" ? t("settings.language_pseudo") : "繁體中文";
+    : value === "qps-ploc" ? t("settings.language_pseudo") : LANGUAGE_NAMES[value];
 
   function languageControl(data: SettingsResponse, blocked: boolean): {node: HTMLElement; read(): LanguageSetting} {
     let choice: LanguageSetting = data.editable.display.language;
-    const values: LanguageSetting[] = choice === "qps-ploc" ? ["auto", "zh-Hant", "qps-ploc"] : ["auto", "zh-Hant"];
+    const real = Object.keys(LANGUAGE_NAMES) as LanguageSetting[];
+    const values: LanguageSetting[] = choice === "qps-ploc" ? ["auto", ...real, "qps-ploc"] : ["auto", ...real];
     const select = customSelect({id: "display-language", label: t("settings.language"), value: choice, disabled: blocked,
       options: values.map(value => ({value, label: languageLabel(value)})),
       onChange: next => { choice = next as LanguageSetting; }});

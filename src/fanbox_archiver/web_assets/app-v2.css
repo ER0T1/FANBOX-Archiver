@@ -453,8 +453,10 @@ progress::-moz-progress-bar { background:linear-gradient(90deg,var(--blue),#65a9
 /* Mobile */
 @media (max-width:767px) {
   .topbar { position:relative; flex-wrap:wrap; gap:.55rem; padding:.7rem 1rem; }
-  .topbar nav { order:3; width:100%; display:grid; grid-template-columns:repeat(5,1fr); }
-  .topbar nav button { padding:.55rem .25rem; }
+  /* Equal-width tabs that scroll sideways in their own row when a language's labels are longer. */
+  .topbar nav { order:3; width:100%; display:flex; overflow-x:auto; scrollbar-width:none; }
+  .topbar nav::-webkit-scrollbar { display:none; }
+  .topbar nav button { flex:1 0 auto; padding:.55rem .45rem; white-space:nowrap; }
   .topbar input { order:4; min-width:100%; }
   .status { font-size:.72rem; }
   .github-link { padding:.45rem; }.github-label { display:none; }

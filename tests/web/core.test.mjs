@@ -23,9 +23,9 @@ test("i18n translates, pluralises, formats numbers and reports missing keys once
   assert.equal(ui.currentLocale(), "zh-Hant");
   assert.equal(ui.t("nav.posts"), "投稿");
   assert.equal(ui.t("posts.total", {count: 12345}), "12,345 篇備份");
-  assert.equal(ui.t("posts.card_meta", {creator: "Alice", post_id: "1000", count: 2}), "Alice · Post 1000 · 2 個版本");
+  assert.equal(ui.t("posts.card_meta", {creator: "Alice", post_id: "1000", count: 2}), "Alice · 投稿 1000 · 2 個版本");
   assert.equal(ui.t("common.page_position", {page: 1}), "目前第 1 頁，共 {pages} 頁");
-  assert.equal(ui.feeLabel(0), "全體公開");
+  assert.equal(ui.feeLabel(0), "對所有人公開");
   assert.equal(ui.feeLabel(1200), "¥1,200");
   assert.equal(ui.feeLabel(null), "檔位未記錄");
   assert.equal(ui.t("missing.key"), "missing.key");
@@ -86,7 +86,7 @@ test("TypeScript core formats archive values", () => {
   assert.equal(ui.formatDate(null), "—");
   assert.equal(ui.humanBytes(12_137_079), "11.6 MB");
   assert.equal(ui.humanBytes(0), "0 B");
-  assert.equal(ui.feeLabel(0), "全體公開");
+  assert.equal(ui.feeLabel(0), "對所有人公開");
   assert.equal(ui.feeLabel(300), "¥300");
   assert.equal(ui.feeLabel(null), "檔位未記錄");
   assert.equal(ui.stopReasonLabel("limit_reached"), "已達下載上限");
@@ -132,4 +132,22 @@ test("colour helpers compute WCAG contrast and validate imported palettes", () =
     light: {"font-family": "#000000"}}), keys), /不支援/);
   assert.throws(() => ui.parseColorExport(JSON.stringify({format: "fanbox-archiver-colors",
     light: {accent: "url(x)"}}), keys), /#RRGGBB/);
+});
+
+test("English catalog formats dates with month names and ordinals and pluralises", () => {
+  const english = JSON.parse(readFileSync(
+    new URL("../../src/fanbox_archiver/locales/en.json", import.meta.url), "utf8"));
+  delete english.$comment;
+  const englishContext = vm.createContext({
+    Intl, console: {warn: () => {}},
+    FanboxI18n: {locale: "en", intl: "en", base: "zh-Hant", messages: english},
+  });
+  vm.runInContext(source, englishContext);
+  const en = englishContext.FanboxUI;
+  assert.equal(en.formatDate("2026-10-29T12:28:00Z"), "October 29th, 2026 20:28");
+  assert.equal(en.formatDate("2026-11-01T00:05:00+08:00"), "November 1st, 2026 00:05");
+  assert.equal(en.formatDate("2026-11-02T16:00:00"), "2026-11-02T16:00:00 (time zone not recorded)");
+  assert.equal(en.t("posts.total", {count: 1}), "1 backed-up post");
+  assert.equal(en.t("posts.total", {count: 2}), "2 backed-up posts");
+  assert.equal(en.feeLabel(0), "All Users");
 });

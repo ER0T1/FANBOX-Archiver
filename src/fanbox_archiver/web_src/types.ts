@@ -339,7 +339,7 @@ namespace FanboxUI {
 
   export type ThemeSetting = "system" | "dark" | "light";
   /** "qps-ploc" is the pseudo-locale for layout tests; only config.yaml turns it on. */
-  export type LanguageSetting = "auto" | "zh-Hant" | "qps-ploc";
+  export type LanguageSetting = "auto" | "zh-Hant" | "en" | "ja" | "ko" | "qps-ploc";
 
   export type ColorMode = "light" | "dark";
   /** CSS variable name (without "--") → "#rrggbb". */

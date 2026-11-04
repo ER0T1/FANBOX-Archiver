@@ -526,7 +526,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     expect(page.get_by_role("checkbox", name="完整備份只預覽，不下載")).to_be_checked()
     expect(page.get_by_role("checkbox", name="拉取個人資料", exact=True)).not_to_be_checked()
     expect(page.get_by_role("checkbox", name="拉取粉絲卡", exact=True)).to_be_checked()
-    expect(page.get_by_text("尚未指定創作者；將備份全部支援中的創作者", exact=True)).to_be_visible()
+    expect(page.get_by_text("尚未指定創作者；將備份全部贊助中的創作者", exact=True)).to_be_visible()
     history_button = page.get_by_role("button", name="工作歷史", exact=True)
     expect(history_button).to_have_class("primary")
     creator_search = page.get_by_role("combobox", name="搜尋並加入創作者")
@@ -1255,6 +1255,26 @@ _UNTRANSLATED = """(skip) => {
 }"""
 # Archived content (posts, tags, profile text and links) is never translated.
 _NOT_YET = ".post-card strong, .post-tags, .body-text, .profile-about, .link-grid span"
+# Language names in the language menu are always shown in their own language.
+_LANGUAGE_NAMES = {"繁體中文", "English", "日本語", "한국어"}
+# Any Chinese, Japanese or Korean text outside archived content (for the English interface).
+_CJK_TEXT = """(skip) => {
+  const cjk = /[\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]/;
+  const found = new Set();
+  const walker = document.createTreeWalker(document.querySelector('#app'), NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (text && cjk.test(text) && !node.parentElement.closest(skip)) found.add(text);
+  }
+  for (const element of document.querySelectorAll('#app [aria-label], #app [title], #app [alt], #app [placeholder]')) {
+    if (element.closest(skip)) continue;
+    for (const name of ['aria-label', 'title', 'alt', 'placeholder']) {
+      const value = (element.getAttribute(name) || '').trim();
+      if (value && cjk.test(value)) found.add(`${name}=${value}`);
+    }
+  }
+  return [...found];
+}"""
 
 
 def _untranslated(page: Page) -> list[str]:
@@ -1355,7 +1375,7 @@ def test_pseudo_locale_covers_the_settings_pages(page: Page, live_gui) -> None:
     def check(name: str) -> None:
         page.wait_for_timeout(300)
         # The language name stays in its own language; schedule state comes from the server.
-        screens[name] = [text for text in _untranslated(page) if text != "繁體中文"]
+        screens[name] = [text for text in _untranslated(page) if text not in _LANGUAGE_NAMES]
         assert page.evaluate(_NO_PAGE_OVERFLOW), (name, page.evaluate(_OVERFLOWING))
 
     expect(page.locator(".settings-page h1")).to_have_text(re.compile(r"^［設定"))
@@ -1380,3 +1400,53 @@ def test_pseudo_locale_covers_the_settings_pages(page: Page, live_gui) -> None:
             page.locator(".schedule-creators summary").click()
         check(tab)
     assert screens == {name: [] for name in screens}, screens
+
+
+@pytest.mark.parametrize(("language", "posts_title", "settings_title"), [
+    ("en", "Posts", "Settings"), ("ja", "投稿", "設定"), ("ko", "투고", "설정"),
+])
+def test_each_language_shows_its_catalog_and_fits_narrow_screens(page: Page, live_gui, language, posts_title,
+                                                                  settings_title) -> None:
+    base_url, _config_path, jobs = live_gui
+    jobs.hold_backup = False
+    token = re.search(r'name="fanbox-session-token" content="([^"]+)"', httpx.get(base_url).text)
+    assert token
+    assert httpx.patch(f"{base_url}/api/config", headers={"X-Fanbox-Token": token.group(1)},
+                       json={"display": {"language": language}}).status_code == 200
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(base_url, wait_until="networkidle")
+    expect(page.locator("html")).to_have_attribute("lang", language)
+    leftovers: dict[str, list[str]] = {}
+
+    def check(name: str) -> None:
+        page.wait_for_timeout(300)
+        assert page.evaluate(_NO_PAGE_OVERFLOW), (language, name, page.evaluate(_OVERFLOWING))
+        if language == "en":
+            found = page.evaluate(_CJK_TEXT, _NOT_YET)
+            leftovers[name] = [text for text in found if not _ARCHIVED.match(text) and text not in _LANGUAGE_NAMES]
+
+    expect(page.locator(".heading h1")).to_have_text(posts_title)
+    check("posts")
+    page.locator(".post-card").first.click()
+    expect(page.locator(".reader-heading")).to_be_visible()
+    if language == "en":
+        # Dates use the reviewed English format, e.g. "Published October 29th, 2026 20:28".
+        expect(page.locator(".reader-heading")).to_contain_text(re.compile(r"Published [A-Z][a-z]+ \d{1,2}(st|nd|rd|th), \d{4} \d\d:\d\d"))
+    check("post reader")
+    page.locator("#nav button[data-view=creators]").click()
+    page.locator(".creator-card").filter(has_text="Alice").click()
+    expect(page.locator(".creator-hero")).to_be_visible()
+    check("creator profile")
+    page.locator("#nav button[data-view=backup]").click()
+    expect(page.locator(".backup-form")).to_be_visible(timeout=5_000)
+    check("backup form")
+    page.locator("#nav button[data-view=maintenance]").click()
+    expect(page.locator(".maintenance-action button")).to_be_visible()
+    check("maintenance")
+    page.goto(f"{base_url}/#settings/general", wait_until="networkidle")
+    expect(page.locator(".settings-page h1")).to_have_text(settings_title)
+    check("settings")
+    for tab in ("backup", "account", "about", "theme"):
+        page.locator(f'[data-settings-tab="{tab}"]').click()
+        check(f"settings {tab}")
+    assert leftovers == {name: [] for name in leftovers}, leftovers

@@ -14,6 +14,9 @@ from fanbox_archiver.timestamps import TAIPEI
 from fanbox_archiver.webapp import create_app
 from test_jobs import SuccessfulUseCase
 
+# "auto" follows the request language (English when none is given); these checks read Chinese.
+CHINESE = {"Accept-Language": "zh-TW"}
+
 
 class Clock:
     def __init__(self, value: datetime) -> None:
@@ -128,7 +131,7 @@ async def test_schedule_api_saves_previews_and_validates(tmp_path: Path):
     app = create_app(config, config_path=config_path)
     token = {"X-Fanbox-Token": app.state.session_token}
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1", headers=CHINESE) as client:
         assert (await client.get("/api/schedule")).json()["enabled"] is False
         preview = (await client.post("/api/schedule/preview", headers=token, json={
             "frequency": "weekly", "interval": 2, "weekday": 2, "time": "21:05",

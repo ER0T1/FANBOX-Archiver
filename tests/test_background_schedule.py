@@ -260,7 +260,8 @@ async def test_saving_a_timezone_applies_everywhere_and_restarts_schedule_counti
                        schedule=ScheduleConfig(enabled=True, start_date=date(2026, 11, 1)))
     app = webapp.create_app(config, config_path=tmp_path / "config.yaml")
     token = {"X-Fanbox-Token": app.state.session_token}
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1",
+                                 headers={"Accept-Language": "zh-TW"}) as client:
         current = (await client.get("/api/config")).json()
         assert current["display"] == {"setting": "system", "timezone": "Asia/Taipei", "notice": None,
                                       "system_timezone": "Asia/Taipei"}

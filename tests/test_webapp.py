@@ -16,7 +16,7 @@ def anyio_backend():
 async def test_dynamic_web_reader_does_not_require_index(tmp_path: Path):
     config, _ = dynamic_archive(tmp_path)
     transport = httpx.ASGITransport(app=create_app(config))
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers={"Accept-Language": "zh-TW"}) as client:
         home = await client.get("/")
         assert home.status_code == 200
         assert "FANBOX Archive" in home.text
@@ -541,7 +541,7 @@ async def test_theme_setting_is_saved_and_rendered_into_the_page(tmp_path: Path)
     app = create_app(config, config_path=config_path)
     token = {"X-Fanbox-Token": app.state.session_token}
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", headers={"Accept-Language": "zh-TW"}) as client:
         assert '<html lang="zh-Hant" data-theme="auto">' in (await client.get("/")).text
         assert (await client.get("/api/config")).json()["editable"]["display"]["theme"] == "system"
 
@@ -567,13 +567,18 @@ async def test_language_setting_drives_the_page_and_catalog_script(tmp_path: Pat
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         english = {"Accept-Language": "en-US,en;q=0.9"}
         home = (await client.get("/", headers=english)).text
-        # "auto" with no shipped catalog for the browser language falls back to zh-Hant.
-        assert '<html lang="zh-Hant"' in home
+        # "auto" follows the browser language among the shipped catalogs; others get English.
+        assert '<html lang="en"' in home
         assert home.index('src="/i18n.js"') < home.index('src="/assets/core.js"')
         script = await client.get("/i18n.js", headers=english)
         assert script.headers["content-type"].startswith("text/javascript")
         assert script.headers["cache-control"] == "no-store"
-        assert '"nav.posts": "投稿"' in script.text and '"locale": "zh-Hant"' in script.text
+        assert '"nav.posts": "Posts"' in script.text and '"locale": "en"' in script.text
+        for header, lang, posts in (("zh-TW,zh;q=0.9", "zh-Hant", "投稿"), ("ja-JP", "ja", "投稿"),
+                                    ("ko-KR", "ko", "투고"), ("fr-FR", "en", "Posts")):
+            assert f'<html lang="{lang}"' in (await client.get("/", headers={"Accept-Language": header})).text
+            text = (await client.get("/i18n.js", headers={"Accept-Language": header})).text
+            assert f'"nav.posts": "{posts}"' in text and f'"locale": "{lang}"' in text
         assert (await client.get("/api/config")).json()["editable"]["display"]["language"] == "auto"
 
         invalid = await client.patch("/api/config", headers=token, json={"display": {"language": "fr"}})
@@ -640,9 +645,15 @@ async def test_server_text_follows_the_request_language(tmp_path: Path):
     config.display.language = "auto"  # type: ignore[assignment]
     transport = httpx.ASGITransport(app=create_app(config))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        plain = await client.get("/api/creators/nobody", headers={"Accept-Language": "en-US"})
-        assert plain.json()["detail"] == "找不到創作者"  # no English catalog yet: base language
-        assert (await client.get("/api/schedule")).json()["summary"].startswith("每天")
+        english = await client.get("/api/creators/nobody", headers={"Accept-Language": "en-US"})
+        assert english.json()["detail"] == "Creator not found"
+        summary = (await client.get("/api/schedule", headers={"Accept-Language": "en-US"})).json()["summary"]
+        assert summary.startswith("Every day at")
+        korean = await client.get("/api/creators/nobody", headers={"Accept-Language": "ko-KR"})
+        assert korean.json()["detail"] == "크리에이터를 찾을 수 없습니다"
+        chinese = {"Accept-Language": "zh-TW"}
+        assert (await client.get("/api/creators/nobody", headers=chinese)).json()["detail"] == "找不到創作者"
+        assert (await client.get("/api/schedule", headers=chinese)).json()["summary"].startswith("每天")
 
 
 @pytest.mark.anyio

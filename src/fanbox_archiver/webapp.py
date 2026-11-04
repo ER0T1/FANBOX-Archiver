@@ -19,7 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import AppConfig, ScheduleConfig, ThemeColors
 from .theme import THEME_COLOR_KEYS, THEME_DEFAULTS, custom_theme_css
-from .i18n import BASE_LOCALE, Text, browser_script, error_text, localize, resolve_locale
+from .i18n import BASE_LOCALE, LanguageSetting, Text, browser_script, error_text, localize, resolve_locale
 from . import __version__
 from .application import (
     AuthenticationJobManager, AuthenticationService, BackupJobManager, BackupRequest,
@@ -140,7 +140,7 @@ class DisplayConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     timezone: str | None = Field(None, max_length=64)
     theme: Literal["system", "dark", "light"] | None = None
-    language: Literal["auto", "zh-Hant", "qps-ploc"] | None = None
+    language: LanguageSetting | None = None
     colors: ThemeColors | None = None
 
 

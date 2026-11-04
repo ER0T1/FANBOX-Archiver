@@ -8,6 +8,14 @@ namespace FanboxUI {
   let displayTimeZone = FALLBACK_TIME_ZONE;
   let dateTimeFormatter = buildFormatter(displayTimeZone);
   const explicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+  // English month names and ordinals for `common.datetime` ("October 29th, 2026 20:28"); fixed
+  // tables so the text never depends on the browser locale (same tables as the Python side).
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December"] as const;
+  const ordinalEn = (day: number): string => {
+    const suffix = day % 100 >= 11 && day % 100 <= 13 ? "th" : ({1: "st", 2: "nd", 3: "rd"} as Record<number, string>)[day % 10] ?? "th";
+    return `${day}${suffix}`;
+  };
 
   /** Show every time in the zone the server resolved; never the browser's own zone. */
   export function setDisplayTimeZone(zone: string | null | undefined): void {
@@ -32,8 +40,10 @@ namespace FanboxUI {
     const date = new Date(text);
     if (Number.isNaN(date.valueOf())) return text;
     const parts = Object.fromEntries(dateTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
+    const month = Number(parts.month), day = Number(parts.day);
     return t("common.datetime", {year: parts.year ?? "", month: parts.month ?? "", day: parts.day ?? "",
-      hour: parts.hour ?? "", minute: parts.minute ?? ""});
+      hour: parts.hour ?? "", minute: parts.minute ?? "",
+      month_name: MONTH_NAMES[month - 1] ?? "", day_ordinal: Number.isFinite(day) ? ordinalEn(day) : ""});
   }
 
   export function humanBytes(value: unknown): string {

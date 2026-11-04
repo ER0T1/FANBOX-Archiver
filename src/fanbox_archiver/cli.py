@@ -41,7 +41,7 @@ from .logging_setup import configure_logging, get_logger
 from .legacy_site import cleanup_owned_archive
 from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
-from .timestamps import isoformat_display, set_display_timezone
+from .timestamps import isoformat_display, parse_instant, set_display_timezone, unrecorded_zone
 from .i18n import (
     BASE_LOCALE, LANGUAGE_SETTINGS, Translator, error_text, localize, resolve_locale, system_locales,
     translate,
@@ -184,6 +184,9 @@ def _use_translator(settings: AppConfig) -> None:
 
 
 def format_local_time(value: object) -> str:
+    # Offset-less legacy values carry a translated "time zone not recorded" marker.
+    if parse_instant(value) is None:
+        return shown(unrecorded_zone(value, "-"))
     return isoformat_display(value)
 
 
@@ -334,7 +337,8 @@ def import_html(
     except Exception as exc:
         console.print(f"[red]{tr('cli.import.failed')}[/red]{shown(error_text(exc))}")
         raise typer.Exit(1) from exc
-    console.print(f"[green]{tr('cli.import.done')}[/green] {post.post_id}：{post.title}（{status.value}）")
+    console.print(f"[green]{tr('cli.import.done')}[/green] "
+                  f"{tr('cli.import.done_detail', post_id=post.post_id, title=post.title, status=status.value)}")
 
 
 def _print_plan(data: dict) -> None:

@@ -272,7 +272,7 @@ def test_creator_outside_supporting_list_is_rejected(tmp_path: Path):
     try:
         sync.resolve_creators("bob")
     except ValueError as exc:
-        assert "不在目前支援清單" in str(exc)
+        assert "不在目前贊助清單" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 

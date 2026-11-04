@@ -17,7 +17,7 @@ from functools import lru_cache
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-from .i18n import Text
+from .i18n import Text, datetime_params
 
 SYSTEM = "system"
 DEVELOPMENT_TIMEZONE = "Asia/Taipei"
@@ -25,7 +25,6 @@ TAIPEI = ZoneInfo(DEVELOPMENT_TIMEZONE)
 # FANBOX bills and changes Fan Cards on Japanese calendar months; this is data semantics,
 # so it never follows the display timezone.
 FANBOX_TIMEZONE = ZoneInfo("Asia/Tokyo")
-UNKNOWN_ZONE_SUFFIX = "（時區未標示）"
 COMMON_TIMEZONES = (
     "Asia/Taipei", "Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Singapore",
     "Asia/Bangkok", "Australia/Sydney", "Europe/London", "Europe/Paris", "Europe/Berlin",
@@ -125,30 +124,39 @@ def fanbox_month(value: object) -> str | None:
     return parsed.astimezone(FANBOX_TIMEZONE).strftime("%Y-%m") if parsed is not None else None
 
 
-def _fallback(value: object, empty: str) -> str:
+def unrecorded_zone(value: object, empty: str) -> str:
+    """Show a value without an explicit offset as-is, marked "time zone not recorded" (``Text``)."""
     if not value:
         return empty
-    if isinstance(value, datetime):
-        return f"{value.isoformat()}{UNKNOWN_ZONE_SUFFIX}"
-    text = str(value)
+    text = value.isoformat() if isinstance(value, datetime) else str(value)
     try:
         datetime.fromisoformat(text.strip())
     except ValueError:
         return text
-    return f"{text}{UNKNOWN_ZONE_SUFFIX}"
+    return Text("common.timezone_unknown", value=text)
 
 
 def format_display(value: object, empty: str = "-") -> str:
-    """Human display in the display timezone, e.g. 2026年11月03日 00:00."""
+    """Human display in the display timezone, e.g. 2026年11月03日 00:00 or November 3rd, 2026 00:00.
+
+    The result is :class:`Text`: the base-language string that each boundary (web server, CLI)
+    shows in its own language and date format.
+    """
     parsed = parse_instant(value)
     if parsed is None:
-        return _fallback(value, empty)
-    return parsed.astimezone(display_zone().tz).strftime("%Y年%m月%d日 %H:%M")
+        return unrecorded_zone(value, empty)
+    local = parsed.astimezone(display_zone().tz)
+    return Text("common.datetime", **datetime_params(local.year, local.month, local.day, local.hour, local.minute))
 
 
 def isoformat_display(value: object, empty: str = "-", timespec: str = "seconds") -> str:
-    """Machine-readable display with the display timezone's actual offset."""
+    """Machine-readable display with the display timezone's actual offset.
+
+    Always a plain string in the base language: it is written into archive files (Markdown
+    front matter), which are never translated. The CLI marks legacy values itself.
+    """
     parsed = parse_instant(value)
     if parsed is None:
-        return _fallback(value, empty)
+        shown = unrecorded_zone(value, empty)
+        return str(shown) if isinstance(shown, str) else shown
     return parsed.astimezone(display_zone().tz).isoformat(timespec=timespec)

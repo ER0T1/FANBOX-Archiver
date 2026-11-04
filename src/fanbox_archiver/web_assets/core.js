@@ -113,6 +113,12 @@ var FanboxUI;
     let displayTimeZone = FALLBACK_TIME_ZONE;
     let dateTimeFormatter = buildFormatter(displayTimeZone);
     const explicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+    const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August",
+        "September", "October", "November", "December"];
+    const ordinalEn = (day) => {
+        const suffix = day % 100 >= 11 && day % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[day % 10] ?? "th";
+        return `${day}${suffix}`;
+    };
     function setDisplayTimeZone(zone) {
         if (!zone || zone === displayTimeZone)
             return;
@@ -138,8 +144,10 @@ var FanboxUI;
         if (Number.isNaN(date.valueOf()))
             return text;
         const parts = Object.fromEntries(dateTimeFormatter.formatToParts(date).map(part => [part.type, part.value]));
+        const month = Number(parts.month), day = Number(parts.day);
         return FanboxUI.t("common.datetime", { year: parts.year ?? "", month: parts.month ?? "", day: parts.day ?? "",
-            hour: parts.hour ?? "", minute: parts.minute ?? "" });
+            hour: parts.hour ?? "", minute: parts.minute ?? "",
+            month_name: MONTH_NAMES[month - 1] ?? "", day_ordinal: Number.isFinite(day) ? ordinalEn(day) : "" });
     }
     FanboxUI.formatDate = formatDate;
     function humanBytes(value) {
@@ -1153,11 +1161,15 @@ var FanboxUI;
         const node = FanboxUI.h("section", { class: "settings-section" }, FanboxUI.h("h3", {}, FanboxUI.t("settings.theme")), FanboxUI.h("p", { class: "settings-section-description" }, FanboxUI.t("settings.theme_description")), FanboxUI.h("div", { class: "settings-grid two-columns" }, FanboxUI.h("div", { class: "setting-field" }, FanboxUI.h("span", {}, FanboxUI.t("settings.theme")), select)));
         return { node, read: () => choice };
     }
+    const LANGUAGE_NAMES = {
+        "zh-Hant": "繁體中文", en: "English", ja: "日本語", ko: "한국어",
+    };
     const languageLabel = (value) => value === "auto" ? FanboxUI.t("settings.language_auto")
-        : value === "qps-ploc" ? FanboxUI.t("settings.language_pseudo") : "繁體中文";
+        : value === "qps-ploc" ? FanboxUI.t("settings.language_pseudo") : LANGUAGE_NAMES[value];
     function languageControl(data, blocked) {
         let choice = data.editable.display.language;
-        const values = choice === "qps-ploc" ? ["auto", "zh-Hant", "qps-ploc"] : ["auto", "zh-Hant"];
+        const real = Object.keys(LANGUAGE_NAMES);
+        const values = choice === "qps-ploc" ? ["auto", ...real, "qps-ploc"] : ["auto", ...real];
         const select = FanboxUI.customSelect({ id: "display-language", label: FanboxUI.t("settings.language"), value: choice, disabled: blocked,
             options: values.map(value => ({ value, label: languageLabel(value) })),
             onChange: next => { choice = next; } });

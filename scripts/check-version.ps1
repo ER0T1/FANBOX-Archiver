@@ -55,6 +55,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Display timezone contract check failed."
 }
 
+& $Python (Join-Path $ProjectRoot "scripts\check-i18n.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Interface catalog check failed."
+}
+
 & $Python (Join-Path $ProjectRoot "scripts\check-changelog.py")
 if ($LASTEXITCODE -ne 0) {
     throw "README / CHANGELOG contract check failed."

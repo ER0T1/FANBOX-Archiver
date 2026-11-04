@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .i18n import Text
+from .i18n import LanguageSetting, Text
 
 from datetime import date
 from pathlib import Path
@@ -80,14 +80,14 @@ class DisplayConfig(BaseModel):
     operating system's light/dark setting.
 
     ``language`` picks the interface catalog: ``auto`` follows the system or browser language
-    among the shipped catalogs, falling back to Traditional Chinese; ``qps-ploc`` is the
+    among the shipped catalogs, falling back to English; ``qps-ploc`` is the
     pseudo-locale used only for layout testing.
     """
 
     timezone: str = "system"
     theme: Literal["system", "dark", "light"] = "system"
     colors: ThemeColors = Field(default_factory=ThemeColors)
-    language: Literal["auto", "zh-Hant", "qps-ploc"] = "auto"
+    language: LanguageSetting = "auto"
 
     @property
     def css_theme(self) -> str:

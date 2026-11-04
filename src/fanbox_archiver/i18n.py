@@ -7,6 +7,8 @@ Boundaries (see the Anytype i18n decision):
   diagnostic fields) stay stable whatever the display language.
 * Traditional Chinese (``zh-Hant``) is the base catalog and the fallback for every missing key;
   a key missing from it too is shown as the key itself so the gap is visible, never blank.
+  ``auto`` picks among English, Japanese, Korean and Traditional Chinese (any ``zh-*``) and uses
+  English when the system or browser asks for none of them.
 * Messages use ``{name}`` placeholders. A plural message is an object of CLDR categories
   (``one``/``other``…); ``other`` is required and chosen when no better category exists.
 * ``qps-ploc`` is a generated pseudo-locale for testing: brackets reveal strings that bypass the
@@ -27,15 +29,22 @@ from typing import Iterable, Literal
 
 BASE_LOCALE = "zh-Hant"
 PSEUDO_LOCALE = "qps-ploc"
-# Real locales with a catalog; ``auto`` resolves among these. Add a JSON file and its tag here.
-SUPPORTED_LOCALES: tuple[str, ...] = (BASE_LOCALE,)
-LanguageSetting = Literal["auto", "zh-Hant", "qps-ploc"]
-LANGUAGE_SETTINGS: tuple[str, ...] = ("auto", BASE_LOCALE, PSEUDO_LOCALE)
+# ``auto`` uses this when none of the system or browser languages has a catalog.
+FALLBACK_LOCALE = "en"
+# Real locales with a catalog; ``auto`` resolves among these. Add a JSON file and its tag here
+# (and to ``LanguageSetting``); release:check requires every catalog to have the base keys.
+SUPPORTED_LOCALES: tuple[str, ...] = (BASE_LOCALE, "en", "ja", "ko")
+LanguageSetting = Literal["auto", "zh-Hant", "en", "ja", "ko", "qps-ploc"]
+LANGUAGE_SETTINGS: tuple[str, ...] = ("auto", *SUPPORTED_LOCALES, PSEUDO_LOCALE)
+# Locales without grammatical plural; their plural messages only need ``other``.
+_NO_PLURAL = ("zh", "ja", "ko")
 
 LOCALES_DIR = Path(__file__).with_name("locales")
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
-# Language subtags that mean Traditional Chinese when no script subtag is given.
-_HANT_REGIONS = {"tw", "hk", "mo"}
+# English month names and ordinals for ``common.datetime`` (e.g. "October 29th, 2026 20:28").
+# Fixed tables rather than the host locale, so output never depends on the machine.
+_MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August",
+                "September", "October", "November", "December")
 
 Message = str | dict[str, str]
 
@@ -83,16 +92,13 @@ def match_locale(preferred: Iterable[str]) -> str:
         for supported in SUPPORTED_LOCALES:
             if tag == supported.lower():
                 return supported
-        parts = tag.split("-")
-        if parts[0] == "zh":
-            # Simplified Chinese has no catalog yet; only Traditional variants match here.
-            if "hant" in parts[1:] or _HANT_REGIONS & set(parts[1:]):
-                return BASE_LOCALE
-            continue
+        # Language match ignoring region and script: every Chinese variant (Simplified readers
+        # included) reads the Traditional catalog more easily than the English fallback.
+        language = tag.split("-")[0]
         for supported in SUPPORTED_LOCALES:
-            if supported.lower().split("-")[0] == parts[0]:
+            if supported.lower().split("-")[0] == language:
                 return supported
-    return BASE_LOCALE
+    return FALLBACK_LOCALE
 
 
 def resolve_locale(setting: str, preferred: Iterable[str] = ()) -> str:
@@ -127,11 +133,23 @@ def intl_locale(locale: str) -> str:
 
 
 def plural_category(count: float, locale: str) -> str:
-    # Chinese has no grammatical plural; other locales get the minimal one/other rule
-    # until a real catalog needs CLDR data (the browser side uses Intl.PluralRules).
-    if intl_locale(locale).startswith("zh"):
+    # The CLDR cardinal rules of the shipped locales: Chinese, Japanese and Korean have no
+    # grammatical plural; English uses "one" for exactly 1 (the browser uses Intl.PluralRules).
+    if intl_locale(locale).split("-")[0] in _NO_PLURAL:
         return "other"
     return "one" if count == 1 else "other"
+
+
+def ordinal_en(day: int) -> str:
+    """English ordinal day: 1st, 2nd, 3rd, 4th … 11th, 12th, 13th … 21st."""
+    suffix = "th" if 11 <= day % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def datetime_params(year: int, month: int, day: int, hour: int, minute: int) -> dict[str, str]:
+    """Parameters of ``common.datetime``; each catalog picks the ones its format uses."""
+    return {"year": f"{year:04d}", "month": f"{month:02d}", "day": f"{day:02d}", "hour": f"{hour:02d}",
+            "minute": f"{minute:02d}", "month_name": _MONTH_NAMES[month - 1], "day_ordinal": ordinal_en(day)}
 
 
 def format_number(value: float, locale: str) -> str:
