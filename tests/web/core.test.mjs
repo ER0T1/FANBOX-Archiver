@@ -26,7 +26,7 @@ test("i18n translates, pluralises, formats numbers and reports missing keys once
   assert.equal(ui.t("posts.card_meta", {creator: "Alice", post_id: "1000", count: 2}), "Alice · 投稿 1000 · 2 個版本");
   assert.equal(ui.t("common.page_position", {page: 1}), "目前第 1 頁，共 {pages} 頁");
   assert.equal(ui.feeLabel(0), "對所有人公開");
-  assert.equal(ui.feeLabel(1200), "¥1,200");
+  assert.equal(ui.feeLabel(1200), "1,200日圓");
   assert.equal(ui.feeLabel(null), "檔位未記錄");
   assert.equal(ui.t("missing.key"), "missing.key");
   assert.equal(ui.t("missing.key"), "missing.key");
@@ -87,7 +87,7 @@ test("TypeScript core formats archive values", () => {
   assert.equal(ui.humanBytes(12_137_079), "11.6 MB");
   assert.equal(ui.humanBytes(0), "0 B");
   assert.equal(ui.feeLabel(0), "對所有人公開");
-  assert.equal(ui.feeLabel(300), "¥300");
+  assert.equal(ui.feeLabel(300), "300日圓");
   assert.equal(ui.feeLabel(null), "檔位未記錄");
   assert.equal(ui.stopReasonLabel("limit_reached"), "已達下載上限");
   assert.equal(ui.stopReasonLabel("backfill_completed"), "歷史回補已完成");
@@ -150,4 +150,6 @@ test("English catalog formats dates with month names and ordinals and pluralises
   assert.equal(en.t("posts.total", {count: 1}), "1 backed-up post");
   assert.equal(en.t("posts.total", {count: 2}), "2 backed-up posts");
   assert.equal(en.feeLabel(0), "All Users");
+  assert.equal(en.feeLabel(1200), "1,200 JPY");
+  assert.equal(en.t("fancard.plan_line", {plan: "P", fee: en.feeLabel(500)}), "P · 500 JPY/month");
 });

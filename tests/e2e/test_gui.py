@@ -599,7 +599,7 @@ def test_gui_navigation_search_pagination_settings_and_job_polling(
     page.locator('[data-creator-tab="fancards"]').click()
     expect(page.get_by_text("Gold", exact=True)).to_be_visible()
     page.locator(".fancard-card").click()
-    expect(page.get_by_role("heading", name="方案資訊", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="方案說明", exact=True)).to_be_visible()
     expect(page.get_by_text("Fan Card 密碼：example", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="方案權益", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="加入 Discord 伺服器", exact=True)).to_be_visible()
@@ -1315,7 +1315,7 @@ def test_pseudo_locale_covers_the_reading_screens(page: Page, live_gui) -> None:
     expect(page.locator(".fancard-card").first).to_be_visible()
     check("fan cards")
     page.locator(".fancard-card").first.click()
-    expect(page.locator(".fancard-reader")).to_contain_text("［方案資訊")
+    expect(page.locator(".fancard-reader")).to_contain_text("［方案說明")
     check("fan card reader")
     assert screens == {name: [] for name in screens}, screens
 
