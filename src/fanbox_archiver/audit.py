@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .i18n import Text
+
 import hashlib
 import json
 import os
@@ -899,19 +901,19 @@ class ArchiveRepairer:
         try:
             database_relative = self.database.relative_to(self.root)
         except ValueError as exc:
-            raise ValueError("資料庫必須位於封存根目錄內，才能建立可修復副本。") from exc
+            raise ValueError(Text("repair.database_outside_root")) from exc
         if destination.exists():
-            raise ValueError("修復副本目的地已存在。")
+            raise ValueError(Text("repair.destination_exists"))
         try:
             destination.relative_to(self.root)
         except ValueError:
             pass
         else:
-            raise ValueError("修復副本目的地不可位於原始封存內。")
+            raise ValueError(Text("repair.destination_inside_archive"))
         if not self.root.is_dir() or not self.database.is_file():
-            raise ValueError("原始封存或資料庫不存在。")
+            raise ValueError(Text("repair.source_missing"))
         if not ArchiveAuditor(self.config).run().repair_plan:
-            raise ValueError("稽核沒有可確定性套用的修復，不建立副本。")
+            raise ValueError(Text("repair.nothing_to_apply"))
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         staging = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.repair.tmp")
@@ -946,7 +948,7 @@ class ArchiveRepairer:
                 } for item in actions)
             remaining = ArchiveAuditor(copied_config).run()
             if any(item.repairability == "automatic" for item in remaining.findings):
-                raise RuntimeError("確定性修復後仍存在可自動修復問題。")
+                raise RuntimeError(Text("repair.still_repairable"))
 
             from .service import ArchiveService  # service depends on this module's peers
 
@@ -1128,7 +1130,7 @@ class ArchiveRepairer:
                     continue
                 row = self._canonical_row(db, action)
                 if row is None or not ArchiveAuditor(config)._manifest_is_consistent(row):
-                    raise RuntimeError(f"修復前 canonical 證據已改變：{action.action_id}")
+                    raise RuntimeError(Text("repair.evidence_changed", action=action.action_id))
                 if action.finding_code == "latest_pointer":
                     if action.subject_type == "post":
                         db.execute(

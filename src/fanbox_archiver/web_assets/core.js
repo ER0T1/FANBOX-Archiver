@@ -1874,7 +1874,7 @@ var FanboxUI;
         const tokenMeta = document.querySelector('meta[name="fanbox-session-token"]');
         if (!(appElement instanceof HTMLElement) || !(searchElement instanceof HTMLInputElement)
             || !(navElement instanceof HTMLElement) || !tokenMeta) {
-            throw new Error("GUI 缺少必要的頁面元素");
+            throw new Error("GUI page is missing required elements");
         }
         const app = appElement;
         const search = searchElement;

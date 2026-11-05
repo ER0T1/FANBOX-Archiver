@@ -30,6 +30,11 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.59-alpha 更新重點
+
+- 介面國際化收尾：命令列 `repair-copy` 拒絕建立或修復失敗時的 7 則錯誤訊息改由翻譯目錄提供，依介面語言顯示（每種語言 880 條，經維護者審閱）。至此閱讀器、命令列與桌面版啟動畫面中會顯示給使用者的介面文字都已可切換為繁體中文、English、日本語、한국어。
+- 仍維持原文、不翻譯：寫入封存的內容（Markdown、粉絲卡 Markdown、post.json 解析警告）、稽核報告、診斷資訊、日誌，以及資料庫內部檢查訊息。
+
 ## v1.3.58-alpha 更新重點
 
 - 修正 Windows 桌面版備份一開始就失敗、只顯示「[Errno 2] No such file or directory」的問題。原因是本機打包 sidecar 時用了非官方的 Python，打包後無法建立 HTTPS 連線，所有需要連線 FANBOX 的工作（完整備份、單項拉取、自動備份）都會失敗；CLI 與一般 Python 執行的閱讀器不受影響。
@@ -39,11 +44,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 ## v1.3.57-alpha 更新重點
 
 - 粉絲卡頁的「贊助開始」改用 FANBOX 官方用詞：「開始日期」「Start Date」「開始日」「개시일」。封存中的粉絲卡 Markdown 屬封存內容，維持原文。
-
-## v1.3.56-alpha 更新重點
-
-- 金額改用 FANBOX 各語言介面的寫法：繁體中文「500日圓」、英文「500 JPY」、日文「¥500」、韓文「500엔」（原本一律為「¥500」），投稿卡片、粉絲卡列表與粉絲卡頁都適用。
-- 粉絲卡頁的方案說明標題改用 FANBOX 官方用詞：「方案說明」「Plan Description」「プラン説明」「플랜 설명」（原本為「方案資訊」等）。
 
 ## 安裝
 

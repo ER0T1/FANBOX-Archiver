@@ -872,5 +872,12 @@
   "desktop.config_missing": "The selected config file doesn't exist.",
   "desktop.menu_archive": "Archive",
   "desktop.menu_change_archive": "Change Archive Location…",
-  "desktop.dialog_yaml": "YAML Config File"
+  "desktop.dialog_yaml": "YAML Config File",
+  "repair.database_outside_root": "The database must be inside the archive folder to create a repairable copy.",
+  "repair.destination_exists": "The repaired copy's destination already exists.",
+  "repair.destination_inside_archive": "The repaired copy's destination can't be inside the original archive.",
+  "repair.source_missing": "The original archive or database doesn't exist.",
+  "repair.nothing_to_apply": "The audit found no definite repairs to apply, so no copy was created.",
+  "repair.still_repairable": "Automatically repairable issues remain after the definite repairs.",
+  "repair.evidence_changed": "Canonical evidence changed before the repair: {action}"
 }

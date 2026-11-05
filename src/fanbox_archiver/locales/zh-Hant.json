@@ -872,5 +872,12 @@
   "desktop.config_missing": "選擇的設定檔不存在。",
   "desktop.menu_archive": "封存",
   "desktop.menu_change_archive": "變更封存位置…",
-  "desktop.dialog_yaml": "YAML 設定檔"
+  "desktop.dialog_yaml": "YAML 設定檔",
+  "repair.database_outside_root": "資料庫必須位於封存根目錄內，才能建立可修復副本。",
+  "repair.destination_exists": "修復副本目的地已存在。",
+  "repair.destination_inside_archive": "修復副本目的地不可位於原始封存內。",
+  "repair.source_missing": "原始封存或資料庫不存在。",
+  "repair.nothing_to_apply": "稽核沒有可確定性套用的修復，不建立副本。",
+  "repair.still_repairable": "確定性修復後仍存在可自動修復問題。",
+  "repair.evidence_changed": "修復前 canonical 證據已改變：{action}"
 }

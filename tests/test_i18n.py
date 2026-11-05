@@ -257,3 +257,19 @@ def test_cli_speaks_english_with_the_lang_option(tmp_path: Path):
     help_text = _help_texts(cli.localized_command("en"))
     assert "A conservative, low-frequency personal local backup tool for pixivFANBOX." in help_text
     assert not [text for text in help_text if re.search(r"[㐀-鿿]", text)]
+
+
+def test_repair_copy_errors_follow_the_language(tmp_path: Path):
+    from fanbox_archiver.audit import ArchiveRepairer
+    from fanbox_archiver.i18n import error_text
+
+    path = _status_config(tmp_path)
+    settings = AppConfig.load(path)
+    settings.storage.output_dir.mkdir(parents=True, exist_ok=True)
+    existing = tmp_path / "already-there"
+    existing.mkdir()
+    with pytest.raises(ValueError) as raised:
+        ArchiveRepairer(settings).repair_copy(existing)
+    assert error_text(raised.value).localized("en") == "The repaired copy's destination already exists."
+    english = runner.invoke(app, ["--lang", "en", "repair-copy", "--output", str(existing), "--config", str(path)])
+    assert "The repaired copy's destination already exists." in " ".join(english.output.split())

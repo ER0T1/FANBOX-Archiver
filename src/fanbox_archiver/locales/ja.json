@@ -872,5 +872,12 @@
   "desktop.config_missing": "選択した設定ファイルが存在しません。",
   "desktop.menu_archive": "アーカイブ",
   "desktop.menu_change_archive": "アーカイブの場所を変更…",
-  "desktop.dialog_yaml": "YAML 設定ファイル"
+  "desktop.dialog_yaml": "YAML 設定ファイル",
+  "repair.database_outside_root": "修復可能なコピーを作成するには、データベースがアーカイブのルートフォルダー内にある必要があります。",
+  "repair.destination_exists": "修復コピーの保存先はすでに存在します。",
+  "repair.destination_inside_archive": "修復コピーの保存先を元のアーカイブ内にすることはできません。",
+  "repair.source_missing": "元のアーカイブまたはデータベースが存在しません。",
+  "repair.nothing_to_apply": "監査で確定的に適用できる修復が見つからなかったため、コピーは作成しません。",
+  "repair.still_repairable": "確定的な修復の後も、自動修復できる問題が残っています。",
+  "repair.evidence_changed": "修復前に canonical の証拠が変更されました：{action}"
 }

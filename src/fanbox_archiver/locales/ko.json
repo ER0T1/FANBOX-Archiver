@@ -872,5 +872,12 @@
   "desktop.config_missing": "선택한 설정 파일이 존재하지 않습니다.",
   "desktop.menu_archive": "아카이브",
   "desktop.menu_change_archive": "아카이브 위치 변경…",
-  "desktop.dialog_yaml": "YAML 설정 파일"
+  "desktop.dialog_yaml": "YAML 설정 파일",
+  "repair.database_outside_root": "복구 가능한 사본을 만들려면 데이터베이스가 아카이브 루트 폴더 안에 있어야 합니다.",
+  "repair.destination_exists": "복구 사본 대상이 이미 존재합니다.",
+  "repair.destination_inside_archive": "복구 사본 대상은 원래 아카이브 안에 둘 수 없습니다.",
+  "repair.source_missing": "원래 아카이브 또는 데이터베이스가 존재하지 않습니다.",
+  "repair.nothing_to_apply": "감사에서 확정적으로 적용할 복구를 찾지 못해 사본을 만들지 않습니다.",
+  "repair.still_repairable": "확정 복구 후에도 자동 복구 가능한 문제가 남아 있습니다.",
+  "repair.evidence_changed": "복구 전에 canonical 증거가 변경되었습니다: {action}"
 }
