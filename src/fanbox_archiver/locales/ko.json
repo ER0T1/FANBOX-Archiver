@@ -118,7 +118,7 @@
   "fancard.plan_line": "{plan} · {fee}/월",
   "fancard.plan_info": "플랜 설명",
   "fancard.no_description": "(플랜 설명 없음)",
-  "fancard.support_start": "지원 시작: {time}",
+  "fancard.support_start": "개시일: {time}",
   "fancard.saved_months": "저장된 월: {months}",
   "fancard.month_separator": ", ",
   "posts.tag_filter_label": "태그로 투고 필터링",

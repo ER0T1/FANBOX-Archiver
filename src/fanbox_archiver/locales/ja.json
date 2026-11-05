@@ -118,7 +118,7 @@
   "fancard.plan_line": "{plan} · {fee}/月",
   "fancard.plan_info": "プラン説明",
   "fancard.no_description": "（プラン説明なし）",
-  "fancard.support_start": "支援開始：{time}",
+  "fancard.support_start": "開始日：{time}",
   "fancard.saved_months": "保存済みの月：{months}",
   "fancard.month_separator": "、",
   "posts.tag_filter_label": "タグで投稿を絞り込む",
