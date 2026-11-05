@@ -1,4 +1,4 @@
 """FANBOX Archiver."""
 
-__version__ = "1.3.59-alpha"
+__version__ = "1.3.60-alpha"
 

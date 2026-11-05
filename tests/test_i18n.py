@@ -273,3 +273,12 @@ def test_repair_copy_errors_follow_the_language(tmp_path: Path):
     assert error_text(raised.value).localized("en") == "The repaired copy's destination already exists."
     english = runner.invoke(app, ["--lang", "en", "repair-copy", "--output", str(existing), "--config", str(path)])
     assert "The repaired copy's destination already exists." in " ".join(english.output.split())
+
+
+def test_auto_follows_an_english_system(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cli, "system_locales", lambda: ["en-US"])
+    path = _status_config(tmp_path)
+    result = runner.invoke(app, ["status", "--config", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "No backups yet." in result.output
+    assert cli._argv_locale(["status", "--config", str(tmp_path / "missing.yaml")]) == "en"

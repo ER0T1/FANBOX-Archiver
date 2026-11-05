@@ -30,6 +30,10 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.60-alpha 更新重點
+
+- 修正測試在英文 Windows（例如 GitHub Actions 的 Windows CI）上失敗：介面語言「跟隨系統」自 v1.3.53-alpha 起會在英文系統使用英文，但兩個測試仍假設系統語言是繁體中文。測試現在固定以繁體中文系統為基準（與既有的時區基準相同），並另外測試英文系統會顯示英文。程式行為不變。
+
 ## v1.3.59-alpha 更新重點
 
 - 介面國際化收尾：命令列 `repair-copy` 拒絕建立或修復失敗時的 7 則錯誤訊息改由翻譯目錄提供，依介面語言顯示（每種語言 880 條，經維護者審閱）。至此閱讀器、命令列與桌面版啟動畫面中會顯示給使用者的介面文字都已可切換為繁體中文、English、日本語、한국어。
@@ -40,10 +44,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 - 修正 Windows 桌面版備份一開始就失敗、只顯示「[Errno 2] No such file or directory」的問題。原因是本機打包 sidecar 時用了非官方的 Python，打包後無法建立 HTTPS 連線，所有需要連線 FANBOX 的工作（完整備份、單項拉取、自動備份）都會失敗；CLI 與一般 Python 執行的閱讀器不受影響。
 - 打包 sidecar 時只把所用的 Python 與 Windows 系統資料夾放進 `PATH`，不再把其他程式附帶的 C runtime 一起打包；打包完成後會執行 `--self-check` 確認 HTTPS 可用，失敗就停止建置。`desktop:test-sidecar` 也加入同樣的檢查。可用環境變數 `FANBOX_SIDECAR_PYTHON` 指定打包用的官方 Python。
 - 背景工作與命令列遇到非預期錯誤時，會把完整錯誤寫進日誌，方便判斷原因；登入失效等一般錯誤維持只記一行。
-
-## v1.3.57-alpha 更新重點
-
-- 粉絲卡頁的「贊助開始」改用 FANBOX 官方用詞：「開始日期」「Start Date」「開始日」「개시일」。封存中的粉絲卡 Markdown 屬封存內容，維持原文。
 
 ## 安裝
 
