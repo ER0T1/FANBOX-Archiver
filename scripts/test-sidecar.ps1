@@ -11,6 +11,12 @@ if (-not (Test-Path -LiteralPath $Binary -PathType Leaf)) {
     throw "Sidecar not found: $Binary. Run npm run desktop:sidecar first."
 }
 
+$Check = & $Binary --self-check
+if ($LASTEXITCODE -ne 0) {
+    throw "Sidecar self-check failed (HTTPS cannot start): $Check"
+}
+Write-Host "Sidecar self-check passed: $Check"
+
 New-Item -ItemType Directory -Force -Path $SmokeDirectory | Out-Null
 Set-Content -LiteralPath $Config -Value "{}" -Encoding UTF8
 Remove-Item -LiteralPath $StandardOutput, $StandardError -Force -ErrorAction SilentlyContinue

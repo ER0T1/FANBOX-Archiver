@@ -30,6 +30,12 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 > 💡 完整歷史版本更新重點請參閱 [CHANGELOG.md](CHANGELOG.md)。
 
+## v1.3.58-alpha 更新重點
+
+- 修正 Windows 桌面版備份一開始就失敗、只顯示「[Errno 2] No such file or directory」的問題。原因是本機打包 sidecar 時用了非官方的 Python，打包後無法建立 HTTPS 連線，所有需要連線 FANBOX 的工作（完整備份、單項拉取、自動備份）都會失敗；CLI 與一般 Python 執行的閱讀器不受影響。
+- 打包 sidecar 時只把所用的 Python 與 Windows 系統資料夾放進 `PATH`，不再把其他程式附帶的 C runtime 一起打包；打包完成後會執行 `--self-check` 確認 HTTPS 可用，失敗就停止建置。`desktop:test-sidecar` 也加入同樣的檢查。可用環境變數 `FANBOX_SIDECAR_PYTHON` 指定打包用的官方 Python。
+- 背景工作與命令列遇到非預期錯誤時，會把完整錯誤寫進日誌，方便判斷原因；登入失效等一般錯誤維持只記一行。
+
 ## v1.3.57-alpha 更新重點
 
 - 粉絲卡頁的「贊助開始」改用 FANBOX 官方用詞：「開始日期」「Start Date」「開始日」「개시일」。封存中的粉絲卡 Markdown 屬封存內容，維持原文。
@@ -38,10 +44,6 @@ FANBOX Archiver 是 Windows 11 優先、Python 3.12+ 的 pixivFANBOX 個人備�
 
 - 金額改用 FANBOX 各語言介面的寫法：繁體中文「500日圓」、英文「500 JPY」、日文「¥500」、韓文「500엔」（原本一律為「¥500」），投稿卡片、粉絲卡列表與粉絲卡頁都適用。
 - 粉絲卡頁的方案說明標題改用 FANBOX 官方用詞：「方案說明」「Plan Description」「プラン説明」「플랜 설명」（原本為「方案資訊」等）。
-
-## v1.3.55-alpha 更新重點
-
-- 韓文介面的「贊助中」改用 FANBOX 韓文官方用語「지원」（例如「지원 중인 크리에이터」），取代原本的「후원」，共 12 處，包括贊助中的創作者、贊助開始、贊助金額與贊助狀態。
 
 ## 安裝
 
@@ -283,7 +285,7 @@ npm run desktop:check
 npm run desktop:dev
 ```
 
-`desktop:sidecar` 會產生 Tauri 規定的 `fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe`；該建置產物不納入 Git。`desktop:build` 會重新產生 sidecar 並建立 NSIS 安裝程式，輸出位於 `src-tauri/target/release/bundle/nsis/`。`desktop:test-installer` 只會在 `build/installer-smoke/` 安裝測試副本，先拒絕覆蓋環境中既有的 FANBOX Archiver，再驗證靜默安裝、覆蓋升級、主程式版本、解除安裝與外部封存資料保留。`1.2.0 → 1.3.0` 與 `1.3.0 → 1.3.1` 已用保存的舊版安裝器實測通過；後續版本可執行 `scripts/test-installer.ps1 -PreviousInstallerPath <舊版安裝程式>` 延續驗證。目前本機安裝器是未簽章的開發建置；正式公開散發需由 release workflow 使用 Windows PFX 憑證完成簽章。
+`desktop:sidecar` 會產生 Tauri 規定的 `fanbox-archiver-sidecar-x86_64-pc-windows-msvc.exe`；該建置產物不納入 Git。sidecar 必須以官方 CPython（python.org 或 Microsoft Store 版）建立的虛擬環境打包：部分非官方 Python 打包後無法建立 HTTPS 連線，備份會在開始時失敗。建置腳本打包時只把該 Python 與 Windows 系統資料夾放進 `PATH`（避免把其他程式附帶的 C runtime 打包進去），完成後會執行 `--self-check` 確認 HTTPS 可用，失敗就停止建置；`.venv` 不是官方 Python 時，可另建打包用環境並以環境變數 `FANBOX_SIDECAR_PYTHON` 指定其 `python.exe`。`desktop:build` 會重新產生 sidecar 並建立 NSIS 安裝程式，輸出位於 `src-tauri/target/release/bundle/nsis/`。`desktop:test-installer` 只會在 `build/installer-smoke/` 安裝測試副本，先拒絕覆蓋環境中既有的 FANBOX Archiver，再驗證靜默安裝、覆蓋升級、主程式版本、解除安裝與外部封存資料保留。`1.2.0 → 1.3.0` 與 `1.3.0 → 1.3.1` 已用保存的舊版安裝器實測通過；後續版本可執行 `scripts/test-installer.ps1 -PreviousInstallerPath <舊版安裝程式>` 延續驗證。目前本機安裝器是未簽章的開發建置；正式公開散發需由 release workflow 使用 Windows PFX 憑證完成簽章。
 
 ### Windows 正式發布
 

@@ -2,6 +2,12 @@
 
 本檔保存 FANBOX Archiver 從 `v1.0.0-alpha` 起所有版本的更新重點，依版本由新到舊排列。`README.md` 只保留最新三個版本；每次發布先在本檔最上方新增版本區塊，舊版本不會從本檔刪除。
 
+## v1.3.58-alpha 更新重點
+
+- 修正 Windows 桌面版備份一開始就失敗、只顯示「[Errno 2] No such file or directory」的問題。原因是本機打包 sidecar 時用了非官方的 Python，打包後無法建立 HTTPS 連線，所有需要連線 FANBOX 的工作（完整備份、單項拉取、自動備份）都會失敗；CLI 與一般 Python 執行的閱讀器不受影響。
+- 打包 sidecar 時只把所用的 Python 與 Windows 系統資料夾放進 `PATH`，不再把其他程式附帶的 C runtime 一起打包；打包完成後會執行 `--self-check` 確認 HTTPS 可用，失敗就停止建置。`desktop:test-sidecar` 也加入同樣的檢查。可用環境變數 `FANBOX_SIDECAR_PYTHON` 指定打包用的官方 Python。
+- 背景工作與命令列遇到非預期錯誤時，會把完整錯誤寫進日誌，方便判斷原因；登入失效等一般錯誤維持只記一行。
+
 ## v1.3.57-alpha 更新重點
 
 - 粉絲卡頁的「贊助開始」改用 FANBOX 官方用詞：「開始日期」「Start Date」「開始日」「개시일」。封存中的粉絲卡 Markdown 屬封存內容，維持原文。

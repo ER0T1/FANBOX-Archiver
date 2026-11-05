@@ -43,7 +43,7 @@ from .audit import ArchiveAuditor, ArchiveRepairer
 from .security import confined_path, safe_filename
 from .timestamps import isoformat_display, parse_instant, set_display_timezone, unrecorded_zone
 from .i18n import (
-    BASE_LOCALE, LANGUAGE_SETTINGS, Translator, error_text, localize, resolve_locale, system_locales,
+    BASE_LOCALE, LANGUAGE_SETTINGS, Text, Translator, error_text, localize, resolve_locale, system_locales,
     translate,
 )
 
@@ -203,7 +203,8 @@ def load_config(path: Path) -> AppConfig:
 
 
 def handle_remote_error(exc: Exception) -> None:
-    get_logger().error("%s: %s", type(exc).__name__, exc)
+    # Unexpected errors (no catalogue text) keep their traceback in the log for diagnosis.
+    get_logger().error("%s: %s", type(exc).__name__, exc, exc_info=not isinstance(error_text(exc), Text))
     console.print(f"[red]{shown(error_text(exc))}[/red]")
     raise typer.Exit(1) from exc
 

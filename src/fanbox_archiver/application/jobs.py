@@ -12,6 +12,7 @@ from typing import Any, Callable
 from ..archive_lock import ArchiveLock
 from ..config import AppConfig
 from ..database import Database
+from ..logging_setup import get_logger
 from ..i18n import Text, decode_text, decode_texts, encode_texts, error_text
 from ..service import ArchiveService
 from .backup import BackupRequest, BackupUseCase
@@ -257,9 +258,14 @@ class BackupJobManager:
                 job.status = "cancelled"
                 job.error = error_text(exc)
         except Exception as exc:
+            message = error_text(exc)
+            # Expected failures carry catalogue text; anything else (e.g. a broken runtime)
+            # also gets its traceback in the log, since the job page only shows the message.
+            get_logger().error("job %s failed: %s: %s", job_id, type(exc).__name__, exc,
+                               exc_info=not isinstance(message, Text))
             with self._lock:
                 job.status = "failed"
-                job.error = error_text(exc)
+                job.error = message
         finally:
             with self._lock:
                 if job.kind == "verify" and job.status != "completed":
